@@ -13,3 +13,13 @@ Current scanner behavior:
 - Supports simple ignore patterns such as `*.log` and `build/**`.
 
 Unsupported non-regular filesystem entries fail the scan closed.
+
+Reconciliation behavior:
+
+- Compares a previous `file_index` snapshot with a fresh scan result.
+- Emits deterministic path-ordered changes.
+- Classifies paths as `added`, `modified`, `deleted`, or `unchanged`.
+- Treats a previously deleted path as unchanged until it reappears.
+- Treats a reappeared previously deleted path as added.
+- Compares regular files by size, hash algorithm, and content hash.
+- Compares directories by entry type only.
