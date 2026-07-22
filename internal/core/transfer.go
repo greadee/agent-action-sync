@@ -26,22 +26,22 @@ const (
 )
 
 type Transfer struct {
-	ID             TransferID
-	Direction      TransferDirection
-	PeerDeviceID   DeviceID
-	ShareID        ShareID
-	RelativePath   string
-	State          TransferState
-	Size           int64
-	ChunkSize      int64
-	ContentHash    string
-	HashAlgorithm  string
-	BytesVerified  int64
-	RetryCount     int
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	CompletedAt    time.Time
-	LastError       string
+	ID            TransferID
+	Direction     TransferDirection
+	PeerDeviceID  DeviceID
+	ShareID       ShareID
+	RelativePath  string
+	State         TransferState
+	Size          int64
+	ChunkSize     int64
+	ContentHash   string
+	HashAlgorithm string
+	BytesVerified int64
+	RetryCount    int
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CompletedAt   time.Time
+	LastError     string
 }
 
 type ChunkState string

@@ -4,35 +4,52 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$goCommand = Get-Command go -ErrorAction SilentlyContinue
-if (-not $goCommand) {
-    $commonGo = "C:\Program Files\Go\bin\go.exe"
-    if (Test-Path $commonGo) {
-        $go = $commonGo
-    } else {
-        Write-Host "Go is not installed or not on PATH. Install Go 1.22+ from https://go.dev/dl/, restart PowerShell, then run tools\test.ps1 again." -ForegroundColor Red
-        Write-Host "GitHub Actions also runs the same suite on every push and pull request." -ForegroundColor Yellow
-        exit 1
-    }
-} else {
-    $go = $goCommand.Source
-}
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$portableGoRoot = Join-Path $repoRoot ".tools\go1.22.12\go\bin"
+$portableGo = Join-Path $portableGoRoot "go.exe"
+$portableGofmt = Join-Path $portableGoRoot "gofmt.exe"
 
-if (-not $SkipFormat) {
-    $gofmtCommand = Get-Command gofmt -ErrorAction SilentlyContinue
-    if (-not $gofmtCommand) {
-        $commonGofmt = "C:\Program Files\Go\bin\gofmt.exe"
-        if (Test-Path $commonGofmt) {
-            $gofmt = $commonGofmt
+if (Test-Path $portableGo) {
+    $go = $portableGo
+} else {
+    $goCommand = Get-Command go -ErrorAction SilentlyContinue
+    if (-not $goCommand) {
+        $commonGo = "C:\Program Files\Go\bin\go.exe"
+        if (Test-Path $commonGo) {
+            $go = $commonGo
         } else {
-            Write-Host "gofmt is not installed or not on PATH." -ForegroundColor Red
+            Write-Host "Go is not installed or not on PATH. Install Go 1.22+ from https://go.dev/dl/, restart PowerShell, then run tools\test.ps1 again." -ForegroundColor Red
+            Write-Host "Optional local portable layout: .tools\go1.22.12\go\bin\go.exe" -ForegroundColor Yellow
+            Write-Host "GitHub Actions also runs the same suite on every push and pull request." -ForegroundColor Yellow
             exit 1
         }
     } else {
-        $gofmt = $gofmtCommand.Source
+        $go = $goCommand.Source
+    }
+}
+
+$env:GOCACHE = Join-Path $repoRoot ".cache\go-build"
+$env:GOMODCACHE = Join-Path $repoRoot ".cache\go-mod"
+
+if (-not $SkipFormat) {
+    if (Test-Path $portableGofmt) {
+        $gofmt = $portableGofmt
+    } else {
+        $gofmtCommand = Get-Command gofmt -ErrorAction SilentlyContinue
+        if (-not $gofmtCommand) {
+            $commonGofmt = "C:\Program Files\Go\bin\gofmt.exe"
+            if (Test-Path $commonGofmt) {
+                $gofmt = $commonGofmt
+            } else {
+                Write-Host "gofmt is not installed or not on PATH." -ForegroundColor Red
+                exit 1
+            }
+        } else {
+            $gofmt = $gofmtCommand.Source
+        }
     }
 
-    $formatIssues = & $gofmt -l .
+    $formatIssues = & $gofmt -l cmd internal
     if ($formatIssues) {
         Write-Host "gofmt is required for:" -ForegroundColor Red
         $formatIssues

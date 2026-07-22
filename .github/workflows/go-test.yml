@@ -36,7 +36,7 @@ jobs:
       - name: Check formatting
         shell: bash
         run: |
-          files="$(gofmt -l .)"
+          files="$(gofmt -l cmd internal)"
           if [ -n "$files" ]; then
             echo "gofmt is required for:"
             echo "$files"

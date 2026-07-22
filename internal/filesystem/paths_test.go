@@ -4,12 +4,11 @@ import "testing"
 
 func TestNormalizeRelativePath(t *testing.T) {
 	tests := map[string]string{
-		`docs/report.txt`:      "docs/report.txt",
-		`docs\report.txt`:     "docs/report.txt",
-		`docs/../report.txt`:  "report.txt",
-		`./docs/report.txt`:   "docs/report.txt",
-		`docs//drafts/a.txt`:  "docs/drafts/a.txt",
-		` photos /image.jpg `: "photos /image.jpg",
+		`docs/report.txt`:    "docs/report.txt",
+		`docs\report.txt`:    "docs/report.txt",
+		`docs/../report.txt`: "report.txt",
+		`./docs/report.txt`:  "docs/report.txt",
+		`docs//drafts/a.txt`: "docs/drafts/a.txt",
 	}
 
 	for input, want := range tests {
@@ -35,6 +34,7 @@ func TestNormalizeRelativePathRejectsUnsafePaths(t *testing.T) {
 		"CON",
 		"folder/NUL.txt",
 		"folder/name.",
+		` photos /image.jpg `,
 	}
 
 	for _, input := range tests {

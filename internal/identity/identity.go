@@ -21,9 +21,9 @@ const (
 )
 
 type DeviceIdentity struct {
-	DeviceID   core.DeviceID
-	PublicKey  ed25519.PublicKey
-	PrivateKey ed25519.PrivateKey
+	DeviceID    core.DeviceID
+	PublicKey   ed25519.PublicKey
+	PrivateKey  ed25519.PrivateKey
 	Fingerprint string
 }
 
@@ -102,7 +102,7 @@ func GeneratePairingCode(reader io.Reader) (string, error) {
 	if len(code) <= 4 {
 		return code, nil
 	}
-	return code[:4] + "-" + code[4:8] + "-" + code[8:12] + "-" + code[12:]
+	return code[:4] + "-" + code[4:8] + "-" + code[8:12] + "-" + code[12:], nil
 }
 
 func publicKeysEqual(a, b ed25519.PublicKey) bool {

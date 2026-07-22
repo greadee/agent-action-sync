@@ -17,6 +17,14 @@ Run the suite:
 tools\test.ps1
 ```
 
+The script also supports a local portable Go layout:
+
+```text
+.tools/go1.22.12/go/bin/go.exe
+```
+
+When that exists, the script uses it automatically and stores build caches under `.cache/`.
+
 If formatting needs to be skipped temporarily while diagnosing a toolchain issue:
 
 ```powershell
@@ -33,7 +41,7 @@ The workflow is defined in:
 .github/workflows/go-test.yml
 ```
 
-CI installs Go from `go.mod`, checks `gofmt`, and runs:
+CI installs Go from `go.mod`, checks `gofmt` for `cmd` and `internal`, and runs:
 
 ```powershell
 go test ./...

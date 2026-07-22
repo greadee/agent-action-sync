@@ -32,7 +32,7 @@ type LocalAPIConfig struct {
 }
 
 type TransferConfig struct {
-	ChunkSizeBytes      int64 `json:"chunk_size_bytes"`
+	ChunkSizeBytes       int64 `json:"chunk_size_bytes"`
 	MaxParallelTransfers int   `json:"max_parallel_transfers"`
 }
 
