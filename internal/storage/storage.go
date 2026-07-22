@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"time"
 
 	"syncgate/internal/core"
 )
@@ -11,6 +12,7 @@ type Store interface {
 	Devices() DeviceStore
 	Shares() ShareStore
 	Revisions() RevisionStore
+	FileIndex() FileIndexStore
 	Transfers() TransferStore
 	Audit() AuditStore
 	Close() error
@@ -32,6 +34,12 @@ type RevisionStore interface {
 	RecordRevision(ctx context.Context, revision core.Revision) error
 	GetRevision(ctx context.Context, id core.RevisionID) (core.Revision, error)
 	GetCurrentRevision(ctx context.Context, shareID core.ShareID, relativePath string) (core.Revision, error)
+}
+
+type FileIndexStore interface {
+	SaveSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, scannedAt time.Time) error
+	Get(ctx context.Context, shareID core.ShareID, relativePath string) (core.FileIndexEntry, error)
+	List(ctx context.Context, shareID core.ShareID) ([]core.FileIndexEntry, error)
 }
 
 type TransferStore interface {

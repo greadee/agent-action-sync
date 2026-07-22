@@ -167,6 +167,101 @@ func TestStorePersistsRevisionsAndAuditEvents(t *testing.T) {
 	}
 }
 
+func TestStorePersistsFileIndexSnapshots(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	share := storage.Share{ID: "share-1", Name: "Drop", RootPath: t.TempDir(), Mode: storage.ShareOneWaySource}
+	if err := store.Shares().SaveShare(ctx, share); err != nil {
+		t.Fatalf("SaveShare: %v", err)
+	}
+
+	scannedAt := time.Unix(100, 0).UTC()
+	entries := []core.FileIndexEntry{
+		{
+			ShareID:       share.ID,
+			RelativePath:  "docs",
+			EntryType:     core.EntryDirectory,
+			LastScannedAt: scannedAt,
+		},
+		{
+			ShareID:       share.ID,
+			RelativePath:  "docs/readme.txt",
+			EntryType:     core.EntryFile,
+			Size:          12,
+			ModifiedTime:  time.Unix(90, 0).UTC(),
+			FileIdentity:  "file-id",
+			ContentHash:   "hash-a",
+			HashAlgorithm: "sha256",
+			LastScannedAt: scannedAt,
+		},
+	}
+	if err := store.FileIndex().SaveSnapshot(ctx, share.ID, entries, scannedAt); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+
+	got, err := store.FileIndex().Get(ctx, share.ID, "docs/readme.txt")
+	if err != nil {
+		t.Fatalf("Get file index entry: %v", err)
+	}
+	if got.ContentHash != "hash-a" || got.IsDeleted {
+		t.Fatalf("file index entry = %+v", got)
+	}
+	if !got.LastScannedAt.Equal(scannedAt) {
+		t.Fatalf("last scanned at = %s, want %s", got.LastScannedAt, scannedAt)
+	}
+
+	listed, err := store.FileIndex().List(ctx, share.ID)
+	if err != nil {
+		t.Fatalf("List file index: %v", err)
+	}
+	if len(listed) != 2 || listed[0].RelativePath != "docs" || listed[1].RelativePath != "docs/readme.txt" {
+		t.Fatalf("listed entries = %+v", listed)
+	}
+}
+
+func TestStoreMarksMissingFileIndexEntriesDeleted(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	share := storage.Share{ID: "share-1", Name: "Drop", RootPath: t.TempDir(), Mode: storage.ShareOneWaySource}
+	if err := store.Shares().SaveShare(ctx, share); err != nil {
+		t.Fatalf("SaveShare: %v", err)
+	}
+
+	firstScan := time.Unix(100, 0).UTC()
+	if err := store.FileIndex().SaveSnapshot(ctx, share.ID, []core.FileIndexEntry{
+		{ShareID: share.ID, RelativePath: "keep.txt", EntryType: core.EntryFile, Size: 1, ContentHash: "keep", HashAlgorithm: "sha256"},
+		{ShareID: share.ID, RelativePath: "gone.txt", EntryType: core.EntryFile, Size: 2, ContentHash: "gone", HashAlgorithm: "sha256"},
+	}, firstScan); err != nil {
+		t.Fatalf("SaveSnapshot first: %v", err)
+	}
+
+	secondScan := time.Unix(200, 0).UTC()
+	if err := store.FileIndex().SaveSnapshot(ctx, share.ID, []core.FileIndexEntry{
+		{ShareID: share.ID, RelativePath: "keep.txt", EntryType: core.EntryFile, Size: 3, ContentHash: "keep-new", HashAlgorithm: "sha256"},
+	}, secondScan); err != nil {
+		t.Fatalf("SaveSnapshot second: %v", err)
+	}
+
+	keep, err := store.FileIndex().Get(ctx, share.ID, "keep.txt")
+	if err != nil {
+		t.Fatalf("Get keep: %v", err)
+	}
+	if keep.IsDeleted || keep.ContentHash != "keep-new" {
+		t.Fatalf("keep entry = %+v", keep)
+	}
+
+	gone, err := store.FileIndex().Get(ctx, share.ID, "gone.txt")
+	if err != nil {
+		t.Fatalf("Get gone: %v", err)
+	}
+	if !gone.IsDeleted || gone.EntryType != core.EntryDeleted {
+		t.Fatalf("gone entry = %+v", gone)
+	}
+	if !gone.DeletedAt.Equal(secondScan) {
+		t.Fatalf("deleted at = %s, want %s", gone.DeletedAt, secondScan)
+	}
+}
+
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	store, err := Open(filepath.Join(t.TempDir(), "syncgate.db"))

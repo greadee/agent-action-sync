@@ -76,6 +76,10 @@ func (store *Store) Revisions() storage.RevisionStore {
 	return revisionStore{db: store.db}
 }
 
+func (store *Store) FileIndex() storage.FileIndexStore {
+	return fileIndexStore{db: store.db}
+}
+
 func (store *Store) Transfers() storage.TransferStore {
 	return transferStore{db: store.db}
 }
@@ -312,6 +316,127 @@ WHERE i.share_id = ? AND i.relative_path = ?`, shareID, relativePath)
 	return scanRevision(row, "current revision", string(shareID)+"/"+relativePath)
 }
 
+type fileIndexStore struct {
+	db *sql.DB
+}
+
+func (store fileIndexStore) SaveSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, scannedAt time.Time) error {
+	if shareID == "" {
+		return errors.New("share id is required")
+	}
+	if scannedAt.IsZero() {
+		scannedAt = time.Now().UTC()
+	}
+	scannedAt = scannedAt.UTC()
+
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin file index snapshot: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS scan_seen_paths(relative_path TEXT PRIMARY KEY)`); err != nil {
+		return fmt.Errorf("create scan seen table: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scan_seen_paths`); err != nil {
+		return fmt.Errorf("clear scan seen table: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.ShareID != "" && entry.ShareID != shareID {
+			return fmt.Errorf("file index entry %s belongs to share %s, want %s", entry.RelativePath, entry.ShareID, shareID)
+		}
+		if strings.TrimSpace(entry.RelativePath) == "" {
+			return errors.New("file index entry relative path is required")
+		}
+		if entry.EntryType == "" {
+			return fmt.Errorf("file index entry %s entry type is required", entry.RelativePath)
+		}
+		if entry.LastScannedAt.IsZero() {
+			entry.LastScannedAt = scannedAt
+		}
+
+		if _, err := tx.ExecContext(ctx, `INSERT INTO scan_seen_paths(relative_path) VALUES (?)`, entry.RelativePath); err != nil {
+			return fmt.Errorf("record seen path %s: %w", entry.RelativePath, err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO file_index(share_id, relative_path, entry_type, size, modified_time, creation_time, file_identity, content_hash, hash_algorithm, current_revision_id, is_deleted, deleted_at, last_scanned_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+ON CONFLICT(share_id, relative_path) DO UPDATE SET
+    entry_type = excluded.entry_type,
+    size = excluded.size,
+    modified_time = excluded.modified_time,
+    creation_time = excluded.creation_time,
+    file_identity = excluded.file_identity,
+    content_hash = excluded.content_hash,
+    hash_algorithm = excluded.hash_algorithm,
+    current_revision_id = excluded.current_revision_id,
+    is_deleted = 0,
+    deleted_at = NULL,
+    last_scanned_at = excluded.last_scanned_at`,
+			shareID, entry.RelativePath, entry.EntryType, entry.Size, nullableTime(entry.ModifiedTime),
+			nullableTime(entry.CreationTime), nullableString(entry.FileIdentity), nullableString(entry.ContentHash),
+			nullableString(entry.HashAlgorithm), nullableString(string(entry.CurrentRevisionID)), formatTime(entry.LastScannedAt),
+		); err != nil {
+			return fmt.Errorf("save file index entry %s: %w", entry.RelativePath, err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE file_index
+SET entry_type = ?, is_deleted = 1, deleted_at = ?, last_scanned_at = ?
+WHERE share_id = ?
+  AND is_deleted = 0
+  AND NOT EXISTS (
+      SELECT 1 FROM scan_seen_paths seen WHERE seen.relative_path = file_index.relative_path
+  )`,
+		core.EntryDeleted, formatTime(scannedAt), formatTime(scannedAt), shareID,
+	); err != nil {
+		return fmt.Errorf("mark missing file index entries deleted: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scan_seen_paths`); err != nil {
+		return fmt.Errorf("clear scan seen table after snapshot: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit file index snapshot: %w", err)
+	}
+	return nil
+}
+
+func (store fileIndexStore) Get(ctx context.Context, shareID core.ShareID, relativePath string) (core.FileIndexEntry, error) {
+	row := store.db.QueryRowContext(ctx, `
+SELECT share_id, relative_path, entry_type, size, modified_time, creation_time, file_identity, content_hash, hash_algorithm, current_revision_id, is_deleted, deleted_at, last_scanned_at
+FROM file_index
+WHERE share_id = ? AND relative_path = ?`, shareID, relativePath)
+	return scanFileIndexEntry(row, "file index entry", string(shareID)+"/"+relativePath)
+}
+
+func (store fileIndexStore) List(ctx context.Context, shareID core.ShareID) ([]core.FileIndexEntry, error) {
+	rows, err := store.db.QueryContext(ctx, `
+SELECT share_id, relative_path, entry_type, size, modified_time, creation_time, file_identity, content_hash, hash_algorithm, current_revision_id, is_deleted, deleted_at, last_scanned_at
+FROM file_index
+WHERE share_id = ?
+ORDER BY relative_path`, shareID)
+	if err != nil {
+		return nil, fmt.Errorf("list file index entries for share %s: %w", shareID, err)
+	}
+	defer rows.Close()
+
+	var entries []core.FileIndexEntry
+	for rows.Next() {
+		entry, err := scanFileIndexEntryRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate file index entries: %w", err)
+	}
+	return entries, nil
+}
+
 type transferStore struct {
 	db *sql.DB
 }
@@ -455,6 +580,64 @@ func scanRevision(row *sql.Row, entity, id string) (core.Revision, error) {
 	revision.IsDeleted = deleted == 1
 	revision.CreatedAt = parseStoredTime(createdAt)
 	return revision, nil
+}
+
+type fileIndexScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanFileIndexEntry(row *sql.Row, entity, id string) (core.FileIndexEntry, error) {
+	entry, err := scanFileIndex(row)
+	if err != nil {
+		return core.FileIndexEntry{}, mapNotFound(err, entity, id)
+	}
+	return entry, nil
+}
+
+func scanFileIndexEntryRows(rows *sql.Rows) (core.FileIndexEntry, error) {
+	entry, err := scanFileIndex(rows)
+	if err != nil {
+		return core.FileIndexEntry{}, fmt.Errorf("scan file index entry: %w", err)
+	}
+	return entry, nil
+}
+
+func scanFileIndex(scanner fileIndexScanner) (core.FileIndexEntry, error) {
+	var entry core.FileIndexEntry
+	var modifiedAt, createdAt, fileIdentity, contentHash, hashAlgorithm, revisionID, deletedAt sql.NullString
+	var lastScannedAt string
+	var deleted int
+	err := scanner.Scan(
+		&entry.ShareID, &entry.RelativePath, &entry.EntryType, &entry.Size, &modifiedAt, &createdAt,
+		&fileIdentity, &contentHash, &hashAlgorithm, &revisionID, &deleted, &deletedAt, &lastScannedAt,
+	)
+	if err != nil {
+		return core.FileIndexEntry{}, err
+	}
+	if modifiedAt.Valid {
+		entry.ModifiedTime = parseStoredTime(modifiedAt.String)
+	}
+	if createdAt.Valid {
+		entry.CreationTime = parseStoredTime(createdAt.String)
+	}
+	if fileIdentity.Valid {
+		entry.FileIdentity = fileIdentity.String
+	}
+	if contentHash.Valid {
+		entry.ContentHash = contentHash.String
+	}
+	if hashAlgorithm.Valid {
+		entry.HashAlgorithm = hashAlgorithm.String
+	}
+	if revisionID.Valid {
+		entry.CurrentRevisionID = core.RevisionID(revisionID.String)
+	}
+	entry.IsDeleted = deleted == 1
+	if deletedAt.Valid {
+		entry.DeletedAt = parseStoredTime(deletedAt.String)
+	}
+	entry.LastScannedAt = parseStoredTime(lastScannedAt)
+	return entry, nil
 }
 
 func capabilityColumn(capability core.Capability) (string, error) {
