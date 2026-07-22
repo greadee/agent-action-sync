@@ -14,6 +14,7 @@ The repository was empty when Phase 0 began. The current contents define:
 - Initial share path normalization and containment helpers.
 - Fixed-size chunk planning for resumable transfers.
 - Safe receive-side partial file writing with hash verification before commit.
+- Folder scan manifests for future synchronization, including default ignores for history and partial files.
 - Initial Go interfaces for transport and storage.
 - Versioned SQLite migration definitions for local agent state.
 - Revision and transfer state models.
