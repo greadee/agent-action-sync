@@ -9,7 +9,13 @@ This repository is currently in Phase 0: architecture and threat model. The firs
 The repository was empty when Phase 0 began. The current contents define:
 
 - Clean package boundaries for sync, transfer, storage, transport, and identity.
+- A dependency-free JSON config loader with loopback-only local API validation.
+- Device identity helpers for Ed25519 keys, fingerprints, and pairing codes.
+- Initial share path normalization and containment helpers.
+- Fixed-size chunk planning for resumable transfers.
+- Safe receive-side partial file writing with hash verification before commit.
 - Initial Go interfaces for transport and storage.
+- Versioned SQLite migration definitions for local agent state.
 - Revision and transfer state models.
 - Initial SQLite schema.
 - Threat model and trust boundaries.
@@ -39,13 +45,21 @@ Later phases add LAN discovery, one-way sync, browser portal access, coordinator
 Validate the current scaffold with:
 
 ```powershell
-go test ./...
+tools\test.ps1
+```
+
+Manual local send-once smoke path:
+
+```powershell
+syncgate receive-once --listen 127.0.0.1:47821 --share-root C:\SyncGate\Drop
+syncgate send-once --addr 127.0.0.1:47821 --file C:\path\file.bin --relative-path file.bin
 ```
 
 Useful docs:
 
 - [Architecture overview](docs/architecture/overview.md)
 - [Agent coordination model](docs/architecture/agent-coordination.md)
+- [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)
 - [Protocol outline](docs/protocol/transfer-protocol.md)
