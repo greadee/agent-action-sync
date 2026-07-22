@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
+	"syncgate/internal/api"
 	"syncgate/internal/config"
 	"syncgate/internal/core"
 	"syncgate/internal/transfer"
@@ -25,8 +27,24 @@ func main() {
 		runReceiveOnce(os.Args[2:])
 	case "send-once":
 		runSendOnce(os.Args[2:])
+	case "status-server":
+		runStatusServer(os.Args[2:])
 	default:
 		exitf("unknown command %q", os.Args[1])
+	}
+}
+
+func runStatusServer(args []string) {
+	flags := flag.NewFlagSet("status-server", flag.ExitOnError)
+	listen := flags.String("listen", "127.0.0.1:47820", "loopback status server address")
+	_ = flags.Parse(args)
+	server, err := api.NewHealthServer(*listen, time.Now().UTC())
+	if err != nil {
+		exitf("%v", err)
+	}
+	fmt.Printf("syncgate status server on %s\n", *listen)
+	if err := server.ListenAndServe(); err != nil {
+		exitf("%v", err)
 	}
 }
 
