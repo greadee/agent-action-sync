@@ -44,13 +44,14 @@ Later phases add LAN discovery, one-way sync, browser portal access, coordinator
 Validate the current scaffold with:
 
 ```powershell
-go test ./...
+tools\test.ps1
 ```
 
 Useful docs:
 
 - [Architecture overview](docs/architecture/overview.md)
 - [Agent coordination model](docs/architecture/agent-coordination.md)
+- [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)
 - [Protocol outline](docs/protocol/transfer-protocol.md)
