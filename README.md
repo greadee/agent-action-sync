@@ -48,6 +48,13 @@ Validate the current scaffold with:
 tools\test.ps1
 ```
 
+Manual local send-once smoke path:
+
+```powershell
+syncgate receive-once --listen 127.0.0.1:47821 --share-root C:\SyncGate\Drop
+syncgate send-once --addr 127.0.0.1:47821 --file C:\path\file.bin --relative-path file.bin
+```
+
 Useful docs:
 
 - [Architecture overview](docs/architecture/overview.md)
