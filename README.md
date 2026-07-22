@@ -13,6 +13,7 @@ The repository was empty when Phase 0 began. The current contents define:
 - Device identity helpers for Ed25519 keys, fingerprints, and pairing codes.
 - Initial share path normalization and containment helpers.
 - Fixed-size chunk planning for resumable transfers.
+- Safe receive-side partial file writing with hash verification before commit.
 - Initial Go interfaces for transport and storage.
 - Versioned SQLite migration definitions for local agent state.
 - Revision and transfer state models.
