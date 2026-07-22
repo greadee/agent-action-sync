@@ -2,7 +2,7 @@
 
 ## Required Toolchain
 
-Local development requires Go 1.22 or newer.
+Local development requires Go 1.25 or newer.
 
 Check the local toolchain:
 
@@ -20,7 +20,7 @@ tools\test.ps1
 The script also supports a local portable Go layout:
 
 ```text
-.tools/go1.22.12/go/bin/go.exe
+.tools/go1.25.12/go/bin/go.exe
 ```
 
 When that exists, the script uses it automatically and stores build caches under `.cache/`.
