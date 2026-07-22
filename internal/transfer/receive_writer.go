@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"syncgate/internal/filesystem"
 )
@@ -16,15 +17,18 @@ import (
 const (
 	HashSHA256           = "sha256"
 	DefaultPartialSuffix = ".sync-part"
+	DefaultHistoryDir    = ".sync-history"
 )
 
 type ReceiveSpec struct {
-	ShareRoot     string
-	RelativePath  string
-	ExpectedSize  int64
-	ExpectedHash  string
-	HashAlgorithm string
-	PartialSuffix string
+	ShareRoot       string
+	RelativePath    string
+	ExpectedSize    int64
+	ExpectedHash    string
+	HashAlgorithm   string
+	PartialSuffix   string
+	ReplaceExisting bool
+	HistoryDirName  string
 }
 
 type ReceiveWriter struct {
@@ -32,6 +36,9 @@ type ReceiveWriter struct {
 	partialPath     string
 	expectedSize    int64
 	expectedHash    string
+	shareRoot       string
+	replaceExisting bool
+	historyDirName  string
 	file            *os.File
 	hasher          hash.Hash
 	written         int64
@@ -51,6 +58,9 @@ func NewReceiveWriter(spec ReceiveSpec) (*ReceiveWriter, error) {
 	}
 	if spec.PartialSuffix == "" {
 		spec.PartialSuffix = DefaultPartialSuffix
+	}
+	if spec.HistoryDirName == "" {
+		spec.HistoryDirName = DefaultHistoryDir
 	}
 
 	expectedHash, err := normalizeHexHash(spec.ExpectedHash)
@@ -77,6 +87,9 @@ func NewReceiveWriter(spec ReceiveSpec) (*ReceiveWriter, error) {
 		partialPath:     partialPath,
 		expectedSize:    spec.ExpectedSize,
 		expectedHash:    expectedHash,
+		shareRoot:       spec.ShareRoot,
+		replaceExisting: spec.ReplaceExisting,
+		historyDirName:  spec.HistoryDirName,
 		file:            file,
 		hasher:          sha256.New(),
 	}, nil
@@ -123,17 +136,53 @@ func (writer *ReceiveWriter) Commit() (string, error) {
 	}
 	writer.closed = true
 
-	if _, err := os.Stat(writer.destinationPath); err == nil {
-		return "", fmt.Errorf("destination already exists: %s", writer.destinationPath)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("check destination: %w", err)
+	if err := writer.prepareDestinationForCommit(); err != nil {
+		return "", err
 	}
-
 	if err := os.Rename(writer.partialPath, writer.destinationPath); err != nil {
 		return "", fmt.Errorf("commit partial file: %w", err)
 	}
 	writer.committed = true
 	return writer.destinationPath, nil
+}
+
+func (writer *ReceiveWriter) prepareDestinationForCommit() error {
+	if _, err := os.Stat(writer.destinationPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("check destination: %w", err)
+	}
+	if !writer.replaceExisting {
+		return fmt.Errorf("destination already exists: %s", writer.destinationPath)
+	}
+
+	historyPath, err := writer.historyPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil {
+		return fmt.Errorf("create history directory: %w", err)
+	}
+	if err := os.Rename(writer.destinationPath, historyPath); err != nil {
+		return fmt.Errorf("preserve existing destination: %w", err)
+	}
+	return nil
+}
+
+func (writer *ReceiveWriter) historyPath() (string, error) {
+	normalized, err := filesystem.NormalizeRelativePath(writer.destinationPath)
+	if err == nil {
+		return filesystem.ResolveInsideShare(writer.shareRoot, filepath.Join(writer.historyDirName, normalized+"."+historyStamp()))
+	}
+	relative, relErr := filepath.Rel(filepath.Clean(writer.shareRoot), writer.destinationPath)
+	if relErr != nil {
+		return "", fmt.Errorf("make history path: %w", err)
+	}
+	return filesystem.ResolveInsideShare(writer.shareRoot, filepath.Join(writer.historyDirName, relative+"."+historyStamp()))
+}
+
+func historyStamp() string {
+	return time.Now().UTC().Format("20060102T150405.000000000Z")
 }
 
 func (writer *ReceiveWriter) Close() error {
