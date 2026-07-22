@@ -9,6 +9,9 @@ This repository is currently in Phase 0: architecture and threat model. The firs
 The repository was empty when Phase 0 began. The current contents define:
 
 - Clean package boundaries for sync, transfer, storage, transport, and identity.
+- A dependency-free JSON config loader with loopback-only local API validation.
+- Initial share path normalization and containment helpers.
+- Fixed-size chunk planning for resumable transfers.
 - Initial Go interfaces for transport and storage.
 - Revision and transfer state models.
 - Initial SQLite schema.

@@ -1,0 +1,148 @@
+package config
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"strings"
+
+	"syncgate/internal/transfer"
+)
+
+const (
+	DefaultLocalAPIHost      = "127.0.0.1"
+	DefaultLocalAPIPort      = 47820
+	DefaultParallelTransfers = 2
+)
+
+type Config struct {
+	DeviceName string         `json:"device_name"`
+	DataDir    string         `json:"data_dir"`
+	LocalAPI   LocalAPIConfig `json:"local_api"`
+	Transfer   TransferConfig `json:"transfer"`
+	Shares     []ShareConfig  `json:"shares"`
+}
+
+type LocalAPIConfig struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
+type TransferConfig struct {
+	ChunkSizeBytes      int64 `json:"chunk_size_bytes"`
+	MaxParallelTransfers int   `json:"max_parallel_transfers"`
+}
+
+type ShareConfig struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	RootPath string `json:"root_path"`
+	Mode     string `json:"mode"`
+}
+
+func LoadFile(ctx context.Context, path string) (Config, error) {
+	if err := ctx.Err(); err != nil {
+		return Config{}, err
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+
+	var cfg Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse config JSON: %w", err)
+	}
+	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func (cfg *Config) ApplyDefaultsAndValidate() error {
+	cfg.DeviceName = strings.TrimSpace(cfg.DeviceName)
+	cfg.DataDir = strings.TrimSpace(cfg.DataDir)
+
+	if cfg.LocalAPI.Host == "" {
+		cfg.LocalAPI.Host = DefaultLocalAPIHost
+	}
+	if cfg.LocalAPI.Port == 0 {
+		cfg.LocalAPI.Port = DefaultLocalAPIPort
+	}
+	if cfg.Transfer.ChunkSizeBytes == 0 {
+		cfg.Transfer.ChunkSizeBytes = transfer.DefaultChunkSize
+	}
+	if cfg.Transfer.MaxParallelTransfers == 0 {
+		cfg.Transfer.MaxParallelTransfers = DefaultParallelTransfers
+	}
+
+	if cfg.DeviceName == "" {
+		return errors.New("device_name is required")
+	}
+	if cfg.DataDir == "" {
+		return errors.New("data_dir is required")
+	}
+	if !isLoopbackHost(cfg.LocalAPI.Host) {
+		return fmt.Errorf("local_api.host must be loopback, got %q", cfg.LocalAPI.Host)
+	}
+	if cfg.LocalAPI.Port < 1 || cfg.LocalAPI.Port > 65535 {
+		return fmt.Errorf("local_api.port must be between 1 and 65535, got %d", cfg.LocalAPI.Port)
+	}
+	if cfg.Transfer.ChunkSizeBytes <= 0 {
+		return fmt.Errorf("transfer.chunk_size_bytes must be positive, got %d", cfg.Transfer.ChunkSizeBytes)
+	}
+	if cfg.Transfer.MaxParallelTransfers < 1 {
+		return fmt.Errorf("transfer.max_parallel_transfers must be positive, got %d", cfg.Transfer.MaxParallelTransfers)
+	}
+	if len(cfg.Shares) == 0 {
+		return errors.New("at least one share is required")
+	}
+
+	seenShares := map[string]bool{}
+	for i := range cfg.Shares {
+		if err := cfg.Shares[i].validate(seenShares); err != nil {
+			return fmt.Errorf("shares[%d]: %w", i, err)
+		}
+	}
+
+	return nil
+}
+
+func (share *ShareConfig) validate(seen map[string]bool) error {
+	share.ID = strings.TrimSpace(share.ID)
+	share.Name = strings.TrimSpace(share.Name)
+	share.RootPath = strings.TrimSpace(share.RootPath)
+	share.Mode = strings.TrimSpace(share.Mode)
+
+	if share.ID == "" {
+		return errors.New("id is required")
+	}
+	if seen[share.ID] {
+		return fmt.Errorf("duplicate id %q", share.ID)
+	}
+	seen[share.ID] = true
+	if share.Name == "" {
+		return errors.New("name is required")
+	}
+	if share.RootPath == "" {
+		return errors.New("root_path is required")
+	}
+	switch share.Mode {
+	case "send_once", "one_way_source", "one_way_target", "upload_only", "read_only":
+		return nil
+	default:
+		return fmt.Errorf("unsupported mode %q", share.Mode)
+	}
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}

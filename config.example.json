@@ -1,0 +1,20 @@
+{
+  "device_name": "HOME-DESKTOP",
+  "data_dir": "C:\\Users\\example\\AppData\\Local\\SyncGate",
+  "local_api": {
+    "host": "127.0.0.1",
+    "port": 47820
+  },
+  "transfer": {
+    "chunk_size_bytes": 4194304,
+    "max_parallel_transfers": 2
+  },
+  "shares": [
+    {
+      "id": "school-drop",
+      "name": "School Drop",
+      "root_path": "C:\\Users\\example\\SyncGate\\School Drop",
+      "mode": "upload_only"
+    }
+  ]
+}
