@@ -14,6 +14,7 @@ The repository was empty when Phase 0 began. The current contents define:
 - Initial share path normalization and containment helpers.
 - Fixed-size chunk planning for resumable transfers.
 - Initial Go interfaces for transport and storage.
+- Versioned SQLite migration definitions for local agent state.
 - Revision and transfer state models.
 - Initial SQLite schema.
 - Threat model and trust boundaries.
