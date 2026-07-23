@@ -38,3 +38,10 @@ Scan planning behavior:
 - Applies deletion limits before writing a new snapshot.
 - Persists the snapshot only when the deletion guard allows it.
 - Returns the scan, reconciliation, and guard decision so callers can present or propagate the approved changes.
+
+Revision-building behavior:
+
+- Converts approved added, modified, and deleted changes into path-ordered revisions.
+- Associates every revision with its source device and a caller-provided sequence range.
+- Links updates and deletions to the previously recorded revision for that path.
+- Represents deletions as `deleted` revisions, ready for later tombstone propagation.
