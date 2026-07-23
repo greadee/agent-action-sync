@@ -31,3 +31,10 @@ Deletion guard behavior:
 - Blocks when deletes exceed configured count or percentage limits.
 - Treats a zero count or zero percentage limit as disabled for that limit.
 - Returns deleted paths and reasons so the CLI or agent can explain the block.
+
+Scan planning behavior:
+
+- Loads the previous file-index snapshot, scans the share, and reconciles both states.
+- Applies deletion limits before writing a new snapshot.
+- Persists the snapshot only when the deletion guard allows it.
+- Returns the scan, reconciliation, and guard decision so callers can present or propagate the approved changes.

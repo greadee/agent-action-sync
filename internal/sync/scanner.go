@@ -32,7 +32,8 @@ type ScanOptions struct {
 }
 
 type ScanResult struct {
-	Entries []core.FileIndexEntry
+	Entries   []core.FileIndexEntry
+	ScannedAt time.Time
 }
 
 func ScanShare(options ScanOptions) (ScanResult, error) {
@@ -110,7 +111,7 @@ func ScanShare(options ScanOptions) (ScanResult, error) {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].RelativePath < entries[j].RelativePath
 	})
-	return ScanResult{Entries: entries}, nil
+	return ScanResult{Entries: entries, ScannedAt: scannedAt}, nil
 }
 
 func relativeSharePath(root, path string) (string, error) {

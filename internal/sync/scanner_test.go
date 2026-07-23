@@ -49,6 +49,9 @@ func TestScanShareIndexesFilesAndDirectories(t *testing.T) {
 	if !file.LastScannedAt.Equal(scannedAt) {
 		t.Fatalf("last scanned at = %s", file.LastScannedAt)
 	}
+	if !result.ScannedAt.Equal(scannedAt) {
+		t.Fatalf("scan timestamp = %s", result.ScannedAt)
+	}
 }
 
 func TestScanShareIgnoresHistoryAndPartials(t *testing.T) {
