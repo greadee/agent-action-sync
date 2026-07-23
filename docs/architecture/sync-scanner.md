@@ -23,3 +23,11 @@ Reconciliation behavior:
 - Treats a reappeared previously deleted path as added.
 - Compares regular files by size, hash algorithm, and content hash.
 - Compares directories by entry type only.
+
+Deletion guard behavior:
+
+- Counts pending `deleted` changes before they are eligible for propagation.
+- Tracks deletion percentage against previously active paths.
+- Blocks when deletes exceed configured count or percentage limits.
+- Treats a zero count or zero percentage limit as disabled for that limit.
+- Returns deleted paths and reasons so the CLI or agent can explain the block.
