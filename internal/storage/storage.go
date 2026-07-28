@@ -13,6 +13,7 @@ type Store interface {
 	Shares() ShareStore
 	Revisions() RevisionStore
 	FileIndex() FileIndexStore
+	Tombstones() TombstoneStore
 	Transfers() TransferStore
 	Audit() AuditStore
 	Close() error
@@ -41,6 +42,13 @@ type FileIndexStore interface {
 	CommitSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, revisions []core.Revision, scannedAt time.Time) error
 	Get(ctx context.Context, shareID core.ShareID, relativePath string) (core.FileIndexEntry, error)
 	List(ctx context.Context, shareID core.ShareID) ([]core.FileIndexEntry, error)
+}
+
+type TombstoneStore interface {
+	RecordDeletion(ctx context.Context, tombstoneID core.TombstoneID, tombstoneRevisionID core.RevisionID, expiresAt time.Time) (Tombstone, error)
+	Get(ctx context.Context, shareID core.ShareID, relativePath string) (Tombstone, error)
+	List(ctx context.Context, shareID core.ShareID) ([]Tombstone, error)
+	ListActive(ctx context.Context, shareID core.ShareID) ([]Tombstone, error)
 }
 
 type TransferStore interface {

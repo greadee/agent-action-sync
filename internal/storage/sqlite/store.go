@@ -80,6 +80,10 @@ func (store *Store) FileIndex() storage.FileIndexStore {
 	return fileIndexStore{db: store.db}
 }
 
+func (store *Store) Tombstones() storage.TombstoneStore {
+	return tombstoneStore{db: store.db}
+}
+
 func (store *Store) Transfers() storage.TransferStore {
 	return transferStore{db: store.db}
 }
@@ -724,6 +728,195 @@ WHERE share_id = ?`, shareID)
 	return byPath, nil
 }
 
+type tombstoneStore struct {
+	db *sql.DB
+}
+
+func (store tombstoneStore) RecordDeletion(
+	ctx context.Context,
+	tombstoneID core.TombstoneID,
+	tombstoneRevisionID core.RevisionID,
+	expiresAt time.Time,
+) (storage.Tombstone, error) {
+	if tombstoneID == "" {
+		return storage.Tombstone{}, errors.New("tombstone id is required")
+	}
+	if tombstoneRevisionID == "" {
+		return storage.Tombstone{}, errors.New("tombstone revision id is required")
+	}
+	if !expiresAt.IsZero() {
+		expiresAt = expiresAt.UTC()
+	}
+
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return storage.Tombstone{}, fmt.Errorf("begin tombstone record: %w", err)
+	}
+	defer tx.Rollback()
+
+	var tombstone storage.Tombstone
+	var parentRevision, currentRevision sql.NullString
+	var deletedAt string
+	var entryType string
+	var revisionDeleted int
+	var indexDeleted sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+SELECT r.share_id, r.relative_path, r.entry_type, r.parent_revision_id, r.origin_device_id,
+       r.is_deleted, r.created_at, i.current_revision_id, i.is_deleted
+FROM revisions r
+LEFT JOIN file_index i
+  ON i.share_id = r.share_id AND i.relative_path = r.relative_path
+WHERE r.revision_id = ?`, tombstoneRevisionID).Scan(
+		&tombstone.ShareID, &tombstone.RelativePath, &entryType, &parentRevision,
+		&tombstone.DeletedByDeviceID, &revisionDeleted, &deletedAt, &currentRevision, &indexDeleted,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return storage.Tombstone{}, fmt.Errorf("deletion revision %s not found", tombstoneRevisionID)
+		}
+		return storage.Tombstone{}, fmt.Errorf("load deletion revision %s: %w", tombstoneRevisionID, err)
+	}
+	if entryType != string(core.EntryDeleted) || revisionDeleted != 1 {
+		return storage.Tombstone{}, fmt.Errorf("revision %s is not a deletion revision", tombstoneRevisionID)
+	}
+	tombstone.ID = tombstoneID
+	tombstone.TombstoneRevisionID = tombstoneRevisionID
+	tombstone.DeletedAt = parseStoredTime(deletedAt)
+	if tombstone.DeletedAt.IsZero() {
+		return storage.Tombstone{}, fmt.Errorf("deletion revision %s has invalid creation time", tombstoneRevisionID)
+	}
+	if parentRevision.Valid {
+		tombstone.BaseRevisionID = core.RevisionID(parentRevision.String)
+	}
+	if !expiresAt.IsZero() && expiresAt.Before(tombstone.DeletedAt) {
+		return storage.Tombstone{}, fmt.Errorf("tombstone %s expires before deletion", tombstoneID)
+	}
+	tombstone.ExpiresAt = expiresAt
+
+	var existing storage.Tombstone
+	err = scanTombstone(tx.QueryRowContext(ctx, `
+SELECT tombstone_id, share_id, relative_path, deleted_by_device_id, base_revision_id,
+       tombstone_revision_id, deleted_at, expires_at
+FROM tombstones
+WHERE tombstone_id = ?`, tombstoneID), &existing)
+	if err == nil {
+		if !tombstonesEqual(existing, tombstone) {
+			return storage.Tombstone{}, fmt.Errorf("tombstone %s already exists with different metadata", tombstoneID)
+		}
+		if err := tx.Commit(); err != nil {
+			return storage.Tombstone{}, fmt.Errorf("commit idempotent tombstone record %s: %w", tombstoneID, err)
+		}
+		return existing, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return storage.Tombstone{}, fmt.Errorf("look up tombstone %s: %w", tombstoneID, err)
+	}
+
+	err = scanTombstone(tx.QueryRowContext(ctx, `
+SELECT tombstone_id, share_id, relative_path, deleted_by_device_id, base_revision_id,
+       tombstone_revision_id, deleted_at, expires_at
+FROM tombstones
+WHERE share_id = ? AND relative_path = ? AND tombstone_revision_id = ?`,
+		tombstone.ShareID, tombstone.RelativePath, tombstoneRevisionID), &existing)
+	if err == nil {
+		if !tombstonesEqualIgnoringID(existing, tombstone) {
+			return storage.Tombstone{}, fmt.Errorf("deletion revision %s already has conflicting tombstone metadata", tombstoneRevisionID)
+		}
+		if err := tx.Commit(); err != nil {
+			return storage.Tombstone{}, fmt.Errorf("commit duplicate tombstone record %s: %w", tombstoneID, err)
+		}
+		return existing, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return storage.Tombstone{}, fmt.Errorf("look up tombstone for revision %s: %w", tombstoneRevisionID, err)
+	}
+	if !currentRevision.Valid || currentRevision.String != string(tombstoneRevisionID) || !indexDeleted.Valid || indexDeleted.Int64 != 1 {
+		return storage.Tombstone{}, fmt.Errorf("deletion revision %s is not the accepted current revision", tombstoneRevisionID)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO tombstones(tombstone_id, share_id, relative_path, deleted_by_device_id, base_revision_id, tombstone_revision_id, deleted_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		tombstone.ID, tombstone.ShareID, tombstone.RelativePath, tombstone.DeletedByDeviceID,
+		nullableString(string(tombstone.BaseRevisionID)), tombstone.TombstoneRevisionID,
+		formatTime(tombstone.DeletedAt), nullableTime(tombstone.ExpiresAt),
+	)
+	if err != nil {
+		return storage.Tombstone{}, fmt.Errorf("record tombstone %s: %w", tombstoneID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return storage.Tombstone{}, fmt.Errorf("commit tombstone record %s: %w", tombstoneID, err)
+	}
+	return tombstone, nil
+}
+
+func (store tombstoneStore) Get(ctx context.Context, shareID core.ShareID, relativePath string) (storage.Tombstone, error) {
+	if shareID == "" {
+		return storage.Tombstone{}, errors.New("share id is required")
+	}
+	if strings.TrimSpace(relativePath) == "" {
+		return storage.Tombstone{}, errors.New("relative path is required")
+	}
+	var tombstone storage.Tombstone
+	err := scanTombstone(store.db.QueryRowContext(ctx, `
+SELECT tombstone_id, share_id, relative_path, deleted_by_device_id, base_revision_id,
+       tombstone_revision_id, deleted_at, expires_at
+FROM tombstones
+WHERE share_id = ? AND relative_path = ?
+ORDER BY deleted_at DESC, tombstone_id DESC
+LIMIT 1`, shareID, relativePath), &tombstone)
+	if err != nil {
+		return storage.Tombstone{}, mapNotFound(err, "tombstone", string(shareID)+"/"+relativePath)
+	}
+	return tombstone, nil
+}
+
+func (store tombstoneStore) List(ctx context.Context, shareID core.ShareID) ([]storage.Tombstone, error) {
+	return store.list(ctx, `
+SELECT tombstone_id, share_id, relative_path, deleted_by_device_id, base_revision_id,
+       tombstone_revision_id, deleted_at, expires_at
+FROM tombstones
+WHERE share_id = ?
+ORDER BY deleted_at DESC, relative_path, tombstone_id`, shareID)
+}
+
+func (store tombstoneStore) ListActive(ctx context.Context, shareID core.ShareID) ([]storage.Tombstone, error) {
+	return store.list(ctx, `
+SELECT t.tombstone_id, t.share_id, t.relative_path, t.deleted_by_device_id, t.base_revision_id,
+       t.tombstone_revision_id, t.deleted_at, t.expires_at
+FROM tombstones t
+JOIN file_index i
+  ON i.share_id = t.share_id
+ AND i.relative_path = t.relative_path
+ AND i.current_revision_id = t.tombstone_revision_id
+WHERE t.share_id = ? AND i.is_deleted = 1
+ORDER BY t.deleted_at DESC, t.relative_path, t.tombstone_id`, shareID)
+}
+
+func (store tombstoneStore) list(ctx context.Context, query string, shareID core.ShareID) ([]storage.Tombstone, error) {
+	if shareID == "" {
+		return nil, errors.New("share id is required")
+	}
+	rows, err := store.db.QueryContext(ctx, query, shareID)
+	if err != nil {
+		return nil, fmt.Errorf("list tombstones for share %s: %w", shareID, err)
+	}
+	defer rows.Close()
+
+	var tombstones []storage.Tombstone
+	for rows.Next() {
+		var tombstone storage.Tombstone
+		if err := scanTombstone(rows, &tombstone); err != nil {
+			return nil, fmt.Errorf("scan tombstone: %w", err)
+		}
+		tombstones = append(tombstones, tombstone)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tombstones for share %s: %w", shareID, err)
+	}
+	return tombstones, nil
+}
+
 func (store fileIndexStore) Get(ctx context.Context, shareID core.ShareID, relativePath string) (core.FileIndexEntry, error) {
 	row := store.db.QueryRowContext(ctx, `
 SELECT share_id, relative_path, entry_type, size, modified_time, creation_time, file_identity, content_hash, hash_algorithm, current_revision_id, is_deleted, deleted_at, last_scanned_at
@@ -900,6 +1093,63 @@ func scanRevision(row *sql.Row, entity, id string) (core.Revision, error) {
 	revision.IsDeleted = deleted == 1
 	revision.CreatedAt = parseStoredTime(createdAt)
 	return revision, nil
+}
+
+type tombstoneScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanTombstone(scanner tombstoneScanner, tombstone *storage.Tombstone) error {
+	var id, shareID, relativePath, deletedByDeviceID string
+	var baseRevisionID, tombstoneRevisionID sql.NullString
+	var deletedAt string
+	var expiresAt sql.NullString
+	if err := scanner.Scan(
+		&id, &shareID, &relativePath, &deletedByDeviceID, &baseRevisionID,
+		&tombstoneRevisionID, &deletedAt, &expiresAt,
+	); err != nil {
+		return err
+	}
+	if !tombstoneRevisionID.Valid {
+		return errors.New("tombstone revision id is null")
+	}
+	parsedDeletedAt := parseStoredTime(deletedAt)
+	if parsedDeletedAt.IsZero() {
+		return errors.New("tombstone deleted time is invalid")
+	}
+	value := storage.Tombstone{
+		ID:                  core.TombstoneID(id),
+		ShareID:             core.ShareID(shareID),
+		RelativePath:        relativePath,
+		DeletedByDeviceID:   core.DeviceID(deletedByDeviceID),
+		TombstoneRevisionID: core.RevisionID(tombstoneRevisionID.String),
+		DeletedAt:           parsedDeletedAt,
+	}
+	if baseRevisionID.Valid {
+		value.BaseRevisionID = core.RevisionID(baseRevisionID.String)
+	}
+	if expiresAt.Valid {
+		value.ExpiresAt = parseStoredTime(expiresAt.String)
+		if value.ExpiresAt.IsZero() {
+			return errors.New("tombstone expiry time is invalid")
+		}
+	}
+	*tombstone = value
+	return nil
+}
+
+func tombstonesEqual(left, right storage.Tombstone) bool {
+	return left.ID == right.ID && tombstonesEqualIgnoringID(left, right)
+}
+
+func tombstonesEqualIgnoringID(left, right storage.Tombstone) bool {
+	return left.ShareID == right.ShareID &&
+		left.RelativePath == right.RelativePath &&
+		left.DeletedByDeviceID == right.DeletedByDeviceID &&
+		left.BaseRevisionID == right.BaseRevisionID &&
+		left.TombstoneRevisionID == right.TombstoneRevisionID &&
+		left.DeletedAt.Equal(right.DeletedAt) &&
+		left.ExpiresAt.Equal(right.ExpiresAt)
 }
 
 type fileIndexScanner interface {

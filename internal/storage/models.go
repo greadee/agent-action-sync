@@ -49,6 +49,19 @@ type Share struct {
 	UpdatedAt            time.Time
 }
 
+// Tombstone records an accepted source deletion. Tombstones are immutable
+// history; active propagation is determined by the current file-index pointer.
+type Tombstone struct {
+	ID                  core.TombstoneID
+	ShareID             core.ShareID
+	RelativePath        string
+	DeletedByDeviceID   core.DeviceID
+	BaseRevisionID      core.RevisionID
+	TombstoneRevisionID core.RevisionID
+	DeletedAt           time.Time
+	ExpiresAt           time.Time
+}
+
 type AuditEvent struct {
 	ID            string
 	EventName     string

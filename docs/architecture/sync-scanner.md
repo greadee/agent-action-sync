@@ -54,3 +54,11 @@ Revision-aware storage behavior:
 - Keeps deleted paths in the index, points them at a deletion revision, and records deletion time.
 - Rejects unknown or mismatched share IDs, mismatched revision metadata, stale parent revisions, and revisions for unchanged paths.
 - Rolls back the complete revision and index update when validation or persistence fails.
+
+Tombstone behavior:
+
+- Records a tombstone only from a deletion revision that is present in `revisions` and is the current deleted pointer in `file_index`.
+- Derives the tombstone share, path, source device, deletion time, and base revision from that accepted deletion revision; callers cannot provide conflicting ancestry metadata.
+- Treats tombstones as immutable deletion history. Repeating the same logical deletion is idempotent, while conflicting metadata is rejected.
+- Stores optional `expires_at` retention metadata but never deletes or hides expired rows automatically; cleanup and retention policy remain deferred.
+- `ListActive` returns only tombstones whose deletion revision is still current in a deleted `file_index` entry. When a path reappears, its new revision supersedes the tombstone for propagation while the historical row remains recoverable through `Get` and `List`.

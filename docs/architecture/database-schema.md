@@ -160,3 +160,5 @@ CREATE TABLE audit_events (
 - `relative_path` values are normalized paths, never raw user input.
 - Plaintext file contents, private keys, passwords, and session tokens must never be stored in audit metadata.
 - The history directory and partial-transfer directory are application-managed and excluded from ordinary synchronization.
+- Tombstones are immutable deletion history. `expires_at` is metadata only until an explicit retention policy is implemented; expired rows are not automatically removed.
+- A reappeared path is restored by advancing its `file_index.current_revision_id` to a non-deleted revision. The prior tombstone remains available as history, while active deletion propagation considers only tombstones still referenced by a deleted index entry.

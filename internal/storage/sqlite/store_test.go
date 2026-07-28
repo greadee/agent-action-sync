@@ -462,6 +462,225 @@ func TestCommitSnapshotRejectsInvalidAndMismatchedShareIDs(t *testing.T) {
 	}
 }
 
+func TestTombstoneStoreRecordsAcceptedDeletionAndListsMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+
+	entry := testFileIndexEntry(shareID, "gone.txt", "old")
+	initialRevision := testRevision("revision-old", shareID, entry.RelativePath, entry.ContentHash, "", 1)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{entry}, []core.Revision{initialRevision}, time.Unix(100, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot initial: %v", err)
+	}
+
+	deletedAt := time.Unix(200, 0).UTC()
+	deletionRevision := core.Revision{
+		ID:               "revision-delete",
+		ShareID:          shareID,
+		RelativePath:     entry.RelativePath,
+		EntryType:        core.EntryDeleted,
+		ParentRevisionID: initialRevision.ID,
+		OriginDeviceID:   "SOURCE-1",
+		Sequence:         2,
+		IsDeleted:        true,
+		CreatedAt:        deletedAt,
+	}
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, nil, []core.Revision{deletionRevision}, deletedAt); err != nil {
+		t.Fatalf("CommitSnapshot deletion: %v", err)
+	}
+
+	expiresAt := deletedAt.Add(24 * time.Hour)
+	got, err := store.Tombstones().RecordDeletion(ctx, "tombstone-1", deletionRevision.ID, expiresAt)
+	if err != nil {
+		t.Fatalf("RecordDeletion: %v", err)
+	}
+	want := storage.Tombstone{
+		ID:                  "tombstone-1",
+		ShareID:             shareID,
+		RelativePath:        entry.RelativePath,
+		DeletedByDeviceID:   deletionRevision.OriginDeviceID,
+		BaseRevisionID:      initialRevision.ID,
+		TombstoneRevisionID: deletionRevision.ID,
+		DeletedAt:           deletedAt,
+		ExpiresAt:           expiresAt,
+	}
+	if !tombstonesEqual(got, want) {
+		t.Fatalf("recorded tombstone = %+v, want %+v", got, want)
+	}
+
+	lookedUp, err := store.Tombstones().Get(ctx, shareID, entry.RelativePath)
+	if err != nil {
+		t.Fatalf("Get tombstone: %v", err)
+	}
+	if !tombstonesEqual(lookedUp, want) {
+		t.Fatalf("looked-up tombstone = %+v, want %+v", lookedUp, want)
+	}
+	all, err := store.Tombstones().List(ctx, shareID)
+	if err != nil {
+		t.Fatalf("List tombstones: %v", err)
+	}
+	if len(all) != 1 || !tombstonesEqual(all[0], want) {
+		t.Fatalf("all tombstones = %+v", all)
+	}
+	active, err := store.Tombstones().ListActive(ctx, shareID)
+	if err != nil {
+		t.Fatalf("ListActive tombstones: %v", err)
+	}
+	if len(active) != 1 || !tombstonesEqual(active[0], want) {
+		t.Fatalf("active tombstones = %+v", active)
+	}
+}
+
+func TestTombstoneStoreIsIdempotentAndDoesNotCleanExpiredRows(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+
+	entry := testFileIndexEntry(shareID, "gone.txt", "old")
+	initialRevision := testRevision("revision-old", shareID, entry.RelativePath, entry.ContentHash, "", 1)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{entry}, []core.Revision{initialRevision}, time.Unix(100, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot initial: %v", err)
+	}
+	deletedAt := time.Now().UTC().Add(-2 * time.Hour)
+	deletionRevision := core.Revision{
+		ID:               "revision-delete",
+		ShareID:          shareID,
+		RelativePath:     entry.RelativePath,
+		EntryType:        core.EntryDeleted,
+		ParentRevisionID: initialRevision.ID,
+		OriginDeviceID:   "SOURCE-1",
+		Sequence:         2,
+		IsDeleted:        true,
+		CreatedAt:        deletedAt,
+	}
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, nil, []core.Revision{deletionRevision}, deletedAt); err != nil {
+		t.Fatalf("CommitSnapshot deletion: %v", err)
+	}
+	expiresAt := deletedAt.Add(time.Hour)
+
+	first, err := store.Tombstones().RecordDeletion(ctx, "tombstone-1", deletionRevision.ID, expiresAt)
+	if err != nil {
+		t.Fatalf("RecordDeletion first: %v", err)
+	}
+	retry, err := store.Tombstones().RecordDeletion(ctx, "tombstone-1", deletionRevision.ID, expiresAt)
+	if err != nil {
+		t.Fatalf("RecordDeletion retry: %v", err)
+	}
+	if !tombstonesEqual(first, retry) {
+		t.Fatalf("retry tombstone = %+v, first = %+v", retry, first)
+	}
+	duplicate, err := store.Tombstones().RecordDeletion(ctx, "another-id", deletionRevision.ID, expiresAt)
+	if err != nil {
+		t.Fatalf("RecordDeletion duplicate revision: %v", err)
+	}
+	if duplicate.ID != first.ID {
+		t.Fatalf("duplicate tombstone ID = %s, want %s", duplicate.ID, first.ID)
+	}
+	if _, err := store.Tombstones().RecordDeletion(ctx, "tombstone-1", deletionRevision.ID, expiresAt.Add(time.Hour)); err == nil {
+		t.Fatal("expected conflicting expiry to fail")
+	}
+
+	all, err := store.Tombstones().List(ctx, shareID)
+	if err != nil {
+		t.Fatalf("List expired tombstones: %v", err)
+	}
+	if len(all) != 1 || !all[0].ExpiresAt.Before(time.Now().UTC()) {
+		t.Fatalf("expired tombstones = %+v", all)
+	}
+}
+
+func TestTombstoneStoreTreatsReappearedPathAsRestored(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+
+	entry := testFileIndexEntry(shareID, "reappeared.txt", "old")
+	initialRevision := testRevision("revision-old", shareID, entry.RelativePath, entry.ContentHash, "", 1)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{entry}, []core.Revision{initialRevision}, time.Unix(100, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot initial: %v", err)
+	}
+	deletedAt := time.Unix(200, 0).UTC()
+	deletionRevision := core.Revision{
+		ID:               "revision-delete",
+		ShareID:          shareID,
+		RelativePath:     entry.RelativePath,
+		EntryType:        core.EntryDeleted,
+		ParentRevisionID: initialRevision.ID,
+		OriginDeviceID:   "SOURCE-1",
+		Sequence:         2,
+		IsDeleted:        true,
+		CreatedAt:        deletedAt,
+	}
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, nil, []core.Revision{deletionRevision}, deletedAt); err != nil {
+		t.Fatalf("CommitSnapshot deletion: %v", err)
+	}
+	if _, err := store.Tombstones().RecordDeletion(ctx, "tombstone-1", deletionRevision.ID, time.Time{}); err != nil {
+		t.Fatalf("RecordDeletion: %v", err)
+	}
+
+	reappeared := testFileIndexEntry(shareID, entry.RelativePath, "new")
+	reappearedRevision := testRevision("revision-reappeared", shareID, entry.RelativePath, reappeared.ContentHash, deletionRevision.ID, 3)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{reappeared}, []core.Revision{reappearedRevision}, time.Unix(300, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot reappearance: %v", err)
+	}
+	active, err := store.Tombstones().ListActive(ctx, shareID)
+	if err != nil {
+		t.Fatalf("ListActive after reappearance: %v", err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("active tombstones after reappearance = %+v", active)
+	}
+	history, err := store.Tombstones().Get(ctx, shareID, entry.RelativePath)
+	if err != nil {
+		t.Fatalf("Get tombstone history after reappearance: %v", err)
+	}
+	if history.TombstoneRevisionID != deletionRevision.ID {
+		t.Fatalf("history tombstone revision = %s, want %s", history.TombstoneRevisionID, deletionRevision.ID)
+	}
+	retry, err := store.Tombstones().RecordDeletion(ctx, "retry-after-restore", deletionRevision.ID, time.Time{})
+	if err != nil {
+		t.Fatalf("RecordDeletion retry after reappearance: %v", err)
+	}
+	if retry.ID != "tombstone-1" {
+		t.Fatalf("retry after reappearance ID = %s, want tombstone-1", retry.ID)
+	}
+}
+
+func TestTombstoneStoreRejectsUnacceptedDeletionRevision(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+
+	fileRevision := testRevision("revision-file", shareID, "file.txt", "hash", "", 1)
+	if err := store.Revisions().RecordRevision(ctx, fileRevision); err != nil {
+		t.Fatalf("RecordRevision file: %v", err)
+	}
+	if _, err := store.Tombstones().RecordDeletion(ctx, "tombstone-file", fileRevision.ID, time.Time{}); err == nil {
+		t.Fatal("expected non-deletion revision to be rejected")
+	}
+
+	unacceptedDeletion := core.Revision{
+		ID:             "revision-unaccepted-delete",
+		ShareID:        shareID,
+		RelativePath:   "missing.txt",
+		EntryType:      core.EntryDeleted,
+		OriginDeviceID: "SOURCE-1",
+		Sequence:       2,
+		IsDeleted:      true,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := store.Revisions().RecordRevision(ctx, unacceptedDeletion); err != nil {
+		t.Fatalf("RecordRevision deletion: %v", err)
+	}
+	if _, err := store.Tombstones().RecordDeletion(ctx, "tombstone-unaccepted", unacceptedDeletion.ID, time.Time{}); err == nil {
+		t.Fatal("expected unaccepted deletion revision to be rejected")
+	}
+}
+
 func saveTestShare(t *testing.T, store *Store, shareID core.ShareID) {
 	t.Helper()
 	if err := store.Shares().SaveShare(context.Background(), storage.Share{
