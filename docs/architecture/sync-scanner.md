@@ -62,3 +62,10 @@ Tombstone behavior:
 - Treats tombstones as immutable deletion history. Repeating the same logical deletion is idempotent, while conflicting metadata is rejected.
 - Stores optional `expires_at` retention metadata but never deletes or hides expired rows automatically; cleanup and retention policy remain deferred.
 - `ListActive` returns only tombstones whose deletion revision is still current in a deleted `file_index` entry. When a path reappears, its new revision supersedes the tombstone for propagation while the historical row remains recoverable through `Get` and `List`.
+
+Revision-aware scan commit service:
+
+- Plans the scan before generating revision or tombstone IDs, so a deletion-guard block performs no writes and consumes no IDs.
+- Builds deterministic revisions with injected clock and ID sources, then commits the file-index snapshot, revisions, and derived tombstones through one authoritative storage transaction.
+- Returns the plan, accepted revisions, tombstones, commit status, blocked status, and commit time for CLI and scheduler consumers.
+- Uses optional tombstone retention as metadata only; cleanup remains outside the scan commit service.

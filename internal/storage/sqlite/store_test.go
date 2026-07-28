@@ -385,6 +385,71 @@ END`); err != nil {
 	}
 }
 
+func TestCommitSnapshotAndTombstonesRollsBackWhenTombstoneInsertFails(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+
+	initial := testFileIndexEntry(shareID, "taken.txt", "old")
+	revisionOne := testRevision("revision-one", shareID, initial.RelativePath, initial.ContentHash, "", 1)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{initial}, []core.Revision{revisionOne}, time.Unix(100, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot initial: %v", err)
+	}
+	deletedAt := time.Unix(200, 0).UTC()
+	revisionTwo := core.Revision{
+		ID:               "revision-two",
+		ShareID:          shareID,
+		RelativePath:     initial.RelativePath,
+		EntryType:        core.EntryDeleted,
+		ParentRevisionID: revisionOne.ID,
+		OriginDeviceID:   "SOURCE-1",
+		Sequence:         2,
+		IsDeleted:        true,
+		CreatedAt:        deletedAt,
+	}
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, nil, []core.Revision{revisionTwo}, deletedAt); err != nil {
+		t.Fatalf("CommitSnapshot deletion: %v", err)
+	}
+	if _, err := store.Tombstones().RecordDeletion(ctx, "tombstone-taken", revisionTwo.ID, time.Time{}); err != nil {
+		t.Fatalf("RecordDeletion: %v", err)
+	}
+
+	reappeared := testFileIndexEntry(shareID, initial.RelativePath, "new")
+	revisionThree := testRevision("revision-three", shareID, reappeared.RelativePath, reappeared.ContentHash, revisionTwo.ID, 3)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{reappeared}, []core.Revision{revisionThree}, time.Unix(300, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot reappearance: %v", err)
+	}
+
+	deletionRevision := core.Revision{
+		ID:               "revision-four",
+		ShareID:          shareID,
+		RelativePath:     initial.RelativePath,
+		EntryType:        core.EntryDeleted,
+		ParentRevisionID: revisionThree.ID,
+		OriginDeviceID:   "SOURCE-1",
+		Sequence:         4,
+		IsDeleted:        true,
+		CreatedAt:        time.Unix(400, 0).UTC(),
+	}
+	if _, err := store.FileIndex().CommitSnapshotAndTombstones(ctx, shareID, nil, []core.Revision{deletionRevision}, []storage.TombstoneRequest{{
+		ID:                  "tombstone-taken",
+		TombstoneRevisionID: deletionRevision.ID,
+	}}, time.Unix(400, 0).UTC()); err == nil {
+		t.Fatal("expected duplicate tombstone ID to fail")
+	}
+	current, err := store.FileIndex().Get(ctx, shareID, initial.RelativePath)
+	if err != nil {
+		t.Fatalf("Get current entry: %v", err)
+	}
+	if current.CurrentRevisionID != revisionThree.ID || current.IsDeleted {
+		t.Fatalf("current entry after rollback = %+v", current)
+	}
+	if _, err := store.Revisions().GetRevision(ctx, deletionRevision.ID); err == nil {
+		t.Fatal("deletion revision survived tombstone rollback")
+	}
+}
+
 func TestCommitSnapshotPersistsDeletionRevision(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)

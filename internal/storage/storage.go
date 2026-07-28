@@ -37,7 +37,18 @@ type RevisionStore interface {
 	GetCurrentRevision(ctx context.Context, shareID core.ShareID, relativePath string) (core.Revision, error)
 }
 
+type TombstoneRequest struct {
+	ID                  core.TombstoneID
+	TombstoneRevisionID core.RevisionID
+	ExpiresAt           time.Time
+}
+
+type AuthoritativeStateStore interface {
+	CommitSnapshotAndTombstones(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, revisions []core.Revision, tombstones []TombstoneRequest, scannedAt time.Time) ([]Tombstone, error)
+}
+
 type FileIndexStore interface {
+	AuthoritativeStateStore
 	SaveSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, scannedAt time.Time) error
 	CommitSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, revisions []core.Revision, scannedAt time.Time) error
 	Get(ctx context.Context, shareID core.ShareID, relativePath string) (core.FileIndexEntry, error)

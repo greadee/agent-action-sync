@@ -331,35 +331,50 @@ func (store fileIndexStore) CommitSnapshot(
 	revisions []core.Revision,
 	scannedAt time.Time,
 ) error {
+	_, err := store.CommitSnapshotAndTombstones(ctx, shareID, entries, revisions, nil, scannedAt)
+	return err
+}
+
+func (store fileIndexStore) CommitSnapshotAndTombstones(
+	ctx context.Context,
+	shareID core.ShareID,
+	entries []core.FileIndexEntry,
+	revisions []core.Revision,
+	tombstoneRequests []storage.TombstoneRequest,
+	scannedAt time.Time,
+) ([]storage.Tombstone, error) {
 	if shareID == "" {
-		return errors.New("share id is required")
+		return nil, errors.New("share id is required")
 	}
 	if scannedAt.IsZero() {
-		return errors.New("scan time is required")
+		return nil, errors.New("scan time is required")
 	}
 	scannedAt = scannedAt.UTC()
 
 	currentByPath, err := validateCommitEntries(shareID, entries)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	revisionsByPath, err := validateCommitRevisions(shareID, revisions)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if err := validateTombstoneRequests(tombstoneRequests); err != nil {
+		return nil, err
 	}
 
 	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin revision-aware file index snapshot: %w", err)
+		return nil, fmt.Errorf("begin revision-aware file index snapshot: %w", err)
 	}
 	defer tx.Rollback()
 
 	if err := requireShare(ctx, tx, shareID); err != nil {
-		return err
+		return nil, err
 	}
 	previousByPath, err := listFileIndexEntries(ctx, tx, shareID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	acceptedByPath := make(map[string]core.Revision, len(revisionsByPath))
@@ -369,18 +384,18 @@ func (store fileIndexStore) CommitSnapshot(
 		revision, hasRevision := revisionsByPath[path]
 		switch {
 		case changed && !hasRevision:
-			return fmt.Errorf("file index entry %s changed without a revision", path)
+			return nil, fmt.Errorf("file index entry %s changed without a revision", path)
 		case !changed && hasRevision:
-			return fmt.Errorf("file index entry %s is unchanged but has revision %s", path, revision.ID)
+			return nil, fmt.Errorf("file index entry %s is unchanged but has revision %s", path, revision.ID)
 		case hasRevision:
 			if err := validateCurrentRevision(revision, entry, previous); err != nil {
-				return err
+				return nil, err
 			}
 			entry.CurrentRevisionID = revision.ID
 			acceptedByPath[path] = revision
 		case existed:
 			if entry.CurrentRevisionID != "" && entry.CurrentRevisionID != previous.CurrentRevisionID {
-				return fmt.Errorf("file index entry %s changes current revision without a new revision", path)
+				return nil, fmt.Errorf("file index entry %s changes current revision without a new revision", path)
 			}
 			entry.CurrentRevisionID = previous.CurrentRevisionID
 		}
@@ -393,30 +408,34 @@ func (store fileIndexStore) CommitSnapshot(
 		}
 		revision, ok := revisionsByPath[path]
 		if !ok {
-			return fmt.Errorf("deleted file index entry %s is missing a deletion revision", path)
+			return nil, fmt.Errorf("deleted file index entry %s is missing a deletion revision", path)
 		}
 		if err := validateDeletionRevision(revision, previous); err != nil {
-			return err
+			return nil, err
 		}
 		acceptedByPath[path] = revision
 	}
 	if len(acceptedByPath) != len(revisionsByPath) {
 		for path, revision := range revisionsByPath {
 			if _, accepted := acceptedByPath[path]; !accepted {
-				return fmt.Errorf("revision %s does not describe a snapshot change for %s", revision.ID, path)
+				return nil, fmt.Errorf("revision %s does not describe a snapshot change for %s", revision.ID, path)
 			}
 		}
+	}
+	tombstones, err := buildAcceptedTombstones(shareID, acceptedByPath, tombstoneRequests)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, revision := range revisions {
 		if err := insertRevision(ctx, tx, revision); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, entry := range entries {
 		entry = currentByPath[entry.RelativePath]
 		if err := upsertFileIndexEntry(ctx, tx, shareID, entry, scannedAt); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for path, previous := range previousByPath {
@@ -430,14 +449,19 @@ SET entry_type = ?, current_revision_id = ?, is_deleted = 1, deleted_at = ?, las
 WHERE share_id = ? AND relative_path = ?`,
 			core.EntryDeleted, revision.ID, formatTime(scannedAt), formatTime(scannedAt), shareID, path,
 		); err != nil {
-			return fmt.Errorf("mark file index entry %s deleted: %w", path, err)
+			return nil, fmt.Errorf("mark file index entry %s deleted: %w", path, err)
+		}
+	}
+	for _, tombstone := range tombstones {
+		if err := insertTombstone(ctx, tx, tombstone); err != nil {
+			return nil, err
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit revision-aware file index snapshot: %w", err)
+		return nil, fmt.Errorf("commit revision-aware file index snapshot: %w", err)
 	}
-	return nil
+	return tombstones, nil
 }
 
 func (store fileIndexStore) SaveSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, scannedAt time.Time) error {
@@ -674,6 +698,91 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return nil
 }
 
+func validateTombstoneRequests(requests []storage.TombstoneRequest) error {
+	seenIDs := make(map[core.TombstoneID]struct{}, len(requests))
+	seenRevisions := make(map[core.RevisionID]struct{}, len(requests))
+	for _, request := range requests {
+		if request.ID == "" {
+			return errors.New("tombstone request id is required")
+		}
+		if request.TombstoneRevisionID == "" {
+			return errors.New("tombstone request revision id is required")
+		}
+		if _, exists := seenIDs[request.ID]; exists {
+			return fmt.Errorf("duplicate tombstone request id %s", request.ID)
+		}
+		if _, exists := seenRevisions[request.TombstoneRevisionID]; exists {
+			return fmt.Errorf("duplicate tombstone request revision %s", request.TombstoneRevisionID)
+		}
+		seenIDs[request.ID] = struct{}{}
+		seenRevisions[request.TombstoneRevisionID] = struct{}{}
+	}
+	return nil
+}
+
+func buildAcceptedTombstones(
+	shareID core.ShareID,
+	acceptedByPath map[string]core.Revision,
+	requests []storage.TombstoneRequest,
+) ([]storage.Tombstone, error) {
+	tombstones := make([]storage.Tombstone, 0, len(requests))
+	for _, request := range requests {
+		var revision core.Revision
+		found := false
+		for _, candidate := range acceptedByPath {
+			if candidate.ID == request.TombstoneRevisionID {
+				revision = candidate
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("tombstone request revision %s is not part of the accepted snapshot", request.TombstoneRevisionID)
+		}
+		if revision.ShareID != shareID {
+			return nil, fmt.Errorf("tombstone request revision %s belongs to share %s, want %s", revision.ID, revision.ShareID, shareID)
+		}
+		if revision.EntryType != core.EntryDeleted || !revision.IsDeleted {
+			return nil, fmt.Errorf("tombstone request revision %s is not a deletion revision", revision.ID)
+		}
+		if revision.CreatedAt.IsZero() {
+			return nil, fmt.Errorf("tombstone request revision %s has no creation time", revision.ID)
+		}
+		expiresAt := request.ExpiresAt
+		if !expiresAt.IsZero() {
+			expiresAt = expiresAt.UTC()
+			if expiresAt.Before(revision.CreatedAt) {
+				return nil, fmt.Errorf("tombstone request %s expires before deletion", request.ID)
+			}
+		}
+		tombstones = append(tombstones, storage.Tombstone{
+			ID:                  request.ID,
+			ShareID:             shareID,
+			RelativePath:        revision.RelativePath,
+			DeletedByDeviceID:   revision.OriginDeviceID,
+			BaseRevisionID:      revision.ParentRevisionID,
+			TombstoneRevisionID: revision.ID,
+			DeletedAt:           revision.CreatedAt.UTC(),
+			ExpiresAt:           expiresAt,
+		})
+	}
+	return tombstones, nil
+}
+
+func insertTombstone(ctx context.Context, tx *sql.Tx, tombstone storage.Tombstone) error {
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO tombstones(tombstone_id, share_id, relative_path, deleted_by_device_id, base_revision_id, tombstone_revision_id, deleted_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		tombstone.ID, tombstone.ShareID, tombstone.RelativePath, tombstone.DeletedByDeviceID,
+		nullableString(string(tombstone.BaseRevisionID)), tombstone.TombstoneRevisionID,
+		formatTime(tombstone.DeletedAt), nullableTime(tombstone.ExpiresAt),
+	)
+	if err != nil {
+		return fmt.Errorf("record tombstone %s: %w", tombstone.ID, err)
+	}
+	return nil
+}
+
 func upsertFileIndexEntry(ctx context.Context, tx *sql.Tx, shareID core.ShareID, entry core.FileIndexEntry, scannedAt time.Time) error {
 	lastScannedAt := entry.LastScannedAt
 	if lastScannedAt.IsZero() {
@@ -834,15 +943,8 @@ WHERE share_id = ? AND relative_path = ? AND tombstone_revision_id = ?`,
 		return storage.Tombstone{}, fmt.Errorf("deletion revision %s is not the accepted current revision", tombstoneRevisionID)
 	}
 
-	_, err = tx.ExecContext(ctx, `
-INSERT INTO tombstones(tombstone_id, share_id, relative_path, deleted_by_device_id, base_revision_id, tombstone_revision_id, deleted_at, expires_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		tombstone.ID, tombstone.ShareID, tombstone.RelativePath, tombstone.DeletedByDeviceID,
-		nullableString(string(tombstone.BaseRevisionID)), tombstone.TombstoneRevisionID,
-		formatTime(tombstone.DeletedAt), nullableTime(tombstone.ExpiresAt),
-	)
-	if err != nil {
-		return storage.Tombstone{}, fmt.Errorf("record tombstone %s: %w", tombstoneID, err)
+	if err := insertTombstone(ctx, tx, tombstone); err != nil {
+		return storage.Tombstone{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return storage.Tombstone{}, fmt.Errorf("commit tombstone record %s: %w", tombstoneID, err)
