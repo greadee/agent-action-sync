@@ -35,9 +35,9 @@ Deletion guard behavior:
 Scan planning behavior:
 
 - Loads the previous file-index snapshot, scans the share, and reconciles both states.
-- Applies deletion limits before writing a new snapshot.
-- Persists the snapshot only when the deletion guard allows it.
-- Returns the scan, reconciliation, and guard decision so callers can present or propagate the approved changes.
+- Applies deletion limits before a snapshot is eligible for commit.
+- Never persists a bare snapshot; paths that changed require revisions before storage can advance the index.
+- Returns the scan, reconciliation, and guard decision so a revision-aware commit service can persist approved changes.
 
 Revision-building behavior:
 
@@ -45,3 +45,12 @@ Revision-building behavior:
 - Associates every revision with its source device and a caller-provided sequence range.
 - Links updates and deletions to the previously recorded revision for that path.
 - Represents deletions as `deleted` revisions, ready for later tombstone propagation.
+
+Revision-aware storage behavior:
+
+- Records accepted revisions and advances the file-index snapshot in one SQLite transaction.
+- Requires every added, modified, reappeared, or deleted path to have one matching revision.
+- Preserves the current revision pointer for unchanged paths and assigns the accepted revision ID to changed paths.
+- Keeps deleted paths in the index, points them at a deletion revision, and records deletion time.
+- Rejects unknown or mismatched share IDs, mismatched revision metadata, stale parent revisions, and revisions for unchanged paths.
+- Rolls back the complete revision and index update when validation or persistence fails.

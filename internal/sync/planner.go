@@ -5,11 +5,14 @@ import (
 	"fmt"
 
 	"syncgate/internal/core"
-	"syncgate/internal/storage"
 )
 
+type FileIndexReader interface {
+	List(ctx context.Context, shareID core.ShareID) ([]core.FileIndexEntry, error)
+}
+
 type ScanPlanner struct {
-	Index storage.FileIndexStore
+	Index FileIndexReader
 	Scan  func(ScanOptions) (ScanResult, error)
 }
 
@@ -19,10 +22,9 @@ type PlanScanOptions struct {
 }
 
 type ScanPlan struct {
-	Scan              ScanResult
-	Reconciliation    ReconcileResult
-	DeletionDecision  DeletionGuardDecision
-	SnapshotPersisted bool
+	Scan             ScanResult
+	Reconciliation   ReconcileResult
+	DeletionDecision DeletionGuardDecision
 }
 
 func (planner ScanPlanner) Plan(ctx context.Context, options PlanScanOptions) (ScanPlan, error) {
@@ -62,9 +64,5 @@ func (planner ScanPlanner) Plan(ctx context.Context, options PlanScanOptions) (S
 	if !decision.Allowed {
 		return plan, nil
 	}
-	if err := planner.Index.SaveSnapshot(ctx, options.ShareID, result.Entries, result.ScannedAt); err != nil {
-		return ScanPlan{}, fmt.Errorf("save file index snapshot: %w", err)
-	}
-	plan.SnapshotPersisted = true
 	return plan, nil
 }

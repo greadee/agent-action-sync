@@ -262,6 +262,245 @@ func TestStoreMarksMissingFileIndexEntriesDeleted(t *testing.T) {
 	}
 }
 
+func TestCommitSnapshotRecordsRevisionsAndAdvancesCurrentPointers(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+
+	firstScan := time.Unix(100, 0).UTC()
+	firstEntries := []core.FileIndexEntry{
+		testFileIndexEntry(shareID, "change.txt", "old"),
+		testFileIndexEntry(shareID, "keep.txt", "keep"),
+	}
+	firstRevisions := []core.Revision{
+		testRevision("revision-change-1", shareID, "change.txt", "old", "", 1),
+		testRevision("revision-keep-1", shareID, "keep.txt", "keep", "", 2),
+	}
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, firstEntries, firstRevisions, firstScan); err != nil {
+		t.Fatalf("CommitSnapshot first: %v", err)
+	}
+
+	secondScan := time.Unix(200, 0).UTC()
+	secondEntries := []core.FileIndexEntry{
+		testFileIndexEntry(shareID, "change.txt", "new"),
+		testFileIndexEntry(shareID, "keep.txt", "keep"),
+	}
+	secondRevisions := []core.Revision{
+		testRevision("revision-change-2", shareID, "change.txt", "new", "revision-change-1", 3),
+	}
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, secondEntries, secondRevisions, secondScan); err != nil {
+		t.Fatalf("CommitSnapshot second: %v", err)
+	}
+
+	changed, err := store.FileIndex().Get(ctx, shareID, "change.txt")
+	if err != nil {
+		t.Fatalf("Get changed entry: %v", err)
+	}
+	if changed.ContentHash != "new" || changed.CurrentRevisionID != "revision-change-2" {
+		t.Fatalf("changed entry = %+v", changed)
+	}
+	kept, err := store.FileIndex().Get(ctx, shareID, "keep.txt")
+	if err != nil {
+		t.Fatalf("Get kept entry: %v", err)
+	}
+	if kept.CurrentRevisionID != "revision-keep-1" {
+		t.Fatalf("kept current revision = %s", kept.CurrentRevisionID)
+	}
+}
+
+func TestCommitSnapshotCurrentRevisionLookup(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+
+	entry := testFileIndexEntry(shareID, "payload.bin", "hash")
+	revision := testRevision("revision-1", shareID, entry.RelativePath, entry.ContentHash, "", 1)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{entry}, []core.Revision{revision}, time.Unix(100, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot: %v", err)
+	}
+
+	current, err := store.Revisions().GetCurrentRevision(ctx, shareID, entry.RelativePath)
+	if err != nil {
+		t.Fatalf("GetCurrentRevision: %v", err)
+	}
+	if current.ID != revision.ID || current.ContentHash != revision.ContentHash {
+		t.Fatalf("current revision = %+v", current)
+	}
+}
+
+func TestCommitSnapshotRollsBackRevisionAndIndexOnError(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+
+	oldEntry := testFileIndexEntry(shareID, "existing.txt", "old")
+	oldRevision := testRevision("revision-old", shareID, oldEntry.RelativePath, oldEntry.ContentHash, "", 1)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{oldEntry}, []core.Revision{oldRevision}, time.Unix(100, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot initial: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+CREATE TRIGGER fail_existing_index_update
+BEFORE UPDATE ON file_index
+WHEN NEW.relative_path = 'existing.txt'
+BEGIN
+    SELECT RAISE(ABORT, 'forced index failure');
+END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	changedEntry := testFileIndexEntry(shareID, oldEntry.RelativePath, "new")
+	addedEntry := testFileIndexEntry(shareID, "added.txt", "added")
+	revisions := []core.Revision{
+		testRevision("revision-added", shareID, addedEntry.RelativePath, addedEntry.ContentHash, "", 2),
+		testRevision("revision-changed", shareID, changedEntry.RelativePath, changedEntry.ContentHash, oldRevision.ID, 3),
+	}
+	err := store.FileIndex().CommitSnapshot(
+		ctx,
+		shareID,
+		[]core.FileIndexEntry{addedEntry, changedEntry},
+		revisions,
+		time.Unix(200, 0).UTC(),
+	)
+	if err == nil {
+		t.Fatal("expected forced index failure")
+	}
+
+	current, err := store.FileIndex().Get(ctx, shareID, oldEntry.RelativePath)
+	if err != nil {
+		t.Fatalf("Get existing entry: %v", err)
+	}
+	if current.ContentHash != oldEntry.ContentHash || current.CurrentRevisionID != oldRevision.ID {
+		t.Fatalf("existing entry changed after rollback: %+v", current)
+	}
+	if _, err := store.FileIndex().Get(ctx, shareID, addedEntry.RelativePath); err == nil {
+		t.Fatal("added entry survived rollback")
+	}
+	for _, revision := range revisions {
+		if _, err := store.Revisions().GetRevision(ctx, revision.ID); err == nil {
+			t.Fatalf("inserted revision %s survived rollback", revision.ID)
+		}
+	}
+}
+
+func TestCommitSnapshotPersistsDeletionRevision(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+
+	entry := testFileIndexEntry(shareID, "gone.txt", "old")
+	initialRevision := testRevision("revision-1", shareID, entry.RelativePath, entry.ContentHash, "", 1)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{entry}, []core.Revision{initialRevision}, time.Unix(100, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot initial: %v", err)
+	}
+
+	deletedAt := time.Unix(200, 0).UTC()
+	deletionRevision := core.Revision{
+		ID:               "revision-delete",
+		ShareID:          shareID,
+		RelativePath:     entry.RelativePath,
+		EntryType:        core.EntryDeleted,
+		ParentRevisionID: initialRevision.ID,
+		OriginDeviceID:   "DEVICE-1",
+		Sequence:         2,
+		IsDeleted:        true,
+		CreatedAt:        deletedAt,
+	}
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, nil, []core.Revision{deletionRevision}, deletedAt); err != nil {
+		t.Fatalf("CommitSnapshot deletion: %v", err)
+	}
+
+	deleted, err := store.FileIndex().Get(ctx, shareID, entry.RelativePath)
+	if err != nil {
+		t.Fatalf("Get deleted entry: %v", err)
+	}
+	if !deleted.IsDeleted || deleted.EntryType != core.EntryDeleted || deleted.CurrentRevisionID != deletionRevision.ID {
+		t.Fatalf("deleted entry = %+v", deleted)
+	}
+	if !deleted.DeletedAt.Equal(deletedAt) {
+		t.Fatalf("deleted at = %s, want %s", deleted.DeletedAt, deletedAt)
+	}
+	current, err := store.Revisions().GetCurrentRevision(ctx, shareID, entry.RelativePath)
+	if err != nil {
+		t.Fatalf("GetCurrentRevision deletion: %v", err)
+	}
+	if current.ID != deletionRevision.ID || !current.IsDeleted {
+		t.Fatalf("current deletion revision = %+v", current)
+	}
+}
+
+func TestCommitSnapshotRejectsInvalidAndMismatchedShareIDs(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-1")
+	saveTestShare(t, store, shareID)
+	scannedAt := time.Unix(100, 0).UTC()
+
+	tests := []struct {
+		name       string
+		commitID   core.ShareID
+		entryID    core.ShareID
+		revisionID core.ShareID
+	}{
+		{name: "unknown share", commitID: "missing", entryID: "missing", revisionID: "missing"},
+		{name: "entry mismatch", commitID: shareID, entryID: "other", revisionID: shareID},
+		{name: "revision mismatch", commitID: shareID, entryID: shareID, revisionID: "other"},
+		{name: "empty entry share", commitID: shareID, revisionID: shareID},
+		{name: "empty revision share", commitID: shareID, entryID: shareID},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			entry := testFileIndexEntry(test.entryID, "file.txt", "hash")
+			revision := testRevision(core.RevisionID("revision-"+test.name), test.revisionID, entry.RelativePath, entry.ContentHash, "", 1)
+			if err := store.FileIndex().CommitSnapshot(ctx, test.commitID, []core.FileIndexEntry{entry}, []core.Revision{revision}, scannedAt); err == nil {
+				t.Fatal("expected commit to fail")
+			}
+		})
+	}
+}
+
+func saveTestShare(t *testing.T, store *Store, shareID core.ShareID) {
+	t.Helper()
+	if err := store.Shares().SaveShare(context.Background(), storage.Share{
+		ID:       shareID,
+		Name:     "Source",
+		RootPath: t.TempDir(),
+		Mode:     storage.ShareOneWaySource,
+	}); err != nil {
+		t.Fatalf("SaveShare: %v", err)
+	}
+}
+
+func testFileIndexEntry(shareID core.ShareID, relativePath, hash string) core.FileIndexEntry {
+	return core.FileIndexEntry{
+		ShareID:       shareID,
+		RelativePath:  relativePath,
+		EntryType:     core.EntryFile,
+		Size:          int64(len(hash)),
+		ContentHash:   hash,
+		HashAlgorithm: "sha256",
+	}
+}
+
+func testRevision(id core.RevisionID, shareID core.ShareID, relativePath, hash string, parent core.RevisionID, sequence int64) core.Revision {
+	return core.Revision{
+		ID:               id,
+		ShareID:          shareID,
+		RelativePath:     relativePath,
+		EntryType:        core.EntryFile,
+		Size:             int64(len(hash)),
+		ContentHash:      hash,
+		HashAlgorithm:    "sha256",
+		ParentRevisionID: parent,
+		OriginDeviceID:   "DEVICE-1",
+		Sequence:         sequence,
+		CreatedAt:        time.Unix(100+sequence, 0).UTC(),
+	}
+}
+
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	store, err := Open(filepath.Join(t.TempDir(), "syncgate.db"))

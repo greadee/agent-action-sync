@@ -38,6 +38,7 @@ type RevisionStore interface {
 
 type FileIndexStore interface {
 	SaveSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, scannedAt time.Time) error
+	CommitSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, revisions []core.Revision, scannedAt time.Time) error
 	Get(ctx context.Context, shareID core.ShareID, relativePath string) (core.FileIndexEntry, error)
 	List(ctx context.Context, shareID core.ShareID) ([]core.FileIndexEntry, error)
 }

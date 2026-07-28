@@ -320,6 +320,122 @@ type fileIndexStore struct {
 	db *sql.DB
 }
 
+func (store fileIndexStore) CommitSnapshot(
+	ctx context.Context,
+	shareID core.ShareID,
+	entries []core.FileIndexEntry,
+	revisions []core.Revision,
+	scannedAt time.Time,
+) error {
+	if shareID == "" {
+		return errors.New("share id is required")
+	}
+	if scannedAt.IsZero() {
+		return errors.New("scan time is required")
+	}
+	scannedAt = scannedAt.UTC()
+
+	currentByPath, err := validateCommitEntries(shareID, entries)
+	if err != nil {
+		return err
+	}
+	revisionsByPath, err := validateCommitRevisions(shareID, revisions)
+	if err != nil {
+		return err
+	}
+
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin revision-aware file index snapshot: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := requireShare(ctx, tx, shareID); err != nil {
+		return err
+	}
+	previousByPath, err := listFileIndexEntries(ctx, tx, shareID)
+	if err != nil {
+		return err
+	}
+
+	acceptedByPath := make(map[string]core.Revision, len(revisionsByPath))
+	for path, entry := range currentByPath {
+		previous, existed := previousByPath[path]
+		changed := !existed || !fileIndexEntriesEquivalent(previous, entry)
+		revision, hasRevision := revisionsByPath[path]
+		switch {
+		case changed && !hasRevision:
+			return fmt.Errorf("file index entry %s changed without a revision", path)
+		case !changed && hasRevision:
+			return fmt.Errorf("file index entry %s is unchanged but has revision %s", path, revision.ID)
+		case hasRevision:
+			if err := validateCurrentRevision(revision, entry, previous); err != nil {
+				return err
+			}
+			entry.CurrentRevisionID = revision.ID
+			acceptedByPath[path] = revision
+		case existed:
+			if entry.CurrentRevisionID != "" && entry.CurrentRevisionID != previous.CurrentRevisionID {
+				return fmt.Errorf("file index entry %s changes current revision without a new revision", path)
+			}
+			entry.CurrentRevisionID = previous.CurrentRevisionID
+		}
+		currentByPath[path] = entry
+	}
+
+	for path, previous := range previousByPath {
+		if _, present := currentByPath[path]; present || previous.IsDeleted {
+			continue
+		}
+		revision, ok := revisionsByPath[path]
+		if !ok {
+			return fmt.Errorf("deleted file index entry %s is missing a deletion revision", path)
+		}
+		if err := validateDeletionRevision(revision, previous); err != nil {
+			return err
+		}
+		acceptedByPath[path] = revision
+	}
+	if len(acceptedByPath) != len(revisionsByPath) {
+		for path, revision := range revisionsByPath {
+			if _, accepted := acceptedByPath[path]; !accepted {
+				return fmt.Errorf("revision %s does not describe a snapshot change for %s", revision.ID, path)
+			}
+		}
+	}
+
+	for _, revision := range revisions {
+		if err := insertRevision(ctx, tx, revision); err != nil {
+			return err
+		}
+	}
+	for _, entry := range entries {
+		entry = currentByPath[entry.RelativePath]
+		if err := upsertFileIndexEntry(ctx, tx, shareID, entry, scannedAt); err != nil {
+			return err
+		}
+	}
+	for path, previous := range previousByPath {
+		if _, present := currentByPath[path]; present || previous.IsDeleted {
+			continue
+		}
+		revision := acceptedByPath[path]
+		if _, err := tx.ExecContext(ctx, `
+UPDATE file_index
+SET entry_type = ?, current_revision_id = ?, is_deleted = 1, deleted_at = ?, last_scanned_at = ?
+WHERE share_id = ? AND relative_path = ?`,
+			core.EntryDeleted, revision.ID, formatTime(scannedAt), formatTime(scannedAt), shareID, path,
+		); err != nil {
+			return fmt.Errorf("mark file index entry %s deleted: %w", path, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit revision-aware file index snapshot: %w", err)
+	}
+	return nil
+}
+
 func (store fileIndexStore) SaveSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, scannedAt time.Time) error {
 	if shareID == "" {
 		return errors.New("share id is required")
@@ -402,6 +518,210 @@ WHERE share_id = ?
 		return fmt.Errorf("commit file index snapshot: %w", err)
 	}
 	return nil
+}
+
+type queryContext interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func requireShare(ctx context.Context, tx *sql.Tx, shareID core.ShareID) error {
+	var found core.ShareID
+	if err := tx.QueryRowContext(ctx, `SELECT share_id FROM shares WHERE share_id = ?`, shareID).Scan(&found); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("share %s not found", shareID)
+		}
+		return fmt.Errorf("look up share %s: %w", shareID, err)
+	}
+	return nil
+}
+
+func validateCommitEntries(shareID core.ShareID, entries []core.FileIndexEntry) (map[string]core.FileIndexEntry, error) {
+	byPath := make(map[string]core.FileIndexEntry, len(entries))
+	for _, entry := range entries {
+		if entry.ShareID == "" {
+			return nil, fmt.Errorf("file index entry %s has empty share id", entry.RelativePath)
+		}
+		if entry.ShareID != shareID {
+			return nil, fmt.Errorf("file index entry %s belongs to share %s, want %s", entry.RelativePath, entry.ShareID, shareID)
+		}
+		if strings.TrimSpace(entry.RelativePath) == "" {
+			return nil, errors.New("file index entry relative path is required")
+		}
+		if entry.RelativePath != strings.TrimSpace(entry.RelativePath) {
+			return nil, fmt.Errorf("file index entry path %q is not normalized", entry.RelativePath)
+		}
+		if !validActiveEntryType(entry.EntryType) {
+			return nil, fmt.Errorf("file index entry %s has invalid entry type %q", entry.RelativePath, entry.EntryType)
+		}
+		if entry.IsDeleted || !entry.DeletedAt.IsZero() {
+			return nil, fmt.Errorf("active snapshot entry %s cannot be marked deleted", entry.RelativePath)
+		}
+		if _, exists := byPath[entry.RelativePath]; exists {
+			return nil, fmt.Errorf("file index snapshot contains duplicate path %s", entry.RelativePath)
+		}
+		byPath[entry.RelativePath] = entry
+	}
+	return byPath, nil
+}
+
+func validateCommitRevisions(shareID core.ShareID, revisions []core.Revision) (map[string]core.Revision, error) {
+	byPath := make(map[string]core.Revision, len(revisions))
+	for _, revision := range revisions {
+		if revision.ID == "" {
+			return nil, errors.New("revision id is required")
+		}
+		if revision.ShareID == "" {
+			return nil, fmt.Errorf("revision %s has empty share id", revision.ID)
+		}
+		if revision.ShareID != shareID {
+			return nil, fmt.Errorf("revision %s belongs to share %s, want %s", revision.ID, revision.ShareID, shareID)
+		}
+		if strings.TrimSpace(revision.RelativePath) == "" {
+			return nil, fmt.Errorf("revision %s relative path is required", revision.ID)
+		}
+		if revision.RelativePath != strings.TrimSpace(revision.RelativePath) {
+			return nil, fmt.Errorf("revision %s path %q is not normalized", revision.ID, revision.RelativePath)
+		}
+		if revision.OriginDeviceID == "" {
+			return nil, fmt.Errorf("revision %s origin device id is required", revision.ID)
+		}
+		if revision.Sequence <= 0 {
+			return nil, fmt.Errorf("revision %s sequence must be positive", revision.ID)
+		}
+		if revision.CreatedAt.IsZero() {
+			return nil, fmt.Errorf("revision %s creation time is required", revision.ID)
+		}
+		if _, exists := byPath[revision.RelativePath]; exists {
+			return nil, fmt.Errorf("multiple revisions supplied for path %s", revision.RelativePath)
+		}
+		byPath[revision.RelativePath] = revision
+	}
+	return byPath, nil
+}
+
+func validateCurrentRevision(revision core.Revision, entry, previous core.FileIndexEntry) error {
+	if revision.IsDeleted || revision.EntryType == core.EntryDeleted {
+		return fmt.Errorf("revision %s for active path %s is marked deleted", revision.ID, entry.RelativePath)
+	}
+	if revision.EntryType != entry.EntryType ||
+		revision.Size != entry.Size ||
+		revision.ContentHash != entry.ContentHash ||
+		revision.HashAlgorithm != entry.HashAlgorithm {
+		return fmt.Errorf("revision %s does not match file index entry %s", revision.ID, entry.RelativePath)
+	}
+	if revision.ParentRevisionID != previous.CurrentRevisionID {
+		return fmt.Errorf("revision %s parent is %s, want %s for %s", revision.ID, revision.ParentRevisionID, previous.CurrentRevisionID, entry.RelativePath)
+	}
+	if entry.CurrentRevisionID != "" && entry.CurrentRevisionID != revision.ID {
+		return fmt.Errorf("file index entry %s points to revision %s, want %s", entry.RelativePath, entry.CurrentRevisionID, revision.ID)
+	}
+	return nil
+}
+
+func validateDeletionRevision(revision core.Revision, previous core.FileIndexEntry) error {
+	if !revision.IsDeleted || revision.EntryType != core.EntryDeleted {
+		return fmt.Errorf("revision %s for deleted path %s is not a deletion revision", revision.ID, previous.RelativePath)
+	}
+	if revision.ParentRevisionID != previous.CurrentRevisionID {
+		return fmt.Errorf("deletion revision %s parent is %s, want %s for %s", revision.ID, revision.ParentRevisionID, previous.CurrentRevisionID, previous.RelativePath)
+	}
+	if revision.Size != 0 || revision.ContentHash != "" || revision.HashAlgorithm != "" {
+		return fmt.Errorf("deletion revision %s contains file content metadata", revision.ID)
+	}
+	return nil
+}
+
+func validActiveEntryType(entryType core.EntryType) bool {
+	switch entryType {
+	case core.EntryFile, core.EntryDirectory, core.EntrySymlinkUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+func fileIndexEntriesEquivalent(previous, current core.FileIndexEntry) bool {
+	if previous.IsDeleted || previous.EntryType != current.EntryType {
+		return false
+	}
+	switch previous.EntryType {
+	case core.EntryFile:
+		return previous.Size == current.Size &&
+			previous.ContentHash == current.ContentHash &&
+			previous.HashAlgorithm == current.HashAlgorithm
+	case core.EntrySymlinkUnsupported:
+		return previous.FileIdentity == current.FileIdentity
+	default:
+		return true
+	}
+}
+
+func insertRevision(ctx context.Context, tx *sql.Tx, revision core.Revision) error {
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO revisions(revision_id, share_id, relative_path, entry_type, size, content_hash, hash_algorithm, parent_revision_id, origin_device_id, sequence, is_deleted, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		revision.ID, revision.ShareID, revision.RelativePath, revision.EntryType, revision.Size, revision.ContentHash,
+		revision.HashAlgorithm, nullableString(string(revision.ParentRevisionID)), revision.OriginDeviceID, revision.Sequence,
+		boolInt(revision.IsDeleted), formatTime(revision.CreatedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("record revision %s: %w", revision.ID, err)
+	}
+	return nil
+}
+
+func upsertFileIndexEntry(ctx context.Context, tx *sql.Tx, shareID core.ShareID, entry core.FileIndexEntry, scannedAt time.Time) error {
+	lastScannedAt := entry.LastScannedAt
+	if lastScannedAt.IsZero() {
+		lastScannedAt = scannedAt
+	}
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO file_index(share_id, relative_path, entry_type, size, modified_time, creation_time, file_identity, content_hash, hash_algorithm, current_revision_id, is_deleted, deleted_at, last_scanned_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+ON CONFLICT(share_id, relative_path) DO UPDATE SET
+    entry_type = excluded.entry_type,
+    size = excluded.size,
+    modified_time = excluded.modified_time,
+    creation_time = excluded.creation_time,
+    file_identity = excluded.file_identity,
+    content_hash = excluded.content_hash,
+    hash_algorithm = excluded.hash_algorithm,
+    current_revision_id = excluded.current_revision_id,
+    is_deleted = 0,
+    deleted_at = NULL,
+    last_scanned_at = excluded.last_scanned_at`,
+		shareID, entry.RelativePath, entry.EntryType, entry.Size, nullableTime(entry.ModifiedTime),
+		nullableTime(entry.CreationTime), nullableString(entry.FileIdentity), nullableString(entry.ContentHash),
+		nullableString(entry.HashAlgorithm), nullableString(string(entry.CurrentRevisionID)), formatTime(lastScannedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("save file index entry %s: %w", entry.RelativePath, err)
+	}
+	return nil
+}
+
+func listFileIndexEntries(ctx context.Context, query queryContext, shareID core.ShareID) (map[string]core.FileIndexEntry, error) {
+	rows, err := query.QueryContext(ctx, `
+SELECT share_id, relative_path, entry_type, size, modified_time, creation_time, file_identity, content_hash, hash_algorithm, current_revision_id, is_deleted, deleted_at, last_scanned_at
+FROM file_index
+WHERE share_id = ?`, shareID)
+	if err != nil {
+		return nil, fmt.Errorf("list file index entries for share %s: %w", shareID, err)
+	}
+	defer rows.Close()
+
+	byPath := make(map[string]core.FileIndexEntry)
+	for rows.Next() {
+		entry, err := scanFileIndexEntryRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		byPath[entry.RelativePath] = entry
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate file index entries: %w", err)
+	}
+	return byPath, nil
 }
 
 func (store fileIndexStore) Get(ctx context.Context, shareID core.ShareID, relativePath string) (core.FileIndexEntry, error) {
