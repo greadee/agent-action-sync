@@ -37,6 +37,7 @@
 | Replay attack | Network attacker replays old messages | Peer transport | TLS or QUIC session security; transfer IDs | Protocol implementation bugs | Duplicate and replay message tests |
 | Chunk corruption | Network or malicious peer sends bad bytes | Chunk data | Per-chunk hash and whole-file hash | Hash implementation bugs | Corruption tests |
 | Destination overwrite | Crash or malicious transfer targets existing file | Commit path | Write partial file, verify, atomic rename, version old file | Filesystem-specific rename behavior | Crash-at-commit tests |
+| Target-side drift overwrite | Authoritative source change collides with a locally changed target | One-way sync preparation | Receiver validates one-way modes, action capabilities, and revision ancestry; drift follows explicit reject, preserve-copy, or report-only policy | Conflict-copy and apply executors are not yet implemented | One-way policy branch tests |
 | Mass deletion | Sync propagates accidental removal | Sync scan | Tombstones and deletion circuit breaker | Not implemented until sync phase | Deletion threshold tests |
 | Ransomware propagation | Local malware mutates many files | Sync engine | Version history and modification-rate pause planned | Detection false negatives | Modification-rate tests |
 | Resource exhaustion | Peer sends huge manifests or chunks | Protocol decoder | Bounded message sizes and quotas | Limit tuning | Oversized message tests |
