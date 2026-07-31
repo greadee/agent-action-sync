@@ -1,0 +1,10 @@
+{
+  "protocol_version": 1,
+  "request_id": "request-101",
+  "source_device_id": "DEVICE-1",
+  "target_device_id": "DEVICE-2",
+  "share_id": "share-1",
+  "revision_id": "revision-100",
+  "expected_base_revision_id": "revision-099",
+  "action": "modify"
+}

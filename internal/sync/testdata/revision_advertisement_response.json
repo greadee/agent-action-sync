@@ -1,0 +1,16 @@
+{
+  "protocol_version": 1,
+  "request_id": "request-100",
+  "responder_device_id": "DEVICE-2",
+  "share_id": "share-1",
+  "limits": {
+    "max_entries": 4,
+    "max_bytes": 4096
+  },
+  "status": "rejected",
+  "error": {
+    "code": "policy_rejected",
+    "message": "target drift requires review",
+    "retryable": false
+  }
+}
