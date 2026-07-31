@@ -36,3 +36,13 @@ When the revisions match, an authorized add, modify, or delete is eligible to
 apply regardless of the configured drift behavior. Conflict-copy creation,
 auditing, and destination application are intentionally deferred to later
 one-way execution slices.
+
+## Receiver preparation boundary
+
+The receiver validates a change request and its advertised source revision
+before any transfer work is created. It checks the request and policy scope,
+canonical relative path, source revision identity/share/origin, parent revision,
+entry type, action compatibility, and the target drift decision. Only after
+those checks does it call the authoritative share store for `sync` and the
+action capability. The preparation result is a descriptor for a later transfer
+slice; this service performs no file, revision, or file-index writes.

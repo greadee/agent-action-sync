@@ -41,5 +41,7 @@ policy validation.
   trimmed message. Successful and duplicate responses cannot include an error.
 
 The protocol types do not open files, create transfers, authorize peers, or
-apply revisions. Those actions remain in the receiver preparation and safe apply
+apply revisions. The receiver preparation slice validates the request and
+advertised revision, then checks stored `sync` and action capabilities before
+returning a non-persistent descriptor. Safe transfer and apply remain later
 slices.
