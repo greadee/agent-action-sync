@@ -31,10 +31,11 @@ type OneWayChangePreparationRequest struct {
 // PreparedOneWayChange is a validated descriptor for later transfer work. It
 // does not create files, transfer rows, revisions, or file-index updates.
 type PreparedOneWayChange struct {
-	Change         OneWayChangeRequest
-	SourceRevision core.Revision
-	RelativePath   string
-	Decision       OneWayDecision
+	Change           OneWayChangeRequest
+	SourceRevision   core.Revision
+	TargetRevisionID core.RevisionID
+	RelativePath     string
+	Decision         OneWayDecision
 }
 
 type OneWayChangePreparationService struct {
@@ -79,10 +80,11 @@ func (service OneWayChangePreparationService) Prepare(ctx context.Context, reque
 	}
 
 	return PreparedOneWayChange{
-		Change:         request.Change,
-		SourceRevision: request.SourceRevision,
-		RelativePath:   request.SourceRevision.RelativePath,
-		Decision:       decision,
+		Change:           request.Change,
+		SourceRevision:   request.SourceRevision,
+		TargetRevisionID: request.TargetRevisionID,
+		RelativePath:     request.SourceRevision.RelativePath,
+		Decision:         decision,
 	}, nil
 }
 

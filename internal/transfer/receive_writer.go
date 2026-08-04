@@ -68,12 +68,9 @@ func NewReceiveWriter(spec ReceiveSpec) (*ReceiveWriter, error) {
 		return nil, err
 	}
 
-	destinationPath, err := filesystem.ResolveInsideShare(spec.ShareRoot, spec.RelativePath)
+	destinationPath, err := filesystem.EnsureParentDirectoriesInsideShare(spec.ShareRoot, spec.RelativePath, 0o700)
 	if err != nil {
 		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
-		return nil, fmt.Errorf("create destination directory: %w", err)
 	}
 
 	partialPath := destinationPath + spec.PartialSuffix
@@ -156,11 +153,12 @@ func (writer *ReceiveWriter) prepareDestinationForCommit() error {
 		return fmt.Errorf("destination already exists: %s", writer.destinationPath)
 	}
 
-	historyPath, err := writer.historyPath()
+	historyRelativePath, err := writer.historyRelativePath()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil {
+	historyPath, err := filesystem.EnsureParentDirectoriesInsideShare(writer.shareRoot, historyRelativePath, 0o700)
+	if err != nil {
 		return fmt.Errorf("create history directory: %w", err)
 	}
 	if err := os.Rename(writer.destinationPath, historyPath); err != nil {
@@ -169,16 +167,16 @@ func (writer *ReceiveWriter) prepareDestinationForCommit() error {
 	return nil
 }
 
-func (writer *ReceiveWriter) historyPath() (string, error) {
-	normalized, err := filesystem.NormalizeRelativePath(writer.destinationPath)
-	if err == nil {
-		return filesystem.ResolveInsideShare(writer.shareRoot, filepath.Join(writer.historyDirName, normalized+"."+historyStamp()))
-	}
-	relative, relErr := filepath.Rel(filepath.Clean(writer.shareRoot), writer.destinationPath)
-	if relErr != nil {
+func (writer *ReceiveWriter) historyRelativePath() (string, error) {
+	relative, err := filepath.Rel(filepath.Clean(writer.shareRoot), writer.destinationPath)
+	if err != nil {
 		return "", fmt.Errorf("make history path: %w", err)
 	}
-	return filesystem.ResolveInsideShare(writer.shareRoot, filepath.Join(writer.historyDirName, relative+"."+historyStamp()))
+	normalized, err := filesystem.NormalizeRelativePath(relative)
+	if err != nil {
+		return "", fmt.Errorf("normalize history path: %w", err)
+	}
+	return filepath.ToSlash(filepath.Join(writer.historyDirName, normalized+"."+historyStamp())), nil
 }
 
 func historyStamp() string {

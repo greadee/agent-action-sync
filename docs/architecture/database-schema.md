@@ -159,6 +159,6 @@ CREATE TABLE audit_events (
 - All timestamps should be stored as UTC RFC3339 strings.
 - `relative_path` values are normalized paths, never raw user input.
 - Plaintext file contents, private keys, passwords, and session tokens must never be stored in audit metadata.
-- The history directory and partial-transfer directory are application-managed and excluded from ordinary synchronization.
+- The history, one-way incoming, and partial-transfer paths are application-managed and excluded from ordinary synchronization. Durable one-way intent files live under `.sync-incoming/` only until the revision/index transaction succeeds.
 - Tombstones are immutable deletion history. `expires_at` is metadata only until an explicit retention policy is implemented; expired rows are not automatically removed.
 - A reappeared path is restored by advancing its `file_index.current_revision_id` to a non-deleted revision. The prior tombstone remains available as history, while active deletion propagation considers only tombstones still referenced by a deleted index entry.

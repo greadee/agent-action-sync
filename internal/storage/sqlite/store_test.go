@@ -746,6 +746,53 @@ func TestTombstoneStoreRejectsUnacceptedDeletionRevision(t *testing.T) {
 	}
 }
 
+func TestCommitOneWayApplyRollsBackAndAcceptsIdenticalRetry(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	shareID := core.ShareID("share-one-way-apply")
+	if err := store.Shares().SaveShare(ctx, storage.Share{ID: shareID, Name: "target", RootPath: t.TempDir(), Mode: storage.ShareOneWayTarget}); err != nil {
+		t.Fatalf("SaveShare: %v", err)
+	}
+	baseEntry := testFileIndexEntry(shareID, "obsolete.txt", "base")
+	baseRevision := testRevision("revision-base-apply", shareID, baseEntry.RelativePath, "base", "", 1)
+	if err := store.FileIndex().CommitSnapshot(ctx, shareID, []core.FileIndexEntry{baseEntry}, []core.Revision{baseRevision}, time.Unix(200, 0).UTC()); err != nil {
+		t.Fatalf("CommitSnapshot: %v", err)
+	}
+
+	deletion := core.Revision{
+		ID: "revision-delete-apply", ShareID: shareID, RelativePath: baseEntry.RelativePath,
+		EntryType: core.EntryDeleted, ParentRevisionID: baseRevision.ID, OriginDeviceID: "DEVICE-1",
+		Sequence: 2, IsDeleted: true, CreatedAt: time.Unix(400, 0).UTC(),
+	}
+	commit := storage.OneWayApplyCommit{
+		ShareID: shareID, Revision: deletion, ExpectedCurrentRevisionID: baseRevision.ID,
+		Tombstone: &storage.TombstoneRequest{
+			ID: "tombstone-apply", TombstoneRevisionID: deletion.ID, ExpiresAt: time.Unix(300, 0).UTC(),
+		},
+		AppliedAt: time.Unix(500, 0).UTC(),
+	}
+	if _, err := store.FileIndex().CommitOneWayApply(ctx, commit); err == nil {
+		t.Fatal("expected invalid tombstone expiry to roll back")
+	}
+	if _, err := store.Revisions().GetRevision(ctx, deletion.ID); err == nil {
+		t.Fatal("deletion revision persisted after rollback")
+	}
+	current, err := store.Revisions().GetCurrentRevision(ctx, shareID, baseEntry.RelativePath)
+	if err != nil || current.ID != baseRevision.ID {
+		t.Fatalf("current revision after rollback = %+v, err=%v", current, err)
+	}
+
+	commit.Tombstone.ExpiresAt = time.Unix(600, 0).UTC()
+	first, err := store.FileIndex().CommitOneWayApply(ctx, commit)
+	if err != nil || first.AlreadyApplied || first.Tombstone == nil {
+		t.Fatalf("first CommitOneWayApply = %+v, err=%v", first, err)
+	}
+	duplicate, err := store.FileIndex().CommitOneWayApply(ctx, commit)
+	if err != nil || !duplicate.AlreadyApplied || duplicate.Tombstone == nil || duplicate.Tombstone.ID != commit.Tombstone.ID {
+		t.Fatalf("duplicate CommitOneWayApply = %+v, err=%v", duplicate, err)
+	}
+}
+
 func saveTestShare(t *testing.T, store *Store, shareID core.ShareID) {
 	t.Helper()
 	if err := store.Shares().SaveShare(context.Background(), storage.Share{

@@ -20,6 +20,8 @@ import (
 var DefaultIgnorePatterns = []string{
 	".sync-history",
 	".sync-history/**",
+	DefaultOneWayIncomingDir,
+	DefaultOneWayIncomingDir + "/**",
 	"*.sync-part",
 	"**/*.sync-part",
 }

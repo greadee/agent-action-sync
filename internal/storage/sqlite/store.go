@@ -464,6 +464,172 @@ WHERE share_id = ? AND relative_path = ?`,
 	return tombstones, nil
 }
 
+func (store fileIndexStore) CommitOneWayApply(ctx context.Context, commit storage.OneWayApplyCommit) (storage.OneWayApplyCommitResult, error) {
+	if err := validateOneWayApplyCommit(commit); err != nil {
+		return storage.OneWayApplyCommitResult{}, err
+	}
+	commit.AppliedAt = commit.AppliedAt.UTC()
+
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return storage.OneWayApplyCommitResult{}, fmt.Errorf("begin one-way apply commit: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := requireShare(ctx, tx, commit.ShareID); err != nil {
+		return storage.OneWayApplyCommitResult{}, err
+	}
+
+	existingRevision, err := scanRevision(tx.QueryRowContext(ctx, `
+SELECT revision_id, share_id, relative_path, entry_type, size, content_hash, hash_algorithm, parent_revision_id, origin_device_id, sequence, is_deleted, created_at
+FROM revisions WHERE revision_id = ?`, commit.Revision.ID), "revision", string(commit.Revision.ID))
+	if err == nil {
+		return idempotentOneWayApplyResult(ctx, tx, commit, existingRevision)
+	}
+	if !errors.Is(err, storage.ErrNotFound) {
+		return storage.OneWayApplyCommitResult{}, err
+	}
+
+	current, err := scanFileIndexEntry(tx.QueryRowContext(ctx, `
+SELECT share_id, relative_path, entry_type, size, modified_time, creation_time, file_identity, content_hash, hash_algorithm, current_revision_id, is_deleted, deleted_at, last_scanned_at
+FROM file_index WHERE share_id = ? AND relative_path = ?`, commit.ShareID, commit.Revision.RelativePath),
+		"file index entry", string(commit.ShareID)+"/"+commit.Revision.RelativePath)
+	switch {
+	case err == nil:
+		if current.CurrentRevisionID == "" || current.CurrentRevisionID != commit.ExpectedCurrentRevisionID {
+			return storage.OneWayApplyCommitResult{}, fmt.Errorf("one-way apply current revision is %q, want %q for %s", current.CurrentRevisionID, commit.ExpectedCurrentRevisionID, commit.Revision.RelativePath)
+		}
+	case errors.Is(err, storage.ErrNotFound):
+		if commit.ExpectedCurrentRevisionID != "" {
+			return storage.OneWayApplyCommitResult{}, fmt.Errorf("one-way apply expected current revision %s for missing path %s", commit.ExpectedCurrentRevisionID, commit.Revision.RelativePath)
+		}
+		if commit.Revision.IsDeleted {
+			return storage.OneWayApplyCommitResult{}, fmt.Errorf("one-way apply cannot delete missing path %s", commit.Revision.RelativePath)
+		}
+	default:
+		return storage.OneWayApplyCommitResult{}, err
+	}
+
+	if err := insertRevision(ctx, tx, commit.Revision); err != nil {
+		return storage.OneWayApplyCommitResult{}, err
+	}
+
+	result := storage.OneWayApplyCommitResult{}
+	if commit.Revision.IsDeleted {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE file_index
+SET entry_type = ?, current_revision_id = ?, is_deleted = 1, deleted_at = ?, last_scanned_at = ?
+WHERE share_id = ? AND relative_path = ?`,
+			core.EntryDeleted, commit.Revision.ID, formatTime(commit.AppliedAt), formatTime(commit.AppliedAt), commit.ShareID, commit.Revision.RelativePath,
+		); err != nil {
+			return storage.OneWayApplyCommitResult{}, fmt.Errorf("mark one-way path %s deleted: %w", commit.Revision.RelativePath, err)
+		}
+		tombstones, err := buildAcceptedTombstones(commit.ShareID, map[string]core.Revision{commit.Revision.RelativePath: commit.Revision}, []storage.TombstoneRequest{*commit.Tombstone})
+		if err != nil {
+			return storage.OneWayApplyCommitResult{}, err
+		}
+		if err := insertTombstone(ctx, tx, tombstones[0]); err != nil {
+			return storage.OneWayApplyCommitResult{}, err
+		}
+		result.Tombstone = &tombstones[0]
+	} else {
+		entry := *commit.Entry
+		entry.CurrentRevisionID = commit.Revision.ID
+		if err := upsertFileIndexEntry(ctx, tx, commit.ShareID, entry, commit.AppliedAt); err != nil {
+			return storage.OneWayApplyCommitResult{}, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return storage.OneWayApplyCommitResult{}, fmt.Errorf("commit one-way apply: %w", err)
+	}
+	return result, nil
+}
+
+func validateOneWayApplyCommit(commit storage.OneWayApplyCommit) error {
+	if commit.ShareID == "" {
+		return errors.New("one-way apply share id is required")
+	}
+	if commit.AppliedAt.IsZero() {
+		return errors.New("one-way apply time is required")
+	}
+	if _, err := validateCommitRevisions(commit.ShareID, []core.Revision{commit.Revision}); err != nil {
+		return err
+	}
+	if commit.Revision.ParentRevisionID != commit.ExpectedCurrentRevisionID && !commit.AllowTargetDrift {
+		return fmt.Errorf("one-way apply revision %s parent is %s, want current revision %s", commit.Revision.ID, commit.Revision.ParentRevisionID, commit.ExpectedCurrentRevisionID)
+	}
+
+	switch {
+	case commit.Revision.IsDeleted:
+		if commit.Revision.EntryType != core.EntryDeleted || commit.Entry != nil || commit.Tombstone == nil {
+			return fmt.Errorf("deletion revision %s requires no active entry and exactly one tombstone", commit.Revision.ID)
+		}
+		if err := validateDeletionRevision(commit.Revision, core.FileIndexEntry{RelativePath: commit.Revision.RelativePath, CurrentRevisionID: commit.Revision.ParentRevisionID}); err != nil {
+			return err
+		}
+		return validateTombstoneRequests([]storage.TombstoneRequest{*commit.Tombstone})
+	case commit.Revision.EntryType != core.EntryFile && commit.Revision.EntryType != core.EntryDirectory:
+		return fmt.Errorf("one-way apply revision %s has unsupported entry type %q", commit.Revision.ID, commit.Revision.EntryType)
+	case commit.Entry == nil:
+		return fmt.Errorf("active revision %s requires a file index entry", commit.Revision.ID)
+	case commit.Tombstone != nil:
+		return fmt.Errorf("active revision %s cannot create a tombstone", commit.Revision.ID)
+	}
+
+	entries, err := validateCommitEntries(commit.ShareID, []core.FileIndexEntry{*commit.Entry})
+	if err != nil {
+		return err
+	}
+	return validateCurrentRevision(commit.Revision, entries[commit.Revision.RelativePath], core.FileIndexEntry{CurrentRevisionID: commit.Revision.ParentRevisionID})
+}
+
+func idempotentOneWayApplyResult(ctx context.Context, tx *sql.Tx, commit storage.OneWayApplyCommit, existing core.Revision) (storage.OneWayApplyCommitResult, error) {
+	if !revisionsEqual(existing, commit.Revision) {
+		return storage.OneWayApplyCommitResult{}, fmt.Errorf("revision %s already exists with different metadata", commit.Revision.ID)
+	}
+	current, err := scanFileIndexEntry(tx.QueryRowContext(ctx, `
+SELECT share_id, relative_path, entry_type, size, modified_time, creation_time, file_identity, content_hash, hash_algorithm, current_revision_id, is_deleted, deleted_at, last_scanned_at
+FROM file_index WHERE share_id = ? AND relative_path = ?`, commit.ShareID, commit.Revision.RelativePath),
+		"file index entry", string(commit.ShareID)+"/"+commit.Revision.RelativePath)
+	if err != nil {
+		return storage.OneWayApplyCommitResult{}, err
+	}
+	if current.CurrentRevisionID != commit.Revision.ID || current.IsDeleted != commit.Revision.IsDeleted {
+		return storage.OneWayApplyCommitResult{}, fmt.Errorf("revision %s exists but is not the accepted current state for %s", commit.Revision.ID, commit.Revision.RelativePath)
+	}
+
+	result := storage.OneWayApplyCommitResult{AlreadyApplied: true}
+	if !commit.Revision.IsDeleted {
+		return result, nil
+	}
+	var tombstone storage.Tombstone
+	err = scanTombstone(tx.QueryRowContext(ctx, `
+SELECT tombstone_id, share_id, relative_path, deleted_by_device_id, base_revision_id,
+       tombstone_revision_id, deleted_at, expires_at
+FROM tombstones WHERE tombstone_revision_id = ?`, commit.Revision.ID), &tombstone)
+	if err != nil {
+		return storage.OneWayApplyCommitResult{}, fmt.Errorf("look up idempotent tombstone for revision %s: %w", commit.Revision.ID, err)
+	}
+	expected, err := buildAcceptedTombstones(commit.ShareID, map[string]core.Revision{commit.Revision.RelativePath: commit.Revision}, []storage.TombstoneRequest{*commit.Tombstone})
+	if err != nil {
+		return storage.OneWayApplyCommitResult{}, err
+	}
+	if !tombstonesEqual(tombstone, expected[0]) {
+		return storage.OneWayApplyCommitResult{}, fmt.Errorf("revision %s already has different tombstone metadata", commit.Revision.ID)
+	}
+	result.Tombstone = &tombstone
+	return result, nil
+}
+
+func revisionsEqual(left, right core.Revision) bool {
+	return left.ID == right.ID && left.ShareID == right.ShareID && left.RelativePath == right.RelativePath &&
+		left.EntryType == right.EntryType && left.Size == right.Size && left.ContentHash == right.ContentHash &&
+		left.HashAlgorithm == right.HashAlgorithm && left.ParentRevisionID == right.ParentRevisionID &&
+		left.OriginDeviceID == right.OriginDeviceID && left.Sequence == right.Sequence &&
+		left.IsDeleted == right.IsDeleted && left.CreatedAt.Equal(right.CreatedAt)
+}
+
 func (store fileIndexStore) SaveSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, scannedAt time.Time) error {
 	if shareID == "" {
 		return errors.New("share id is required")
@@ -1375,7 +1541,7 @@ func boolInt(value bool) int {
 
 func mapNotFound(err error, entity, id string) error {
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("%s %s not found", entity, id)
+		return fmt.Errorf("%w: %s %s", storage.ErrNotFound, entity, id)
 	}
 	return err
 }

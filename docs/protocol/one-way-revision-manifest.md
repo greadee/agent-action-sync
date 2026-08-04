@@ -41,7 +41,10 @@ policy validation.
   trimmed message. Successful and duplicate responses cannot include an error.
 
 The protocol types do not open files, create transfers, authorize peers, or
-apply revisions. The receiver preparation slice validates the request and
-advertised revision, then checks stored `sync` and action capabilities before
-returning a non-persistent descriptor. Safe transfer and apply remain later
-slices.
+apply revisions. Receiver preparation validates the request and advertised
+revision, then checks stored `sync` and action capabilities before returning a
+non-persistent descriptor that includes the observed target revision. For file
+changes, the transfer layer commits verified bytes to a receiver-selected
+`.sync-incoming/` path; no peer-supplied staging path is accepted. The apply
+executor revalidates content and target state before destination work and uses
+the source revision ID for the atomic revision/index commit.

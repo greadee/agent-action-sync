@@ -2,10 +2,13 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"syncgate/internal/core"
 )
+
+var ErrNotFound = errors.New("storage record not found")
 
 type Store interface {
 	Migrate(ctx context.Context) error
@@ -47,8 +50,32 @@ type AuthoritativeStateStore interface {
 	CommitSnapshotAndTombstones(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, revisions []core.Revision, tombstones []TombstoneRequest, scannedAt time.Time) ([]Tombstone, error)
 }
 
+// OneWayApplyCommit describes one receiver-side revision transition. Entry is
+// required for an active revision and must be nil for a deletion revision.
+// ExpectedCurrentRevisionID is checked in the same transaction that advances
+// the file index, preventing stale preparation results from being committed.
+type OneWayApplyCommit struct {
+	ShareID                   core.ShareID
+	Revision                  core.Revision
+	ExpectedCurrentRevisionID core.RevisionID
+	Entry                     *core.FileIndexEntry
+	Tombstone                 *TombstoneRequest
+	AppliedAt                 time.Time
+	AllowTargetDrift          bool
+}
+
+type OneWayApplyCommitResult struct {
+	Tombstone      *Tombstone
+	AlreadyApplied bool
+}
+
+type OneWayApplyStore interface {
+	CommitOneWayApply(ctx context.Context, commit OneWayApplyCommit) (OneWayApplyCommitResult, error)
+}
+
 type FileIndexStore interface {
 	AuthoritativeStateStore
+	OneWayApplyStore
 	SaveSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, scannedAt time.Time) error
 	CommitSnapshot(ctx context.Context, shareID core.ShareID, entries []core.FileIndexEntry, revisions []core.Revision, scannedAt time.Time) error
 	Get(ctx context.Context, shareID core.ShareID, relativePath string) (core.FileIndexEntry, error)

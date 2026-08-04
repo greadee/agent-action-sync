@@ -62,6 +62,10 @@ func TestScanShareIgnoresHistoryAndPartials(t *testing.T) {
 		t.Fatalf("mkdir history: %v", err)
 	}
 	writeFile(t, filepath.Join(root, ".sync-history", "old.txt"), []byte("old"))
+	if err := os.MkdirAll(filepath.Join(root, DefaultOneWayIncomingDir), 0o700); err != nil {
+		t.Fatalf("mkdir incoming: %v", err)
+	}
+	writeFile(t, filepath.Join(root, DefaultOneWayIncomingDir, "revision.ready"), []byte("ready"))
 
 	result, err := ScanShare(ScanOptions{ShareID: "share-1", RootPath: root})
 	if err != nil {
@@ -76,6 +80,9 @@ func TestScanShareIgnoresHistoryAndPartials(t *testing.T) {
 	}
 	if _, ok := entries[".sync-history"]; ok {
 		t.Fatal("history directory should be ignored")
+	}
+	if _, ok := entries[DefaultOneWayIncomingDir]; ok {
+		t.Fatal("incoming directory should be ignored")
 	}
 }
 

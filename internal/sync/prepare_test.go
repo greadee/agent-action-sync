@@ -18,7 +18,7 @@ func TestOneWayChangePreparationAuthorizesAndReturnsDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if prepared.RelativePath != "docs/report.txt" || prepared.SourceRevision.ID != "revision-2" {
+	if prepared.RelativePath != "docs/report.txt" || prepared.SourceRevision.ID != "revision-2" || prepared.TargetRevisionID != "revision-1" {
 		t.Fatalf("prepared = %+v", prepared)
 	}
 	if !prepared.Decision.Apply || prepared.Decision.TargetDrift {
