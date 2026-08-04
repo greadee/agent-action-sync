@@ -1,6 +1,14 @@
 # Sync Scanner
 
-The sync scanner is the first source-of-truth component for folder synchronization. Watchers may later trigger scans, but filesystem events are not authoritative by themselves.
+The sync scanner is the first source-of-truth component for folder synchronization. Watchers trigger scans, but filesystem events are not authoritative by themselves.
+
+Watcher trigger behavior:
+
+- A platform watcher is supplied behind the `Watcher` interface.
+- Events are debounced into one scan request and never mutate the index directly.
+- The trigger bounds events represented by one debounce window.
+- An explicit overflow, a bounded-queue overflow error, or another watcher error requests a full recovery scan.
+- The scheduler owns the resulting request and performs the authoritative scan.
 
 Current scanner behavior:
 
