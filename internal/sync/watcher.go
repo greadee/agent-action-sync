@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
 var ErrWatcherOverflow = errors.New("filesystem watcher overflow")
+var ErrUnavailableRoot = errors.New("share root unavailable")
 
 // WatchEvent is a notification that something may have changed below a share
 // root. It is never interpreted as authoritative file state.
@@ -28,6 +32,9 @@ type Watcher interface {
 type ScanTriggerReason string
 
 const (
+	ScanTriggerStartup  ScanTriggerReason = "startup"
+	ScanTriggerPeriodic ScanTriggerReason = "periodic"
+	ScanTriggerManual   ScanTriggerReason = "manual"
 	ScanTriggerEvents   ScanTriggerReason = "watcher_events"
 	ScanTriggerOverflow ScanTriggerReason = "watcher_overflow"
 	ScanTriggerError    ScanTriggerReason = "watcher_error"
@@ -38,6 +45,23 @@ const (
 type ScanRequest struct {
 	Reason   ScanTriggerReason
 	FullScan bool
+}
+
+// CheckShareRoot is the scheduler's fail-closed preflight. A failed check is
+// not represented as an empty scan, so it cannot create deletion revisions.
+func CheckShareRoot(root string) error {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" || root == "." {
+		return fmt.Errorf("%w: root path is required", ErrUnavailableRoot)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailableRoot, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: root is not a directory", ErrUnavailableRoot)
+	}
+	return nil
 }
 
 // WatchTrigger converts a bounded watcher stream into debounced scan

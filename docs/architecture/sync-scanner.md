@@ -10,6 +10,14 @@ Watcher trigger behavior:
 - An explicit overflow, a bounded-queue overflow error, or another watcher error requests a full recovery scan.
 - The scheduler owns the resulting request and performs the authoritative scan.
 
+Scheduling behavior:
+
+- Startup, periodic, manual, and watcher-triggered requests share one scheduler.
+- A scan never overlaps another scan; one pending trigger is retained while a scan is running.
+- Scan cancellation is passed through to the scan operation.
+- Scan failures use bounded exponential periodic backoff and reset after success.
+- Root availability is checked before every scan. Missing or unavailable roots skip the scan and cannot be interpreted as propagated deletions.
+
 Current scanner behavior:
 
 - Walks a share root deterministically.
