@@ -18,11 +18,27 @@ Scheduling behavior:
 - Scan failures use bounded exponential periodic backoff and reset after success.
 - Root availability is checked before every scan. Missing or unavailable roots skip the scan and cannot be interpreted as propagated deletions.
 
+Per-share configuration:
+
+- `mode` is validated against the supported local modes: `send_once`, `one_way_source`, `one_way_target`, `upload_only`, and `read_only`.
+- `ignore_patterns` are trimmed, normalized to slash separators, and must stay relative to the share root.
+- `scan_interval_seconds` defaults to 60 and must be positive.
+- `deletion_limit_count` defaults to 100 and must not be negative.
+- `deletion_limit_percent` defaults to 10 and must be between 0 and 100.
+- `target_drift_policy` defaults to `reject` and must be one of `reject`, `preserve_conflict_copy`, or `report_only`.
+
 One-way job behavior:
 
 - Queue rows reference an existing transfer ID; transfer bytes and verified chunks remain the resume source of truth.
 - Runnable jobs are claimed transactionally, bounded by configured concurrency, and retried with capped backoff.
 - Paused jobs are excluded until resumed. Running jobs are returned to queued state during restart recovery.
+
+Diagnostics behavior:
+
+- Scan outcomes can be summarized as recent scan diagnostics with trigger, status, counts, deletion-guard reasons, and sanitized errors.
+- One-way jobs are summarized only when pending or blocked: queued, running, retry-wait, paused, or failed.
+- Ignored-path diagnostics report share ID, relative path, and matching pattern without printing share roots.
+- The CLI can print a local JSON diagnostics snapshot with `syncgate diagnostics --file <path> --recent 5`.
 
 Current scanner behavior:
 

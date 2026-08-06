@@ -7,15 +7,21 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"syncgate/internal/transfer"
 )
 
 const (
-	DefaultLocalAPIHost      = "127.0.0.1"
-	DefaultLocalAPIPort      = 47820
-	DefaultParallelTransfers = 2
+	DefaultLocalAPIHost         = "127.0.0.1"
+	DefaultLocalAPIPort         = 47820
+	DefaultParallelTransfers    = 2
+	DefaultScanInterval         = time.Minute
+	DefaultDeletionLimitCount   = 100
+	DefaultDeletionLimitPercent = 10
+	DefaultTargetDriftPolicy    = "reject"
 )
 
 type Config struct {
@@ -37,10 +43,15 @@ type TransferConfig struct {
 }
 
 type ShareConfig struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	RootPath string `json:"root_path"`
-	Mode     string `json:"mode"`
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	RootPath             string   `json:"root_path"`
+	Mode                 string   `json:"mode"`
+	IgnorePatterns       []string `json:"ignore_patterns"`
+	ScanIntervalSeconds  int      `json:"scan_interval_seconds"`
+	DeletionLimitCount   int      `json:"deletion_limit_count"`
+	DeletionLimitPercent int      `json:"deletion_limit_percent"`
+	TargetDriftPolicy    string   `json:"target_drift_policy"`
 }
 
 func LoadFile(ctx context.Context, path string) (Config, error) {
@@ -117,6 +128,20 @@ func (share *ShareConfig) validate(seen map[string]bool) error {
 	share.Name = strings.TrimSpace(share.Name)
 	share.RootPath = strings.TrimSpace(share.RootPath)
 	share.Mode = strings.TrimSpace(share.Mode)
+	share.TargetDriftPolicy = strings.TrimSpace(share.TargetDriftPolicy)
+
+	if share.ScanIntervalSeconds == 0 {
+		share.ScanIntervalSeconds = int(DefaultScanInterval.Seconds())
+	}
+	if share.DeletionLimitCount == 0 {
+		share.DeletionLimitCount = DefaultDeletionLimitCount
+	}
+	if share.DeletionLimitPercent == 0 {
+		share.DeletionLimitPercent = DefaultDeletionLimitPercent
+	}
+	if share.TargetDriftPolicy == "" {
+		share.TargetDriftPolicy = DefaultTargetDriftPolicy
+	}
 
 	if share.ID == "" {
 		return errors.New("id is required")
@@ -133,10 +158,37 @@ func (share *ShareConfig) validate(seen map[string]bool) error {
 	}
 	switch share.Mode {
 	case "send_once", "one_way_source", "one_way_target", "upload_only", "read_only":
-		return nil
 	default:
 		return fmt.Errorf("unsupported mode %q", share.Mode)
 	}
+	if share.ScanIntervalSeconds < 1 {
+		return fmt.Errorf("scan_interval_seconds must be positive, got %d", share.ScanIntervalSeconds)
+	}
+	if share.DeletionLimitCount < 0 {
+		return fmt.Errorf("deletion_limit_count cannot be negative, got %d", share.DeletionLimitCount)
+	}
+	if share.DeletionLimitPercent < 0 || share.DeletionLimitPercent > 100 {
+		return fmt.Errorf("deletion_limit_percent must be between 0 and 100, got %d", share.DeletionLimitPercent)
+	}
+	switch share.TargetDriftPolicy {
+	case "reject", "preserve_conflict_copy", "report_only":
+	default:
+		return fmt.Errorf("unsupported target_drift_policy %q", share.TargetDriftPolicy)
+	}
+	for i := range share.IgnorePatterns {
+		pattern := filepath.ToSlash(strings.TrimSpace(share.IgnorePatterns[i]))
+		if pattern == "" {
+			return fmt.Errorf("ignore_patterns[%d] is empty", i)
+		}
+		if filepath.IsAbs(pattern) || strings.HasPrefix(pattern, "/") || strings.Contains(pattern, "../") || pattern == ".." {
+			return fmt.Errorf("ignore_patterns[%d] must be relative to the share", i)
+		}
+		if _, err := filepath.Match(pattern, "probe"); err != nil && !strings.Contains(pattern, "/") {
+			return fmt.Errorf("ignore_patterns[%d] is invalid: %w", i, err)
+		}
+		share.IgnorePatterns[i] = pattern
+	}
+	return nil
 }
 
 func isLoopbackHost(host string) bool {

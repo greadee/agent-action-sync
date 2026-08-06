@@ -14,7 +14,12 @@
       "id": "school-drop",
       "name": "School Drop",
       "root_path": "C:\\Users\\example\\SyncGate\\School Drop",
-      "mode": "upload_only"
+      "mode": "one_way_source",
+      "ignore_patterns": ["*.log", "cache/**"],
+      "scan_interval_seconds": 60,
+      "deletion_limit_count": 100,
+      "deletion_limit_percent": 10,
+      "target_drift_policy": "reject"
     }
   ]
 }

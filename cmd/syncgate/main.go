@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"syncgate/internal/api"
 	"syncgate/internal/config"
 	"syncgate/internal/core"
+	syncengine "syncgate/internal/sync"
 	"syncgate/internal/transfer"
 	tcptls "syncgate/internal/transport/tcp"
 )
@@ -23,6 +26,8 @@ func main() {
 	switch os.Args[1] {
 	case "check-config":
 		runCheckConfig(os.Args[2:])
+	case "diagnostics":
+		runDiagnostics(os.Args[2:])
 	case "receive-once":
 		runReceiveOnce(os.Args[2:])
 	case "send-once":
@@ -59,6 +64,91 @@ func runCheckConfig(args []string) {
 	}
 
 	fmt.Printf("syncgate config ok: device=%s shares=%d\n", cfg.DeviceName, len(cfg.Shares))
+}
+
+func runDiagnostics(args []string) {
+	flags := flag.NewFlagSet("diagnostics", flag.ExitOnError)
+	reportPath := flags.String("file", "", "path to a local diagnostics JSON snapshot")
+	recent := flags.Int("recent", 5, "maximum recent scans to print")
+	_ = flags.Parse(args)
+	if *reportPath == "" {
+		exitf("--file is required")
+	}
+	if *recent < 1 {
+		exitf("--recent must be positive")
+	}
+
+	raw, err := os.ReadFile(*reportPath)
+	if err != nil {
+		exitf("read diagnostics: %v", err)
+	}
+	var report syncengine.DiagnosticReport
+	if err := json.Unmarshal(raw, &report); err != nil {
+		exitf("parse diagnostics JSON: %v", err)
+	}
+	printDiagnostics(os.Stdout, report, *recent)
+}
+
+func printDiagnostics(writer io.Writer, report syncengine.DiagnosticReport, recent int) {
+	fmt.Fprintf(writer, "syncgate diagnostics generated_at=%s\n", formatDiagnosticTime(report.GeneratedAt))
+	fmt.Fprintln(writer, "recent_scans:")
+	scans := report.RecentScans
+	if len(scans) > recent {
+		scans = scans[len(scans)-recent:]
+	}
+	if len(scans) == 0 {
+		fmt.Fprintln(writer, "  none")
+	}
+	for _, scan := range scans {
+		status := "idle"
+		switch {
+		case scan.Unavailable:
+			status = "unavailable"
+		case scan.Blocked:
+			status = "blocked"
+		case scan.Committed:
+			status = "committed"
+		case scan.Skipped:
+			status = "skipped"
+		case scan.Started:
+			status = "started"
+		}
+		fmt.Fprintf(writer, "  share=%s trigger=%s status=%s revisions=%d tombstones=%d finished_at=%s\n",
+			scan.ShareID, scan.Trigger, status, scan.Revisions, scan.Tombstones, formatDiagnosticTime(scan.FinishedAt))
+		for _, reason := range scan.Reasons {
+			fmt.Fprintf(writer, "    reason=%q\n", reason)
+		}
+		if scan.Error != "" {
+			fmt.Fprintf(writer, "    error=%q\n", scan.Error)
+		}
+	}
+
+	fmt.Fprintln(writer, "pending_or_blocked_work:")
+	if len(report.Work) == 0 {
+		fmt.Fprintln(writer, "  none")
+	}
+	for _, work := range report.Work {
+		fmt.Fprintf(writer, "  job=%s transfer=%s share=%s state=%s retries=%d path=%q next_attempt_at=%s\n",
+			work.JobID, work.TransferID, work.ShareID, work.State, work.RetryCount, work.RelativePath, formatDiagnosticTime(work.NextAttemptAt))
+		if work.LastError != "" {
+			fmt.Fprintf(writer, "    last_error=%q\n", work.LastError)
+		}
+	}
+
+	fmt.Fprintln(writer, "ignored_paths:")
+	if len(report.IgnoredPaths) == 0 {
+		fmt.Fprintln(writer, "  none")
+	}
+	for _, ignored := range report.IgnoredPaths {
+		fmt.Fprintf(writer, "  share=%s path=%q pattern=%q\n", ignored.ShareID, ignored.RelativePath, ignored.Pattern)
+	}
+}
+
+func formatDiagnosticTime(value time.Time) string {
+	if value.IsZero() {
+		return "-"
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func runReceiveOnce(args []string) {
