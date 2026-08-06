@@ -793,6 +793,54 @@ func TestCommitOneWayApplyRollsBackAndAcceptsIdenticalRetry(t *testing.T) {
 	}
 }
 
+func TestOneWayJobsPersistClaimAndRecoverAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "jobs.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	shareID := core.ShareID("share-jobs")
+	if err := store.Devices().TrustDevice(ctx, storage.Device{ID: "DEVICE-1", DisplayName: "source", PublicKey: []byte("key"), Fingerprint: "fingerprint", TrustState: storage.TrustTrusted}); err != nil {
+		t.Fatalf("TrustDevice: %v", err)
+	}
+	if err := store.Shares().SaveShare(ctx, storage.Share{ID: shareID, Name: "source", RootPath: t.TempDir(), Mode: storage.ShareOneWaySource}); err != nil {
+		t.Fatalf("SaveShare: %v", err)
+	}
+	if err := store.Transfers().SaveTransfer(ctx, core.Transfer{ID: "transfer-job", Direction: core.TransferReceive, PeerDeviceID: "DEVICE-1", ShareID: shareID, RelativePath: "payload.txt", State: core.TransferPaused, ChunkSize: 4, CreatedAt: time.Unix(100, 0).UTC(), UpdatedAt: time.Unix(100, 0).UTC()}); err != nil {
+		t.Fatalf("SaveTransfer: %v", err)
+	}
+	job := core.OneWayJob{ID: "job-1", TransferID: "transfer-job", ShareID: shareID, RevisionID: "revision-1", RelativePath: "payload.txt", State: core.OneWayJobQueued, CreatedAt: time.Unix(100, 0).UTC(), UpdatedAt: time.Unix(100, 0).UTC()}
+	if err := store.OneWayJobs().SaveOneWayJob(ctx, job); err != nil {
+		t.Fatalf("SaveOneWayJob: %v", err)
+	}
+	claimed, err := store.OneWayJobs().ClaimOneWayJob(ctx, job.ID, time.Unix(101, 0).UTC())
+	if err != nil || claimed.State != core.OneWayJobRunning || claimed.TransferID != job.TransferID {
+		t.Fatalf("claimed job = %+v, err=%v", claimed, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	store, err = Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer store.Close()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("reopen migrate: %v", err)
+	}
+	if err := store.OneWayJobs().RecoverRunningOneWayJobs(ctx, time.Unix(102, 0).UTC()); err != nil {
+		t.Fatalf("RecoverRunningOneWayJobs: %v", err)
+	}
+	runnable, err := store.OneWayJobs().ListRunnableOneWayJobs(ctx, time.Unix(102, 0).UTC())
+	if err != nil || len(runnable) != 1 || runnable[0].State != core.OneWayJobQueued {
+		t.Fatalf("runnable after restart = %+v, err=%v", runnable, err)
+	}
+}
+
 func saveTestShare(t *testing.T, store *Store, shareID core.ShareID) {
 	t.Helper()
 	if err := store.Shares().SaveShare(context.Background(), storage.Share{

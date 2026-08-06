@@ -169,6 +169,27 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 `),
 	},
+	{
+		Version: 2,
+		Name:    "persistent one-way sync jobs",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS one_way_jobs (
+    job_id TEXT PRIMARY KEY,
+    transfer_id TEXT NOT NULL REFERENCES transfers(transfer_id) ON DELETE CASCADE,
+    share_id TEXT NOT NULL REFERENCES shares(share_id) ON DELETE CASCADE,
+    revision_id TEXT,
+    relative_path TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('queued','running','retry_wait','paused','completed','failed')),
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS one_way_jobs_runnable_idx
+    ON one_way_jobs(state, next_attempt_at, created_at);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

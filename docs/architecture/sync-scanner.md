@@ -18,6 +18,12 @@ Scheduling behavior:
 - Scan failures use bounded exponential periodic backoff and reset after success.
 - Root availability is checked before every scan. Missing or unavailable roots skip the scan and cannot be interpreted as propagated deletions.
 
+One-way job behavior:
+
+- Queue rows reference an existing transfer ID; transfer bytes and verified chunks remain the resume source of truth.
+- Runnable jobs are claimed transactionally, bounded by configured concurrency, and retried with capped backoff.
+- Paused jobs are excluded until resumed. Running jobs are returned to queued state during restart recovery.
+
 Current scanner behavior:
 
 - Walks a share root deterministically.

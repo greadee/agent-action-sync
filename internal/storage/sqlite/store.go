@@ -88,6 +88,10 @@ func (store *Store) Transfers() storage.TransferStore {
 	return transferStore{db: store.db}
 }
 
+func (store *Store) OneWayJobs() storage.OneWayJobStore {
+	return oneWayJobStore{db: store.db}
+}
+
 func (store *Store) Audit() storage.AuditStore {
 	return auditStore{db: store.db}
 }
@@ -1220,6 +1224,109 @@ ORDER BY relative_path`, shareID)
 
 type transferStore struct {
 	db *sql.DB
+}
+
+type oneWayJobStore struct {
+	db *sql.DB
+}
+
+func (store oneWayJobStore) SaveOneWayJob(ctx context.Context, job core.OneWayJob) error {
+	if job.ID == "" || job.TransferID == "" || job.ShareID == "" || job.RelativePath == "" {
+		return errors.New("one-way job ID, transfer, share, and path are required")
+	}
+	if job.State == "" {
+		job.State = core.OneWayJobQueued
+	}
+	_, err := store.db.ExecContext(ctx, `
+INSERT INTO one_way_jobs(job_id, transfer_id, share_id, revision_id, relative_path, state, retry_count, next_attempt_at, last_error, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(job_id) DO UPDATE SET
+ transfer_id=excluded.transfer_id, share_id=excluded.share_id, revision_id=excluded.revision_id,
+ relative_path=excluded.relative_path, state=excluded.state, retry_count=excluded.retry_count,
+ next_attempt_at=excluded.next_attempt_at, last_error=excluded.last_error, updated_at=excluded.updated_at`,
+		job.ID, job.TransferID, job.ShareID, nullableString(string(job.RevisionID)), job.RelativePath, job.State,
+		job.RetryCount, nullableTime(job.NextAttemptAt), nullableString(job.LastError), formatTime(job.CreatedAt), formatTime(job.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("save one-way job %s: %w", job.ID, err)
+	}
+	return nil
+}
+
+func (store oneWayJobStore) GetOneWayJob(ctx context.Context, id string) (core.OneWayJob, error) {
+	return scanOneWayJob(store.db.QueryRowContext(ctx, `SELECT job_id, transfer_id, share_id, revision_id, relative_path, state, retry_count, next_attempt_at, last_error, created_at, updated_at FROM one_way_jobs WHERE job_id = ?`, id), "one-way job", id)
+}
+
+func (store oneWayJobStore) ListRunnableOneWayJobs(ctx context.Context, now time.Time) ([]core.OneWayJob, error) {
+	rows, err := store.db.QueryContext(ctx, `SELECT job_id, transfer_id, share_id, revision_id, relative_path, state, retry_count, next_attempt_at, last_error, created_at, updated_at FROM one_way_jobs WHERE state IN (?, ?) AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY COALESCE(next_attempt_at, created_at), created_at, job_id`, core.OneWayJobQueued, core.OneWayJobRetryWait, formatTime(now))
+	if err != nil {
+		return nil, fmt.Errorf("list runnable one-way jobs: %w", err)
+	}
+	defer rows.Close()
+	jobs := make([]core.OneWayJob, 0)
+	for rows.Next() {
+		job, scanErr := scanOneWayJob(rows, "one-way job", "")
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate runnable one-way jobs: %w", err)
+	}
+	return jobs, nil
+}
+
+func (store oneWayJobStore) ClaimOneWayJob(ctx context.Context, id string, now time.Time) (core.OneWayJob, error) {
+	result, err := store.db.ExecContext(ctx, `UPDATE one_way_jobs SET state = ?, updated_at = ? WHERE job_id = ? AND state IN (?, ?) AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`, core.OneWayJobRunning, formatTime(now), id, core.OneWayJobQueued, core.OneWayJobRetryWait, formatTime(now))
+	if err != nil {
+		return core.OneWayJob{}, fmt.Errorf("claim one-way job %s: %w", id, err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return core.OneWayJob{}, fmt.Errorf("check one-way job claim %s: %w", id, err)
+	}
+	if changed == 0 {
+		return core.OneWayJob{}, fmt.Errorf("%w: one-way job %s", storage.ErrNotFound, id)
+	}
+	return store.GetOneWayJob(ctx, id)
+}
+
+func (store oneWayJobStore) UpdateOneWayJob(ctx context.Context, job core.OneWayJob) error {
+	result, err := store.db.ExecContext(ctx, `UPDATE one_way_jobs SET state = ?, retry_count = ?, next_attempt_at = ?, last_error = ?, updated_at = ? WHERE job_id = ?`, job.State, job.RetryCount, nullableTime(job.NextAttemptAt), nullableString(job.LastError), formatTime(job.UpdatedAt), job.ID)
+	if err != nil {
+		return fmt.Errorf("update one-way job %s: %w", job.ID, err)
+	}
+	return requireChanged(result, "one-way job", job.ID)
+}
+
+func (store oneWayJobStore) RecoverRunningOneWayJobs(ctx context.Context, now time.Time) error {
+	_, err := store.db.ExecContext(ctx, `UPDATE one_way_jobs SET state = ?, next_attempt_at = ?, updated_at = ? WHERE state = ?`, core.OneWayJobQueued, formatTime(now), formatTime(now), core.OneWayJobRunning)
+	if err != nil {
+		return fmt.Errorf("recover running one-way jobs: %w", err)
+	}
+	return nil
+}
+
+func scanOneWayJob(scanner interface{ Scan(...any) error }, entity, id string) (core.OneWayJob, error) {
+	var job core.OneWayJob
+	var revisionID, nextAttempt, lastError sql.NullString
+	var createdAt, updatedAt string
+	err := scanner.Scan(&job.ID, &job.TransferID, &job.ShareID, &revisionID, &job.RelativePath, &job.State, &job.RetryCount, &nextAttempt, &lastError, &createdAt, &updatedAt)
+	if err != nil {
+		return core.OneWayJob{}, mapNotFound(err, entity, id)
+	}
+	if revisionID.Valid {
+		job.RevisionID = core.RevisionID(revisionID.String)
+	}
+	if nextAttempt.Valid {
+		job.NextAttemptAt = parseStoredTime(nextAttempt.String)
+	}
+	if lastError.Valid {
+		job.LastError = lastError.String
+	}
+	job.CreatedAt = parseStoredTime(createdAt)
+	job.UpdatedAt = parseStoredTime(updatedAt)
+	return job, nil
 }
 
 func (store transferStore) SaveTransfer(ctx context.Context, transfer core.Transfer) error {

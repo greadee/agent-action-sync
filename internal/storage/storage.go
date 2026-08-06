@@ -18,6 +18,7 @@ type Store interface {
 	FileIndex() FileIndexStore
 	Tombstones() TombstoneStore
 	Transfers() TransferStore
+	OneWayJobs() OneWayJobStore
 	Audit() AuditStore
 	Close() error
 }
@@ -94,6 +95,15 @@ type TransferStore interface {
 	GetTransfer(ctx context.Context, id core.TransferID) (core.Transfer, error)
 	SaveChunk(ctx context.Context, chunk core.TransferChunk) error
 	VerifiedChunks(ctx context.Context, transferID core.TransferID) ([]core.TransferChunk, error)
+}
+
+type OneWayJobStore interface {
+	SaveOneWayJob(ctx context.Context, job core.OneWayJob) error
+	GetOneWayJob(ctx context.Context, id string) (core.OneWayJob, error)
+	ListRunnableOneWayJobs(ctx context.Context, now time.Time) ([]core.OneWayJob, error)
+	ClaimOneWayJob(ctx context.Context, id string, now time.Time) (core.OneWayJob, error)
+	UpdateOneWayJob(ctx context.Context, job core.OneWayJob) error
+	RecoverRunningOneWayJobs(ctx context.Context, now time.Time) error
 }
 
 type AuditStore interface {
