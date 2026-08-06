@@ -1,11 +1,15 @@
 package sync
 
 import (
+	"regexp"
 	"strings"
 	"time"
 
 	"syncgate/internal/core"
 )
+
+var authorizationDiagnosticValue = regexp.MustCompile(`(?i)\bauthorization\b\s*[:=]\s*(?:bearer\s+)?(?:"[^"]*"|'[^']*'|\S+)`)
+var sensitiveDiagnosticValue = regexp.MustCompile(`(?i)\b(bearer|token|secret|password|api[_-]?key|private[_-]?key)\b(?:\s*[:=]\s*|\s+)(?:"[^"]*"|'[^']*'|\S+)`)
 
 type ScanDiagnostic struct {
 	ShareID     core.ShareID      `json:"share_id"`
@@ -123,6 +127,8 @@ func sanitizeDiagnosticText(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
 	}
+	value = authorizationDiagnosticValue.ReplaceAllString(value, "authorization=[redacted]")
+	value = sensitiveDiagnosticValue.ReplaceAllString(value, "$1=[redacted]")
 	fields := strings.Fields(value)
 	for i, field := range fields {
 		trimmed := strings.Trim(field, `"'()[]{}:,;`)

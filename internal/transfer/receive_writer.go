@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,14 +40,32 @@ type ReceiveWriter struct {
 	shareRoot       string
 	replaceExisting bool
 	historyDirName  string
-	file            *os.File
+	file            receiveFile
 	hasher          hash.Hash
 	written         int64
 	closed          bool
 	committed       bool
 }
 
+// receiveFile is the narrow filesystem boundary used by a receiving transfer.
+// Keeping it small makes write and flush failures testable without changing the
+// production path, which always uses an *os.File.
+type receiveFile interface {
+	io.Writer
+	Sync() error
+	Close() error
+}
+
 func NewReceiveWriter(spec ReceiveSpec) (*ReceiveWriter, error) {
+	return newReceiveWriter(spec, func(path string) (receiveFile, error) {
+		return os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	})
+}
+
+func newReceiveWriter(spec ReceiveSpec, openPartial func(string) (receiveFile, error)) (*ReceiveWriter, error) {
+	if openPartial == nil {
+		return nil, errors.New("partial-file opener is required")
+	}
 	if spec.ExpectedSize < 0 {
 		return nil, fmt.Errorf("expected size must be non-negative, got %d", spec.ExpectedSize)
 	}
@@ -74,7 +93,7 @@ func NewReceiveWriter(spec ReceiveSpec) (*ReceiveWriter, error) {
 	}
 
 	partialPath := destinationPath + spec.PartialSuffix
-	file, err := os.OpenFile(partialPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	file, err := openPartial(partialPath)
 	if err != nil {
 		return nil, fmt.Errorf("open partial file: %w", err)
 	}

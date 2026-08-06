@@ -3,10 +3,33 @@ package transfer
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+type failingReceiveFile struct {
+	file     *os.File
+	writeErr error
+	syncErr  error
+}
+
+func (file failingReceiveFile) Write(data []byte) (int, error) {
+	if file.writeErr != nil {
+		return 0, file.writeErr
+	}
+	return file.file.Write(data)
+}
+
+func (file failingReceiveFile) Sync() error {
+	if file.syncErr != nil {
+		return file.syncErr
+	}
+	return file.file.Sync()
+}
+
+func (file failingReceiveFile) Close() error { return file.file.Close() }
 
 func TestReceiveWriterCommitsVerifiedFile(t *testing.T) {
 	root := t.TempDir()
@@ -159,6 +182,76 @@ func TestReceiveWriterRejectsPathTraversal(t *testing.T) {
 		HashAlgorithm: HashSHA256,
 	}); err == nil {
 		t.Fatal("expected path traversal to be rejected")
+	}
+}
+
+func TestReceiveWriterDiskFullFaultLeavesDestinationUntouched(t *testing.T) {
+	root := t.TempDir()
+	destination := filepath.Join(root, "payload.txt")
+	if err := os.WriteFile(destination, []byte("existing"), 0o600); err != nil {
+		t.Fatalf("write destination: %v", err)
+	}
+	data := []byte("replacement")
+	hash := sha256.Sum256(data)
+	writer, err := newReceiveWriter(ReceiveSpec{
+		ShareRoot:       root,
+		RelativePath:    "payload.txt",
+		ExpectedSize:    int64(len(data)),
+		ExpectedHash:    hex.EncodeToString(hash[:]),
+		HashAlgorithm:   HashSHA256,
+		ReplaceExisting: true,
+	}, func(path string) (receiveFile, error) {
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		return failingReceiveFile{file: file, writeErr: errors.New("disk full")}, nil
+	})
+	if err != nil {
+		t.Fatalf("newReceiveWriter: %v", err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+	if _, err := writer.Write(data); err == nil {
+		t.Fatal("expected injected disk-full write failure")
+	}
+	got, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatalf("read destination: %v", err)
+	}
+	if string(got) != "existing" {
+		t.Fatalf("destination changed after write failure: %q", got)
+	}
+}
+
+func TestReceiveWriterFlushFaultLeavesDestinationUntouched(t *testing.T) {
+	root := t.TempDir()
+	data := []byte("payload")
+	hash := sha256.Sum256(data)
+	writer, err := newReceiveWriter(ReceiveSpec{
+		ShareRoot:     root,
+		RelativePath:  "payload.txt",
+		ExpectedSize:  int64(len(data)),
+		ExpectedHash:  hex.EncodeToString(hash[:]),
+		HashAlgorithm: HashSHA256,
+	}, func(path string) (receiveFile, error) {
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		return failingReceiveFile{file: file, syncErr: errors.New("disk full")}, nil
+	})
+	if err != nil {
+		t.Fatalf("newReceiveWriter: %v", err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+	if _, err := writer.Write(data); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := writer.Commit(); err == nil {
+		t.Fatal("expected injected disk-full flush failure")
+	}
+	if _, err := os.Stat(writer.DestinationPath()); !os.IsNotExist(err) {
+		t.Fatalf("destination should not exist after flush failure, err=%v", err)
 	}
 }
 

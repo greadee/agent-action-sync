@@ -2,6 +2,7 @@ package sync
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,18 @@ func TestPendingOrBlockedWorkFiltersCompletedAndSanitizesErrors(t *testing.T) {
 	}
 	if got[1].LastError != "open [redacted-path]" {
 		t.Fatalf("last error was not sanitized: %q", got[1].LastError)
+	}
+}
+
+func TestDiagnosticSanitizationRedactsPathsAndSecrets(t *testing.T) {
+	got := sanitizeDiagnosticText(`upload failed token=abc123 authorization: Bearer super-secret password "open-sesame" at C:\\Users\\alex\\SyncGate\\Drop`)
+	for _, leaked := range []string{"abc123", "super-secret", "open-sesame", `C:\\Users\\alex\\SyncGate\\Drop`} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("diagnostic leaked %q: %q", leaked, got)
+		}
+	}
+	if !strings.Contains(got, "[redacted]") || !strings.Contains(got, "[redacted-path]") {
+		t.Fatalf("diagnostic did not preserve redaction markers: %q", got)
 	}
 }
 
