@@ -114,6 +114,20 @@ CREATE TABLE transfer_chunks (
     PRIMARY KEY (transfer_id, chunk_index)
 );
 
+CREATE TABLE one_way_jobs (
+    job_id TEXT PRIMARY KEY,
+    transfer_id TEXT NOT NULL REFERENCES transfers(transfer_id) ON DELETE CASCADE,
+    share_id TEXT NOT NULL REFERENCES shares(share_id) ON DELETE CASCADE,
+    revision_id TEXT,
+    relative_path TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('queued','running','retry_wait','paused','completed','failed')),
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE tombstones (
     tombstone_id TEXT PRIMARY KEY,
     share_id TEXT NOT NULL REFERENCES shares(share_id) ON DELETE CASCADE,
@@ -159,4 +173,7 @@ CREATE TABLE audit_events (
 - All timestamps should be stored as UTC RFC3339 strings.
 - `relative_path` values are normalized paths, never raw user input.
 - Plaintext file contents, private keys, passwords, and session tokens must never be stored in audit metadata.
-- The history directory and partial-transfer directory are application-managed and excluded from ordinary synchronization.
+- The history, one-way incoming, and partial-transfer paths are application-managed and excluded from ordinary synchronization. Durable one-way intent files live under `.sync-incoming/` only until the revision/index transaction succeeds.
+- Tombstones are immutable deletion history. `expires_at` is metadata only until an explicit retention policy is implemented; expired rows are not automatically removed.
+- One-way jobs contain queue/retry metadata and reference an existing transfer; transfer chunks remain the sole resume source of truth.
+- A reappeared path is restored by advancing its `file_index.current_revision_id` to a non-deleted revision. The prior tombstone remains available as history, while active deletion propagation considers only tombstones still referenced by a deleted index entry.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,14 +40,32 @@ type ReceiveWriter struct {
 	shareRoot       string
 	replaceExisting bool
 	historyDirName  string
-	file            *os.File
+	file            receiveFile
 	hasher          hash.Hash
 	written         int64
 	closed          bool
 	committed       bool
 }
 
+// receiveFile is the narrow filesystem boundary used by a receiving transfer.
+// Keeping it small makes write and flush failures testable without changing the
+// production path, which always uses an *os.File.
+type receiveFile interface {
+	io.Writer
+	Sync() error
+	Close() error
+}
+
 func NewReceiveWriter(spec ReceiveSpec) (*ReceiveWriter, error) {
+	return newReceiveWriter(spec, func(path string) (receiveFile, error) {
+		return os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	})
+}
+
+func newReceiveWriter(spec ReceiveSpec, openPartial func(string) (receiveFile, error)) (*ReceiveWriter, error) {
+	if openPartial == nil {
+		return nil, errors.New("partial-file opener is required")
+	}
 	if spec.ExpectedSize < 0 {
 		return nil, fmt.Errorf("expected size must be non-negative, got %d", spec.ExpectedSize)
 	}
@@ -68,16 +87,13 @@ func NewReceiveWriter(spec ReceiveSpec) (*ReceiveWriter, error) {
 		return nil, err
 	}
 
-	destinationPath, err := filesystem.ResolveInsideShare(spec.ShareRoot, spec.RelativePath)
+	destinationPath, err := filesystem.EnsureParentDirectoriesInsideShare(spec.ShareRoot, spec.RelativePath, 0o700)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
-		return nil, fmt.Errorf("create destination directory: %w", err)
-	}
 
 	partialPath := destinationPath + spec.PartialSuffix
-	file, err := os.OpenFile(partialPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	file, err := openPartial(partialPath)
 	if err != nil {
 		return nil, fmt.Errorf("open partial file: %w", err)
 	}
@@ -156,11 +172,12 @@ func (writer *ReceiveWriter) prepareDestinationForCommit() error {
 		return fmt.Errorf("destination already exists: %s", writer.destinationPath)
 	}
 
-	historyPath, err := writer.historyPath()
+	historyRelativePath, err := writer.historyRelativePath()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil {
+	historyPath, err := filesystem.EnsureParentDirectoriesInsideShare(writer.shareRoot, historyRelativePath, 0o700)
+	if err != nil {
 		return fmt.Errorf("create history directory: %w", err)
 	}
 	if err := os.Rename(writer.destinationPath, historyPath); err != nil {
@@ -169,16 +186,16 @@ func (writer *ReceiveWriter) prepareDestinationForCommit() error {
 	return nil
 }
 
-func (writer *ReceiveWriter) historyPath() (string, error) {
-	normalized, err := filesystem.NormalizeRelativePath(writer.destinationPath)
-	if err == nil {
-		return filesystem.ResolveInsideShare(writer.shareRoot, filepath.Join(writer.historyDirName, normalized+"."+historyStamp()))
-	}
-	relative, relErr := filepath.Rel(filepath.Clean(writer.shareRoot), writer.destinationPath)
-	if relErr != nil {
+func (writer *ReceiveWriter) historyRelativePath() (string, error) {
+	relative, err := filepath.Rel(filepath.Clean(writer.shareRoot), writer.destinationPath)
+	if err != nil {
 		return "", fmt.Errorf("make history path: %w", err)
 	}
-	return filesystem.ResolveInsideShare(writer.shareRoot, filepath.Join(writer.historyDirName, relative+"."+historyStamp()))
+	normalized, err := filesystem.NormalizeRelativePath(relative)
+	if err != nil {
+		return "", fmt.Errorf("normalize history path: %w", err)
+	}
+	return filepath.ToSlash(filepath.Join(writer.historyDirName, normalized+"."+historyStamp())), nil
 }
 
 func historyStamp() string {

@@ -1,0 +1,8 @@
+{
+  "protocol_version": 1,
+  "request_id": "request-101",
+  "responder_device_id": "DEVICE-2",
+  "share_id": "share-1",
+  "revision_id": "revision-100",
+  "status": "accepted"
+}

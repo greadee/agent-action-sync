@@ -1,12 +1,12 @@
 # Private Sync Gate
 
-Private Sync Gate is a planned cross-platform, personal file transfer and synchronization agent for trusted computers. The product goal is to let an owner run agents across multiple machines, coordinate shared workspaces, move files between those machines, and later expose tightly limited browser access for unmanaged computers without turning a home computer into an open public file server.
+Private Sync Gate is a cross-platform, personal file transfer and one-way synchronization agent for trusted computers. The product goal is to let an owner run agents across multiple machines, coordinate shared workspaces, and move files between those machines without turning a home computer into an open public file server.
 
-This repository is currently in Phase 0: architecture and threat model. The first implementation target is a Windows desktop and Windows laptop using manual pairing, explicit share permissions, safe chunked transfers, and local-only administration.
+The repository now contains the local transfer and one-way synchronization foundation. It is still an active development project: daemon lifecycle management, production pairing and mutual authentication, and a stable external API remain on the roadmap.
 
 ## Current Status
 
-The repository was empty when Phase 0 began. The current contents define:
+The current implementation provides:
 
 - Clean package boundaries for sync, transfer, storage, transport, and identity.
 - A dependency-free JSON config loader with loopback-only local API validation.
@@ -14,6 +14,7 @@ The repository was empty when Phase 0 began. The current contents define:
 - Initial share path normalization and containment helpers.
 - Fixed-size chunk planning for resumable transfers.
 - Safe receive-side partial file writing with hash verification before commit.
+- Folder scan manifests for future synchronization, including default ignores for history and partial files.
 - Initial Go interfaces for transport and storage.
 - Versioned SQLite migration definitions for local agent state.
 - Revision and transfer state models.
@@ -21,13 +22,14 @@ The repository was empty when Phase 0 began. The current contents define:
 - Threat model and trust boundaries.
 - Mermaid architecture diagrams.
 - ADRs for initial technology decisions.
-- Phase 1 implementation tasks and acceptance tests.
-
-No production file transfer path is implemented yet.
+- Manual send-once and receive-once commands over development TCP/TLS.
+- One-way folder scanning, revision manifests, reconciliation, deletion guards, and safe receiver-side apply.
+- Persistent synchronization jobs, retries, watcher reconciliation, scheduler safety, and per-share diagnostics.
+- Integration, fuzz, and package-level tests for the transfer and synchronization paths.
 
 ## MVP Boundary
 
-Phase 1 will focus on local manual transfer between trusted personal computers:
+The current MVP boundary is local, owner-controlled transfer and one-way synchronization between trusted personal computers:
 
 - Manual device pairing.
 - Manual IP connection.
@@ -37,8 +39,10 @@ Phase 1 will focus on local manual transfer between trusted personal computers:
 - Temporary destination writes and atomic commit.
 - Transfer history in SQLite.
 - Path traversal protection.
+- Receiver-authoritative writes with temporary files, verification, and atomic commit.
+- Explicit one-way change permissions and guarded deletions.
 
-Later phases add LAN discovery, one-way sync, browser portal access, coordinator/relay services, and direct remote connectivity.
+Later phases add daemon lifecycle management, production pairing and mutual authentication, a stable API, LAN discovery, browser portal access, coordinator/relay services, and direct remote connectivity.
 
 ## Development
 

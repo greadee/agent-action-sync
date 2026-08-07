@@ -5,6 +5,7 @@ import "time"
 type DeviceID string
 type ShareID string
 type RevisionID string
+type TombstoneID string
 type TransferID string
 type ConflictID string
 

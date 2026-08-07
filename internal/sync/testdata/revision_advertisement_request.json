@@ -1,0 +1,32 @@
+{
+  "protocol_version": 1,
+  "request_id": "request-100",
+  "source_device_id": "DEVICE-1",
+  "target_device_id": "DEVICE-2",
+  "share_id": "share-1",
+  "limits": {
+    "max_entries": 4,
+    "max_bytes": 4096
+  },
+  "revisions": [
+    {
+      "revision_id": "revision-100",
+      "relative_path": "docs/report.txt",
+      "entry_type": "file",
+      "size": 5,
+      "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hash_algorithm": "sha256",
+      "sequence": 100,
+      "is_deleted": false
+    },
+    {
+      "revision_id": "revision-101",
+      "parent_revision_id": "revision-100",
+      "relative_path": "docs/obsolete.txt",
+      "entry_type": "deleted",
+      "size": 0,
+      "sequence": 101,
+      "is_deleted": true
+    }
+  ]
+}
