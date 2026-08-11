@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"syncgate/internal/api"
 	"syncgate/internal/config"
 	"syncgate/internal/core"
+	"syncgate/internal/daemon"
 	syncengine "syncgate/internal/sync"
 	"syncgate/internal/transfer"
 	tcptls "syncgate/internal/transport/tcp"
@@ -34,8 +37,22 @@ func main() {
 		runSendOnce(os.Args[2:])
 	case "status-server":
 		runStatusServer(os.Args[2:])
+	case "daemon":
+		runDaemon(os.Args[2:])
 	default:
 		exitf("unknown command %q", os.Args[1])
+	}
+}
+
+func runDaemon(args []string) {
+	flags := flag.NewFlagSet("daemon", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	_ = flags.Parse(args)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := daemon.RunConfig(ctx, *configPath, daemon.Options{}); err != nil {
+		exitf("%v", err)
 	}
 }
 
