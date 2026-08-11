@@ -5,10 +5,15 @@ The sync scanner is the first source-of-truth component for folder synchronizati
 Watcher trigger behavior:
 
 - A platform watcher is supplied behind the `Watcher` interface.
+- Windows uses `ReadDirectoryChangesW` with a bounded native buffer and
+  reconnects through a per-share supervisor after backend failure.
 - Events are debounced into one scan request and never mutate the index directly.
 - The trigger bounds events represented by one debounce window.
 - An explicit overflow, a bounded-queue overflow error, or another watcher error requests a full recovery scan.
 - The scheduler owns the resulting request and performs the authoritative scan.
+- A missing share root produces a full recovery request while the supervisor
+  retries; the scheduler's root preflight marks the scan unavailable instead of
+  treating the root as empty.
 
 Scheduling behavior:
 
