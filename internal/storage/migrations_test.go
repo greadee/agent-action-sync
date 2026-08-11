@@ -39,3 +39,9 @@ func TestValidateMigrationsRejectsVersionGaps(t *testing.T) {
 		t.Fatal("expected version gap to be rejected")
 	}
 }
+
+func TestPairingMigrationContainsAcceptanceLedger(t *testing.T) {
+	if !strings.Contains(Migrations[2].SQL, "CREATE TABLE IF NOT EXISTS pairing_acceptances") {
+		t.Fatal("pairing migration is missing acceptance ledger")
+	}
+}

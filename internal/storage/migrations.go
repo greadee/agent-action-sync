@@ -190,6 +190,21 @@ CREATE INDEX IF NOT EXISTS one_way_jobs_runnable_idx
     ON one_way_jobs(state, next_attempt_at, created_at);
 `),
 	},
+	{
+		Version: 3,
+		Name:    "pairing acceptance records",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS pairing_acceptances (
+    invite_id TEXT PRIMARY KEY,
+    peer_device_id TEXT NOT NULL REFERENCES devices(device_id),
+    fingerprint TEXT NOT NULL,
+    audit_id TEXT NOT NULL REFERENCES audit_events(audit_id),
+    accepted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pairing_acceptances_peer_idx
+    ON pairing_acceptances(peer_device_id, accepted_at);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

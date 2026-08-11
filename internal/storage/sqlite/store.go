@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -25,6 +26,10 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open sqlite store: %w", err)
 	}
 	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
@@ -90,6 +95,10 @@ func (store *Store) Transfers() storage.TransferStore {
 
 func (store *Store) OneWayJobs() storage.OneWayJobStore {
 	return oneWayJobStore{db: store.db}
+}
+
+func (store *Store) Pairings() storage.PairingStore {
+	return pairingStore{db: store.db}
 }
 
 func (store *Store) Audit() storage.AuditStore {
@@ -1458,16 +1467,219 @@ ORDER BY chunk_index`, transferID, core.ChunkVerified)
 	return chunks, nil
 }
 
-type auditStore struct {
+type pairingStore struct {
 	db *sql.DB
 }
 
-func (store auditStore) Record(ctx context.Context, event storage.AuditEvent) error {
+func (store pairingStore) Accept(ctx context.Context, acceptance storage.PairingAcceptance) (storage.PairingAcceptanceResult, error) {
+	if err := validatePairingAcceptance(acceptance); err != nil {
+		return storage.PairingAcceptanceResult{}, err
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return storage.PairingAcceptanceResult{}, fmt.Errorf("begin pairing acceptance: %w", err)
+	}
+	defer tx.Rollback()
+
+	var acceptedDeviceID core.DeviceID
+	var acceptedFingerprint string
+	err = tx.QueryRowContext(ctx,
+		`SELECT peer_device_id, fingerprint FROM pairing_acceptances WHERE invite_id = ?`,
+		acceptance.InviteID,
+	).Scan(&acceptedDeviceID, &acceptedFingerprint)
+	switch {
+	case err == nil:
+		if acceptedDeviceID != acceptance.Device.ID || acceptedFingerprint != acceptance.Device.Fingerprint {
+			return storage.PairingAcceptanceResult{}, errors.New("pairing invitation was already accepted for a different identity")
+		}
+		return storage.PairingAcceptanceResult{AlreadyAccepted: true}, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return storage.PairingAcceptanceResult{}, fmt.Errorf("inspect pairing acceptance: %w", err)
+	}
+
+	var existingPublicKey []byte
+	var existingFingerprint string
+	err = tx.QueryRowContext(ctx,
+		`SELECT public_key, fingerprint FROM devices WHERE device_id = ?`, acceptance.Device.ID,
+	).Scan(&existingPublicKey, &existingFingerprint)
+	if err == nil && (!bytes.Equal(existingPublicKey, acceptance.Device.PublicKey) || existingFingerprint != acceptance.Device.Fingerprint) {
+		return storage.PairingAcceptanceResult{}, errors.New("refusing to replace existing device identity material")
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return storage.PairingAcceptanceResult{}, fmt.Errorf("inspect existing paired device: %w", err)
+	}
+
+	acceptedAt := acceptance.AcceptedAt.UTC()
+	createdAt := acceptance.Device.CreatedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = acceptedAt
+	}
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO devices(device_id, display_name, public_key, fingerprint, trust_state, created_at, updated_at, last_seen_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(device_id) DO UPDATE SET
+    display_name = excluded.display_name,
+    public_key = excluded.public_key,
+    fingerprint = excluded.fingerprint,
+    trust_state = excluded.trust_state,
+    updated_at = excluded.updated_at`,
+		acceptance.Device.ID, acceptance.Device.DisplayName, acceptance.Device.PublicKey,
+		acceptance.Device.Fingerprint, storage.TrustTrusted, formatTime(createdAt), formatTime(acceptedAt), nil,
+	)
+	if err != nil {
+		return storage.PairingAcceptanceResult{}, fmt.Errorf("persist paired device %s: %w", acceptance.Device.ID, err)
+	}
+
+	seenShares := make(map[core.ShareID]bool, len(acceptance.Permissions))
+	for _, permission := range acceptance.Permissions {
+		if permission.DeviceID != acceptance.Device.ID {
+			return storage.PairingAcceptanceResult{}, errors.New("pairing permission device does not match accepted peer")
+		}
+		if seenShares[permission.ShareID] {
+			return storage.PairingAcceptanceResult{}, fmt.Errorf("duplicate pairing permission for share %s", permission.ShareID)
+		}
+		seenShares[permission.ShareID] = true
+		if err := setPermissionTx(ctx, tx, permission); err != nil {
+			return storage.PairingAcceptanceResult{}, err
+		}
+	}
+	if err := recordAuditTx(ctx, tx, acceptance.AuditEvent); err != nil {
+		return storage.PairingAcceptanceResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO pairing_acceptances(invite_id, peer_device_id, fingerprint, audit_id, accepted_at)
+VALUES (?, ?, ?, ?, ?)`,
+		acceptance.InviteID, acceptance.Device.ID, acceptance.Device.Fingerprint,
+		acceptance.AuditEvent.ID, formatTime(acceptedAt),
+	); err != nil {
+		return storage.PairingAcceptanceResult{}, fmt.Errorf("record pairing acceptance: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return storage.PairingAcceptanceResult{}, fmt.Errorf("commit pairing acceptance: %w", err)
+	}
+	return storage.PairingAcceptanceResult{}, nil
+}
+
+func (store pairingStore) Revoke(ctx context.Context, revocation storage.PairingRevocation) (storage.PairingRevocationResult, error) {
+	if revocation.DeviceID == "" {
+		return storage.PairingRevocationResult{}, errors.New("revoked device ID is required")
+	}
+	if revocation.RevokedAt.IsZero() {
+		return storage.PairingRevocationResult{}, errors.New("revocation time is required")
+	}
+	if revocation.AuditEvent.PeerDeviceID != revocation.DeviceID {
+		return storage.PairingRevocationResult{}, errors.New("pairing revocation audit peer does not match revoked device")
+	}
+	if err := validateAuditEvent(revocation.AuditEvent); err != nil {
+		return storage.PairingRevocationResult{}, err
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return storage.PairingRevocationResult{}, fmt.Errorf("begin pairing revocation: %w", err)
+	}
+	defer tx.Rollback()
+
+	var trustState storage.TrustState
+	if err := tx.QueryRowContext(ctx,
+		`SELECT trust_state FROM devices WHERE device_id = ?`, revocation.DeviceID,
+	).Scan(&trustState); err != nil {
+		return storage.PairingRevocationResult{}, mapNotFound(err, "device", string(revocation.DeviceID))
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM share_permissions WHERE device_id = ?`, revocation.DeviceID); err != nil {
+		return storage.PairingRevocationResult{}, fmt.Errorf("remove revoked device permissions: %w", err)
+	}
+	if trustState == storage.TrustRevoked {
+		if err := tx.Commit(); err != nil {
+			return storage.PairingRevocationResult{}, fmt.Errorf("commit repeated pairing revocation: %w", err)
+		}
+		return storage.PairingRevocationResult{AlreadyRevoked: true}, nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE devices SET trust_state = ?, updated_at = ? WHERE device_id = ?`,
+		storage.TrustRevoked, formatTime(revocation.RevokedAt.UTC()), revocation.DeviceID,
+	); err != nil {
+		return storage.PairingRevocationResult{}, fmt.Errorf("revoke paired device %s: %w", revocation.DeviceID, err)
+	}
+	if err := recordAuditTx(ctx, tx, revocation.AuditEvent); err != nil {
+		return storage.PairingRevocationResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return storage.PairingRevocationResult{}, fmt.Errorf("commit pairing revocation: %w", err)
+	}
+	return storage.PairingRevocationResult{}, nil
+}
+
+func validatePairingAcceptance(acceptance storage.PairingAcceptance) error {
+	if acceptance.InviteID == "" || acceptance.Device.ID == "" || acceptance.Device.DisplayName == "" ||
+		len(acceptance.Device.PublicKey) == 0 || acceptance.Device.Fingerprint == "" {
+		return errors.New("pairing acceptance identity fields are required")
+	}
+	if acceptance.AcceptedAt.IsZero() {
+		return errors.New("pairing acceptance time is required")
+	}
+	if acceptance.AuditEvent.PeerDeviceID != acceptance.Device.ID {
+		return errors.New("pairing acceptance audit peer does not match accepted device")
+	}
+	return validateAuditEvent(acceptance.AuditEvent)
+}
+
+func setPermissionTx(ctx context.Context, tx *sql.Tx, permission core.SharePermission) error {
+	if permission.ShareID == "" || permission.DeviceID == "" {
+		return errors.New("pairing permission share and device are required")
+	}
+	capability := func(cap core.Capability) int {
+		if permission.Capabilities[cap] {
+			return 1
+		}
+		return 0
+	}
+	for candidate := range permission.Capabilities {
+		if !core.IsShareCapability(candidate) {
+			return fmt.Errorf("unsupported pairing capability %q", candidate)
+		}
+	}
+	lanOnly := 0
+	if permission.LANOnly {
+		lanOnly = 1
+	}
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO share_permissions(share_id, device_id, can_list, can_read, can_upload, can_modify, can_rename, can_delete, can_access_history, can_restore_history, can_sync, lan_only)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(share_id, device_id) DO UPDATE SET
+    can_list = excluded.can_list,
+    can_read = excluded.can_read,
+    can_upload = excluded.can_upload,
+    can_modify = excluded.can_modify,
+    can_rename = excluded.can_rename,
+    can_delete = excluded.can_delete,
+    can_access_history = excluded.can_access_history,
+    can_restore_history = excluded.can_restore_history,
+    can_sync = excluded.can_sync,
+    lan_only = excluded.lan_only`,
+		permission.ShareID, permission.DeviceID,
+		capability(core.CapabilityList), capability(core.CapabilityRead), capability(core.CapabilityUpload),
+		capability(core.CapabilityModify), capability(core.CapabilityRename), capability(core.CapabilityDelete),
+		capability(core.CapabilityAccessHistory), capability(core.CapabilityRestore), capability(core.CapabilitySync), lanOnly,
+	)
+	if err != nil {
+		return fmt.Errorf("set pairing permission for share %s: %w", permission.ShareID, err)
+	}
+	return nil
+}
+
+func validateAuditEvent(event storage.AuditEvent) error {
+	if event.ID == "" || event.EventName == "" || event.Severity == "" || event.OccurredAt.IsZero() {
+		return errors.New("audit event ID, name, severity, and time are required")
+	}
+	return nil
+}
+
+func recordAuditTx(ctx context.Context, tx *sql.Tx, event storage.AuditEvent) error {
 	metadata, err := json.Marshal(event.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal audit metadata: %w", err)
 	}
-	_, err = store.db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO audit_events(audit_id, event_name, device_id, peer_device_id, share_id, transfer_id, revision_id, transport_type, severity, metadata_json, occurred_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.EventName, nullableString(string(event.DeviceID)), nullableString(string(event.PeerDeviceID)),
@@ -1476,6 +1688,69 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 	if err != nil {
 		return fmt.Errorf("record audit event %s: %w", event.ID, err)
+	}
+	return nil
+}
+
+type auditStore struct {
+	db *sql.DB
+}
+
+func (store auditStore) ListRecent(ctx context.Context, limit int) ([]storage.AuditEvent, error) {
+	if limit < 1 {
+		return nil, errors.New("audit event limit must be positive")
+	}
+	rows, err := store.db.QueryContext(ctx, `
+SELECT audit_id, event_name, device_id, peer_device_id, share_id, transfer_id, revision_id, transport_type, severity, metadata_json, occurred_at
+FROM audit_events ORDER BY occurred_at DESC, audit_id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent audit events: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]storage.AuditEvent, 0, limit)
+	for rows.Next() {
+		var event storage.AuditEvent
+		var deviceID, peerDeviceID, shareID, transferID, revisionID, transportType sql.NullString
+		var metadataJSON, occurredAt string
+		if err := rows.Scan(
+			&event.ID, &event.EventName, &deviceID, &peerDeviceID, &shareID, &transferID,
+			&revisionID, &transportType, &event.Severity, &metadataJSON, &occurredAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan audit event: %w", err)
+		}
+		event.DeviceID = core.DeviceID(deviceID.String)
+		event.PeerDeviceID = core.DeviceID(peerDeviceID.String)
+		event.ShareID = core.ShareID(shareID.String)
+		event.TransferID = core.TransferID(transferID.String)
+		event.RevisionID = core.RevisionID(revisionID.String)
+		event.TransportType = transportType.String
+		event.OccurredAt = parseStoredTime(occurredAt)
+		if err := json.Unmarshal([]byte(metadataJSON), &event.Metadata); err != nil {
+			return nil, fmt.Errorf("parse audit event %s metadata: %w", event.ID, err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate audit events: %w", err)
+	}
+	return events, nil
+}
+
+func (store auditStore) Record(ctx context.Context, event storage.AuditEvent) error {
+	if err := validateAuditEvent(event); err != nil {
+		return err
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin audit event: %w", err)
+	}
+	defer tx.Rollback()
+	if err := recordAuditTx(ctx, tx, event); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit audit event: %w", err)
 	}
 	return nil
 }

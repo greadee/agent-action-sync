@@ -19,6 +19,7 @@ type Store interface {
 	Tombstones() TombstoneStore
 	Transfers() TransferStore
 	OneWayJobs() OneWayJobStore
+	Pairings() PairingStore
 	Audit() AuditStore
 	Close() error
 }
@@ -109,4 +110,10 @@ type OneWayJobStore interface {
 
 type AuditStore interface {
 	Record(ctx context.Context, event AuditEvent) error
+	ListRecent(ctx context.Context, limit int) ([]AuditEvent, error)
+}
+
+type PairingStore interface {
+	Accept(ctx context.Context, acceptance PairingAcceptance) (PairingAcceptanceResult, error)
+	Revoke(ctx context.Context, revocation PairingRevocation) (PairingRevocationResult, error)
 }
