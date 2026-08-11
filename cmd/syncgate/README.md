@@ -15,7 +15,8 @@ Current commands:
 - `scan --config config.example.json --share share-id` runs one authoritative local scan for an eligible source share.
 - `job-pause`, `job-resume`, and `job-retry` each accept `--config` and `--job` to apply an idempotent local SQLite job control.
 - `diagnostics --file diagnostics.json --recent 5` prints a sanitized local diagnostics snapshot with recent scans, pending or blocked work, and ignored paths.
-- `receive-once` and `send-once` provide manual TCP/TLS file-transfer smoke paths.
+- `receive-once --config config.example.json --share-root PATH` accepts one manual file transfer only from a paired, trusted mutual-TLS peer.
+- `send-once --config config.example.json --peer DEVICE-ID --file PATH --relative-path PATH` sends one file after the receiver's certificate key matches that explicitly expected paired device.
 
 Production identity storage and legacy migration behavior are defined in
 `docs/architecture/identity-storage.md`. Set the config to production mode before
@@ -24,3 +25,6 @@ both development mode and an explicit insecure-storage opt-in.
 
 The signed invitation format, independent confirmation steps, idempotency, and
 revocation behavior are defined in `docs/architecture/pairing.md`.
+
+The direct TLS identity binding, rejection behavior, and precise encryption
+scope are defined in `docs/architecture/authenticated-transport.md`.

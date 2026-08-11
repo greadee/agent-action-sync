@@ -1,6 +1,6 @@
 # Transfer Protocol Outline
 
-The Phase 1 protocol is a peer-to-peer request/response protocol running over an authenticated transport session. The transport is responsible for authenticated encrypted streams; the transfer protocol is responsible for file manifests, chunk negotiation, chunk verification, and commit state.
+The Phase 1 protocol is a peer-to-peer request/response protocol running over an authenticated transport session. The direct TCP implementation provides a paired mutual-TLS stream for that connection; the transfer protocol is responsible for file manifests, chunk negotiation, chunk verification, authorization, and commit state. This does not claim file-level or relay end-to-end encryption.
 
 ## Message Families
 
