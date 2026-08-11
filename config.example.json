@@ -1,6 +1,11 @@
 {
   "device_name": "HOME-DESKTOP",
   "data_dir": "C:\\Users\\example\\AppData\\Local\\SyncGate",
+  "runtime_mode": "production",
+  "identity": {
+    "store": "windows_credential_manager",
+    "allow_insecure_development_file": false
+  },
   "local_api": {
     "host": "127.0.0.1",
     "port": 47820

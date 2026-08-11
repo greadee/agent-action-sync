@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	DatabaseFileName = "syncgate.db"
-	IdentityFileName = "identity.json"
+	DatabaseFileName         = "syncgate.db"
+	IdentityFileName         = "identity.json"
+	IdentityMetadataFileName = "identity-public.json"
 )
 
 var ErrAlreadyRunning = errors.New("daemon is already running")
@@ -127,7 +128,10 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 
 	privateKeyStore := options.IdentityStore
 	if privateKeyStore == nil {
-		privateKeyStore = identity.DevFileStore{Path: filepath.Join(cfg.DataDir, IdentityFileName)}
+		privateKeyStore, err = identityStoreForConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
 	}
 	deviceIdentity, err := loadOrCreateIdentity(privateKeyStore, options.NewIdentity)
 	if err != nil {
@@ -189,6 +193,30 @@ func RunConfig(ctx context.Context, configPath string, options Options) error {
 		return err
 	}
 	return daemon.Run(ctx)
+}
+
+func MigrateDevelopmentIdentity(cfg config.Config) (identity.DeviceIdentity, error) {
+	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
+		return identity.DeviceIdentity{}, fmt.Errorf("validate config: %w", err)
+	}
+	if cfg.RuntimeMode != config.RuntimeModeProduction || cfg.Identity.Store != config.IdentityStoreWindows {
+		return identity.DeviceIdentity{}, errors.New("identity migration requires production mode with Windows credential storage")
+	}
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		return identity.DeviceIdentity{}, fmt.Errorf("create data directory: %w", err)
+	}
+	production, err := identityStoreForConfig(cfg)
+	if err != nil {
+		return identity.DeviceIdentity{}, err
+	}
+	migrated, err := identity.MigrateDevelopmentIdentity(
+		identity.DevFileStore{Path: filepath.Join(cfg.DataDir, IdentityFileName)},
+		production,
+	)
+	if err != nil {
+		return identity.DeviceIdentity{}, fmt.Errorf("migrate development identity: %w", err)
+	}
+	return migrated, nil
 }
 
 func (daemon *Daemon) Run(ctx context.Context) error {
@@ -487,7 +515,7 @@ func loadOrCreateIdentity(store identity.PrivateKeyStore, newIdentity func() (id
 	if err == nil {
 		return deviceIdentity, nil
 	}
-	if !errors.Is(err, os.ErrNotExist) {
+	if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, identity.ErrIdentityNotFound) {
 		return identity.DeviceIdentity{}, err
 	}
 	if newIdentity == nil {
@@ -503,4 +531,26 @@ func loadOrCreateIdentity(store identity.PrivateKeyStore, newIdentity func() (id
 		return identity.DeviceIdentity{}, fmt.Errorf("save identity: %w", err)
 	}
 	return deviceIdentity, nil
+}
+
+func identityStoreForConfig(cfg config.Config) (identity.PrivateKeyStore, error) {
+	switch cfg.Identity.Store {
+	case config.IdentityStoreWindows:
+		store, err := identity.NewWindowsCredentialStore(identity.WindowsCredentialStoreOptions{
+			TargetName:   identity.CredentialTarget(cfg.DataDir),
+			MetadataPath: filepath.Join(cfg.DataDir, IdentityMetadataFileName),
+			LegacyPath:   filepath.Join(cfg.DataDir, IdentityFileName),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("configure Windows credential identity store: %w", err)
+		}
+		return store, nil
+	case config.IdentityStoreDevelopment:
+		if cfg.RuntimeMode != config.RuntimeModeDevelopment || !cfg.Identity.AllowInsecureDevelopmentFile {
+			return nil, errors.New("development identity store requires explicit development runtime opt-in")
+		}
+		return identity.DevFileStore{Path: filepath.Join(cfg.DataDir, IdentityFileName)}, nil
+	default:
+		return nil, fmt.Errorf("unsupported identity store %q", cfg.Identity.Store)
+	}
 }

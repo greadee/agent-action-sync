@@ -41,6 +41,8 @@ func main() {
 		runStatusServer(os.Args[2:])
 	case "daemon":
 		runDaemon(os.Args[2:])
+	case "identity-migrate":
+		runIdentityMigrate(os.Args[2:])
 	case "daemon-status":
 		runDaemonStatus(os.Args[2:])
 	case "scan":
@@ -54,6 +56,22 @@ func main() {
 	default:
 		exitf("unknown command %q", os.Args[1])
 	}
+}
+
+func runIdentityMigrate(args []string) {
+	flags := flag.NewFlagSet("identity-migrate", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	_ = flags.Parse(args)
+
+	cfg, err := config.LoadFile(context.Background(), *configPath)
+	if err != nil {
+		exitf("%v", err)
+	}
+	migrated, err := daemon.MigrateDevelopmentIdentity(cfg)
+	if err != nil {
+		exitf("%v", err)
+	}
+	fmt.Printf("syncgate identity migrated: device=%s\n", migrated.DeviceID)
 }
 
 func runDaemon(args []string) {

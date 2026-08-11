@@ -1,7 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -403,6 +407,46 @@ func TestBootstrapCreatesAndReloadsDurableRuntime(t *testing.T) {
 	}
 }
 
+func TestBootstrapKeepsPrivateIdentityOutOfSQLiteAndDiagnostics(t *testing.T) {
+	dataDir := t.TempDir()
+	privateKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x5a}, ed25519.SeedSize))
+	deviceIdentity, err := identity.FromKeyPair(privateKey.Public().(ed25519.PublicKey), privateKey)
+	if err != nil {
+		t.Fatalf("create deterministic identity: %v", err)
+	}
+	identityStore := &memoryIdentityStore{deviceIdentity: deviceIdentity, exists: true}
+	localDaemon, err := Bootstrap(context.Background(), testConfig(dataDir, t.TempDir()), Options{
+		IdentityStore: identityStore,
+	})
+	if err != nil {
+		t.Fatalf("bootstrap daemon: %v", err)
+	}
+
+	diagnostics, err := json.Marshal(localDaemon.Diagnostics())
+	if err != nil {
+		t.Fatalf("marshal diagnostics: %v", err)
+	}
+	assertPrivateIdentityAbsent(t, diagnostics, deviceIdentity.PrivateKey, "diagnostics")
+	if err := localDaemon.Close(); err != nil {
+		t.Fatalf("close daemon: %v", err)
+	}
+
+	databaseFiles, err := filepath.Glob(filepath.Join(dataDir, DatabaseFileName+"*"))
+	if err != nil {
+		t.Fatalf("find SQLite files: %v", err)
+	}
+	if len(databaseFiles) == 0 {
+		t.Fatal("SQLite database was not created")
+	}
+	for _, databasePath := range databaseFiles {
+		database, err := os.ReadFile(databasePath)
+		if err != nil {
+			t.Fatalf("read SQLite file %s: %v", filepath.Base(databasePath), err)
+		}
+		assertPrivateIdentityAbsent(t, database, deviceIdentity.PrivateKey, filepath.Base(databasePath))
+	}
+}
+
 func TestBootstrapRejectsUnavailableShareBeforeOpeningStorage(t *testing.T) {
 	opened := false
 	cfg := testConfig(t.TempDir(), filepath.Join(t.TempDir(), "missing-share"))
@@ -497,8 +541,13 @@ func TestRunRejectsDuplicateStart(t *testing.T) {
 
 func testConfig(dataDir, shareRoot string) config.Config {
 	return config.Config{
-		DeviceName: "TEST-DEVICE",
-		DataDir:    dataDir,
+		DeviceName:  "TEST-DEVICE",
+		DataDir:     dataDir,
+		RuntimeMode: config.RuntimeModeDevelopment,
+		Identity: config.IdentityConfig{
+			Store:                        config.IdentityStoreDevelopment,
+			AllowInsecureDevelopmentFile: true,
+		},
 		Shares: []config.ShareConfig{{
 			ID:       "share-1",
 			Name:     "Share 1",
@@ -617,6 +666,34 @@ func (store *failingStore) Close() error {
 
 var _ storage.Store = (*sqlite.Store)(nil)
 var _ identity.PrivateKeyStore = identity.DevFileStore{}
+
+type memoryIdentityStore struct {
+	deviceIdentity identity.DeviceIdentity
+	exists         bool
+}
+
+func (store *memoryIdentityStore) Save(deviceIdentity identity.DeviceIdentity) error {
+	store.deviceIdentity = deviceIdentity
+	store.exists = true
+	return nil
+}
+
+func (store *memoryIdentityStore) Load() (identity.DeviceIdentity, error) {
+	if !store.exists {
+		return identity.DeviceIdentity{}, identity.ErrIdentityNotFound
+	}
+	return store.deviceIdentity, nil
+}
+
+func assertPrivateIdentityAbsent(t *testing.T, content []byte, privateKey ed25519.PrivateKey, location string) {
+	t.Helper()
+	encoded := base64.StdEncoding.EncodeToString(privateKey)
+	if bytes.Contains(content, privateKey) ||
+		bytes.Contains(content, []byte(encoded)) ||
+		bytes.Contains(bytes.ToLower(content), []byte("private_key")) {
+		t.Fatalf("%s contains private identity material", location)
+	}
+}
 
 type daemonWatcher struct {
 	events chan syncengine.WatchEvent
