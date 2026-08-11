@@ -18,6 +18,10 @@ Watcher trigger behavior:
 Scheduling behavior:
 
 - Startup, periodic, manual, and watcher-triggered requests share one scheduler.
+- The daemon composes automatic runtimes for `one_way_source` and
+  `upload_only` shares; target and one-shot modes do not start source scanners.
+- Each runtime uses its share's configured scan interval and deletion limits at
+  the composition boundary, so callers cannot silently bypass guardrails.
 - A scan never overlaps another scan; one pending trigger is retained while a scan is running.
 - Scan cancellation is passed through to the scan operation.
 - Scan failures use bounded exponential periodic backoff and reset after success.
@@ -41,6 +45,8 @@ One-way job behavior:
 Diagnostics behavior:
 
 - Scan outcomes can be summarized as recent scan diagnostics with trigger, status, counts, deletion-guard reasons, and sanitized errors.
+- The daemon retains a bounded recent outcome history in memory and waits for
+  active scan runtimes to stop before closing SQLite during shutdown.
 - One-way jobs are summarized only when pending or blocked: queued, running, retry-wait, paused, or failed.
 - Ignored-path diagnostics report share ID, relative path, and matching pattern without printing share roots.
 - The CLI can print a local JSON diagnostics snapshot with `syncgate diagnostics --file <path> --recent 5`.

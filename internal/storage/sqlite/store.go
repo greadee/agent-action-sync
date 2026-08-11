@@ -324,6 +324,17 @@ WHERE i.share_id = ? AND i.relative_path = ?`, shareID, relativePath)
 	return scanRevision(row, "current revision", string(shareID)+"/"+relativePath)
 }
 
+func (store revisionStore) MaxSequence(ctx context.Context, originDeviceID core.DeviceID) (int64, error) {
+	var sequence int64
+	if err := store.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(sequence), 0) FROM revisions WHERE origin_device_id = ?`,
+		originDeviceID,
+	).Scan(&sequence); err != nil {
+		return 0, fmt.Errorf("load max revision sequence for %s: %w", originDeviceID, err)
+	}
+	return sequence, nil
+}
+
 type fileIndexStore struct {
 	db *sql.DB
 }
