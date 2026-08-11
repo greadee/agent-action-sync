@@ -33,6 +33,9 @@ func (tcp *Transport) Connect(ctx context.Context, deviceID core.DeviceID) (tran
 	if tcp.TLSConfig == nil {
 		return nil, errors.New("TLS config is required")
 	}
+	if deviceID == "" {
+		return nil, errors.New("expected paired device ID is required")
+	}
 	dialer := net.Dialer{}
 	conn, err := dialer.DialContext(ctx, "tcp", tcp.Address)
 	if err != nil {

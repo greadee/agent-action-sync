@@ -130,6 +130,10 @@ func verifyPeerConnection(state tls.ConnectionState, verifier PeerIdentityVerifi
 		return fmt.Errorf("%w: expected one peer certificate, got %d", ErrPeerCertificateInvalid, len(state.PeerCertificates))
 	}
 	certificate := state.PeerCertificates[0]
+	if !certificate.NotAfter.After(certificate.NotBefore) ||
+		certificate.NotAfter.Sub(certificate.NotBefore) > IdentityCertificateLifetime+identityCertificateClockSkew {
+		return fmt.Errorf("%w: certificate lifetime exceeds policy", ErrPeerCertificateInvalid)
+	}
 	if now.Before(certificate.NotBefore) {
 		return fmt.Errorf("%w: valid from %s", ErrPeerCertificateNotYetValid, certificate.NotBefore.UTC().Format(time.RFC3339))
 	}

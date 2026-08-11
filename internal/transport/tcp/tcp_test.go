@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,6 +157,36 @@ func TestMutualTLSRejectsAuthenticatedUnexpectedDevice(t *testing.T) {
 	clientErr, _ := handshakeSessions(t, serverTLS, clientTLS, transportIdentity(t, 50).DeviceID)
 	if !errors.Is(clientErr, ErrUnexpectedPeer) {
 		t.Fatalf("unexpected peer error = %v, want %v", clientErr, ErrUnexpectedPeer)
+	}
+}
+
+func TestMutualTLSRejectsExcessivePeerCertificateLifetime(t *testing.T) {
+	now := time.Unix(40_000, 0).UTC()
+	serverIdentity := transportIdentity(t, 52)
+	clientIdentity := transportIdentity(t, 53)
+	serverDevices := newTransportDeviceStore(trustedTransportDevice(clientIdentity))
+	clientDevices := newTransportDeviceStore(trustedTransportDevice(serverIdentity))
+	serverTLS := transportTLSConfig(t, serverIdentity, serverDevices, true, now)
+	clientTLS, err := identityTLSConfigAt(
+		IdentityTLSConfigOptions{
+			Identity: clientIdentity, PeerVerifier: pairing.TrustedPeerVerifier{Devices: clientDevices}, Server: false,
+		},
+		now.Add(-IdentityCertificateLifetime), now.Add(time.Hour), func() time.Time { return now },
+		bytes.NewReader(bytes.Repeat([]byte{54}, 64)),
+	)
+	if err != nil {
+		t.Fatalf("long-lived identityTLSConfigAt: %v", err)
+	}
+	_, serverErr := handshakeSessions(t, serverTLS, clientTLS, serverIdentity.DeviceID)
+	if !errors.Is(serverErr, ErrPeerCertificateInvalid) {
+		t.Fatalf("long-lived peer error = %v, want %v", serverErr, ErrPeerCertificateInvalid)
+	}
+}
+
+func TestTransportConnectRequiresExpectedPairedDevice(t *testing.T) {
+	transport := New("127.0.0.1:1", &tls.Config{MinVersion: tls.VersionTLS13})
+	if _, err := transport.Connect(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "expected paired device") {
+		t.Fatalf("Connect without expected peer error = %v", err)
 	}
 }
 
