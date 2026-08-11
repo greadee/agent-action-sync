@@ -463,15 +463,21 @@ func formatDiagnosticTime(value time.Time) string {
 
 func runReceiveOnce(args []string) {
 	flags := flag.NewFlagSet("receive-once", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
 	listen := flags.String("listen", "127.0.0.1:47821", "manual TCP/TLS listen address")
 	shareRoot := flags.String("share-root", "", "destination share root")
-	deviceID := flags.String("device-id", "RECEIVER", "local device ID for development TLS")
 	_ = flags.Parse(args)
 	if *shareRoot == "" {
 		exitf("--share-root is required")
 	}
 
-	tlsConfig, err := tcptls.DevTLSConfig(core.DeviceID(*deviceID), true)
+	localDaemon := openPairingDaemon(*configPath)
+	defer localDaemon.Close()
+	tlsConfig, err := tcptls.IdentityTLSConfig(tcptls.IdentityTLSConfigOptions{
+		Identity:     localDaemon.Identity,
+		PeerVerifier: pairing.TrustedPeerVerifier{Devices: localDaemon.Store.Devices()},
+		Server:       true,
+	})
 	if err != nil {
 		exitf("%v", err)
 	}
@@ -482,7 +488,7 @@ func runReceiveOnce(args []string) {
 		exitf("%v", err)
 	}
 	defer server.Close()
-	fmt.Printf("syncgate receiving on %s\n", server.Address)
+	fmt.Printf("syncgate receiving on %s device=%s\n", server.Address, localDaemon.Identity.DeviceID)
 
 	session, ok := <-sessions
 	if !ok {
@@ -502,10 +508,11 @@ func runReceiveOnce(args []string) {
 
 func runSendOnce(args []string) {
 	flags := flag.NewFlagSet("send-once", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
 	addr := flags.String("addr", "127.0.0.1:47821", "manual TCP/TLS receiver address")
 	source := flags.String("file", "", "source file to send")
 	relativePath := flags.String("relative-path", "", "destination relative path inside receiver share")
-	deviceID := flags.String("device-id", "SENDER", "local device ID for development TLS")
+	peerDeviceID := flags.String("peer", "", "expected paired receiver device ID")
 	chunkSize := flags.Int64("chunk-size", transfer.DefaultChunkSize, "fixed transfer chunk size")
 	_ = flags.Parse(args)
 	if *source == "" {
@@ -514,13 +521,21 @@ func runSendOnce(args []string) {
 	if *relativePath == "" {
 		exitf("--relative-path is required")
 	}
+	if strings.TrimSpace(*peerDeviceID) == "" {
+		exitf("--peer is required")
+	}
 
-	tlsConfig, err := tcptls.DevTLSConfig(core.DeviceID(*deviceID), false)
+	localDaemon := openPairingDaemon(*configPath)
+	defer localDaemon.Close()
+	tlsConfig, err := tcptls.IdentityTLSConfig(tcptls.IdentityTLSConfigOptions{
+		Identity:     localDaemon.Identity,
+		PeerVerifier: pairing.TrustedPeerVerifier{Devices: localDaemon.Store.Devices()},
+	})
 	if err != nil {
 		exitf("%v", err)
 	}
 	client := tcptls.New(*addr, tlsConfig)
-	session, err := client.Connect(context.Background(), "")
+	session, err := client.Connect(context.Background(), core.DeviceID(strings.TrimSpace(*peerDeviceID)))
 	if err != nil {
 		exitf("%v", err)
 	}
