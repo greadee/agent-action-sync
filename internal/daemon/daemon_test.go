@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"syncgate/internal/config"
+	"syncgate/internal/core"
 	"syncgate/internal/identity"
 	"syncgate/internal/storage"
 	"syncgate/internal/storage/sqlite"
@@ -259,6 +261,117 @@ func TestDaemonWatcherRecoveryReachesScheduler(t *testing.T) {
 	}
 }
 
+func TestDaemonSupervisesOneWayJobsWithConfiguredConcurrency(t *testing.T) {
+	dataDir := t.TempDir()
+	shareRoot := t.TempDir()
+	watcher := newDaemonWatcher(2)
+	cfg := testConfigWithInterval(dataDir, shareRoot, 3600)
+	cfg.Transfer.MaxParallelTransfers = 1
+	var active, maxActive atomic.Int32
+	daemon, err := Bootstrap(context.Background(), cfg, Options{
+		WatcherFactory:  func(string) (syncengine.Watcher, error) { return watcher, nil },
+		JobPollInterval: time.Millisecond,
+		JobExecutor: func(context.Context, core.OneWayJob) error {
+			current := active.Add(1)
+			for {
+				previous := maxActive.Load()
+				if current <= previous || maxActive.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			time.Sleep(5 * time.Millisecond)
+			active.Add(-1)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("bootstrap daemon: %v", err)
+	}
+	saveDaemonJob(t, daemon, "job-one", core.OneWayJobQueued)
+	saveDaemonJob(t, daemon, "job-two", core.OneWayJobQueued)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := runDaemon(t, daemon, ctx)
+	waitForJobState(t, daemon, "job-one", core.OneWayJobCompleted)
+	waitForJobState(t, daemon, "job-two", core.OneWayJobCompleted)
+	if maxActive.Load() != 1 {
+		t.Fatalf("job queue max concurrency = %d, want 1", maxActive.Load())
+	}
+	if work := daemon.Diagnostics().Work; len(work) != 0 {
+		t.Fatalf("completed jobs remained in diagnostics: %+v", work)
+	}
+	cancel()
+	if err := waitForDaemon(t, done); err != nil {
+		t.Fatalf("shutdown daemon: %v", err)
+	}
+}
+
+func TestDaemonRestartRecoversRunningJobOnce(t *testing.T) {
+	dataDir := t.TempDir()
+	shareRoot := t.TempDir()
+	first, err := Bootstrap(context.Background(), testConfigWithInterval(dataDir, shareRoot, 3600), Options{})
+	if err != nil {
+		t.Fatalf("bootstrap first daemon: %v", err)
+	}
+	saveDaemonJob(t, first, "recovered", core.OneWayJobRunning)
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first daemon: %v", err)
+	}
+
+	watcher := newDaemonWatcher(2)
+	var executions atomic.Int32
+	second, err := Bootstrap(context.Background(), testConfigWithInterval(dataDir, shareRoot, 3600), Options{
+		WatcherFactory:  func(string) (syncengine.Watcher, error) { return watcher, nil },
+		JobPollInterval: time.Millisecond,
+		JobExecutor: func(context.Context, core.OneWayJob) error {
+			executions.Add(1)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("bootstrap second daemon: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := runDaemon(t, second, ctx)
+	waitForJobState(t, second, "recovered", core.OneWayJobCompleted)
+	if executions.Load() != 1 {
+		t.Fatalf("recovered job executions = %d, want 1", executions.Load())
+	}
+	cancel()
+	if err := waitForDaemon(t, done); err != nil {
+		t.Fatalf("shutdown daemon: %v", err)
+	}
+}
+
+func TestDaemonFailsClosedWithoutPeerJobExecutor(t *testing.T) {
+	dataDir := t.TempDir()
+	shareRoot := t.TempDir()
+	watcher := newDaemonWatcher(2)
+	daemon, err := Bootstrap(context.Background(), testConfigWithInterval(dataDir, shareRoot, 3600), Options{
+		WatcherFactory:  func(string) (syncengine.Watcher, error) { return watcher, nil },
+		JobPollInterval: time.Millisecond,
+		JobRetryBase:    time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("bootstrap daemon: %v", err)
+	}
+	saveDaemonJob(t, daemon, "disabled", core.OneWayJobQueued)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := runDaemon(t, daemon, ctx)
+	job := waitForJobState(t, daemon, "disabled", core.OneWayJobRetryWait)
+	if job.LastError != ErrAutomaticPeerWorkDisabled.Error() {
+		t.Fatalf("disabled job error = %q", job.LastError)
+	}
+	work := daemon.Diagnostics().Work
+	if len(work) != 1 || work[0].LastError != ErrAutomaticPeerWorkDisabled.Error() {
+		t.Fatalf("disabled job diagnostics = %+v", work)
+	}
+	cancel()
+	if err := waitForDaemon(t, done); err != nil {
+		t.Fatalf("shutdown daemon: %v", err)
+	}
+}
+
 func TestBootstrapCreatesAndReloadsDurableRuntime(t *testing.T) {
 	dataDir := t.TempDir()
 	shareRoot := t.TempDir()
@@ -405,6 +518,51 @@ func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write test file: %v", err)
+	}
+}
+
+func saveDaemonJob(t *testing.T, daemon *Daemon, id string, state core.OneWayJobState) {
+	t.Helper()
+	now := time.Now().UTC()
+	transferID := core.TransferID("transfer-" + id)
+	if err := daemon.Store.Transfers().SaveTransfer(context.Background(), core.Transfer{
+		ID:           transferID,
+		Direction:    core.TransferSend,
+		PeerDeviceID: daemon.Identity.DeviceID,
+		ShareID:      "share-1",
+		RelativePath: id + ".txt",
+		State:        core.TransferQueued,
+		ChunkSize:    1,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}); err != nil {
+		t.Fatalf("save transfer: %v", err)
+	}
+	if err := daemon.Store.OneWayJobs().SaveOneWayJob(context.Background(), core.OneWayJob{
+		ID:           id,
+		TransferID:   transferID,
+		ShareID:      "share-1",
+		RelativePath: id + ".txt",
+		State:        state,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}); err != nil {
+		t.Fatalf("save one-way job: %v", err)
+	}
+}
+
+func waitForJobState(t *testing.T, daemon *Daemon, id string, state core.OneWayJobState) core.OneWayJob {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		job, err := daemon.Store.OneWayJobs().GetOneWayJob(context.Background(), id)
+		if err == nil && job.State == state {
+			return job
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for job %s state %s; last job=%+v err=%v", id, state, job, err)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

@@ -100,6 +100,7 @@ type TransferStore interface {
 type OneWayJobStore interface {
 	SaveOneWayJob(ctx context.Context, job core.OneWayJob) error
 	GetOneWayJob(ctx context.Context, id string) (core.OneWayJob, error)
+	ListOneWayJobs(ctx context.Context) ([]core.OneWayJob, error)
 	ListRunnableOneWayJobs(ctx context.Context, now time.Time) ([]core.OneWayJob, error)
 	ClaimOneWayJob(ctx context.Context, id string, now time.Time) (core.OneWayJob, error)
 	UpdateOneWayJob(ctx context.Context, job core.OneWayJob) error

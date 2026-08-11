@@ -2,7 +2,10 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"syncgate/internal/core"
@@ -28,6 +31,16 @@ type OneWayJobOutcome struct {
 	Err       error
 }
 
+type OneWayJobControl string
+
+const (
+	OneWayJobControlPause  OneWayJobControl = "pause"
+	OneWayJobControlResume OneWayJobControl = "resume"
+	OneWayJobControlRetry  OneWayJobControl = "retry"
+)
+
+var ErrActiveOneWayJob = errors.New("one-way job is active")
+
 func (queue OneWayJobQueue) Run(ctx context.Context) (<-chan OneWayJobOutcome, error) {
 	if queue.Jobs == nil || queue.Execute == nil {
 		return nil, fmt.Errorf("job store and executor are required")
@@ -50,6 +63,9 @@ func (queue OneWayJobQueue) Run(ctx context.Context) (<-chan OneWayJobOutcome, e
 	if queue.Now == nil {
 		queue.Now = func() time.Time { return time.Now().UTC() }
 	}
+	if err := queue.Jobs.RecoverRunningOneWayJobs(ctx, queue.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("recover running one-way jobs: %w", err)
+	}
 	outcomes := make(chan OneWayJobOutcome, queue.MaxConcurrent*2)
 	go queue.loop(ctx, outcomes)
 	return outcomes, nil
@@ -57,12 +73,11 @@ func (queue OneWayJobQueue) Run(ctx context.Context) (<-chan OneWayJobOutcome, e
 
 func (queue OneWayJobQueue) loop(ctx context.Context, outcomes chan<- OneWayJobOutcome) {
 	defer close(outcomes)
-	now := queue.Now().UTC()
-	_ = queue.Jobs.RecoverRunningOneWayJobs(ctx, now)
 	ticker := time.NewTicker(queue.PollInterval)
 	defer ticker.Stop()
 	active := make(chan struct{}, queue.MaxConcurrent)
 	done := make(chan OneWayJobOutcome, queue.MaxConcurrent)
+	var workers sync.WaitGroup
 
 	poll := func() {
 		jobs, err := queue.Jobs.ListRunnableOneWayJobs(ctx, queue.Now().UTC())
@@ -80,10 +95,12 @@ func (queue OneWayJobQueue) loop(ctx context.Context, outcomes chan<- OneWayJobO
 				<-active
 				continue
 			}
+			workers.Add(1)
 			go func(job core.OneWayJob) {
+				defer workers.Done()
+				defer func() { <-active }()
 				err := queue.Execute(ctx, job)
 				if ctx.Err() != nil {
-					<-active
 					return
 				}
 				outcome := OneWayJobOutcome{Job: job, Err: err}
@@ -107,7 +124,10 @@ func (queue OneWayJobQueue) loop(ctx context.Context, outcomes chan<- OneWayJobO
 					outcome.Err = fmt.Errorf("update job %s: %w", job.ID, updateErr)
 				}
 				outcome.Job = updated
-				done <- outcome
+				select {
+				case done <- outcome:
+				case <-ctx.Done():
+				}
 			}(job)
 		}
 	}
@@ -116,9 +136,9 @@ func (queue OneWayJobQueue) loop(ctx context.Context, outcomes chan<- OneWayJobO
 	for {
 		select {
 		case <-ctx.Done():
+			workers.Wait()
 			return
 		case outcome := <-done:
-			<-active
 			select {
 			case outcomes <- outcome:
 			default:
@@ -127,6 +147,65 @@ func (queue OneWayJobQueue) loop(ctx context.Context, outcomes chan<- OneWayJobO
 			poll()
 		}
 	}
+}
+
+func ControlOneWayJob(ctx context.Context, jobs storage.OneWayJobStore, id string, control OneWayJobControl, now time.Time) (core.OneWayJob, error) {
+	if jobs == nil {
+		return core.OneWayJob{}, errors.New("one-way job store is required")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return core.OneWayJob{}, errors.New("one-way job ID is required")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	job, err := jobs.GetOneWayJob(ctx, id)
+	if err != nil {
+		return core.OneWayJob{}, err
+	}
+	updated := job
+	switch control {
+	case OneWayJobControlPause:
+		switch job.State {
+		case core.OneWayJobPaused:
+			return job, nil
+		case core.OneWayJobQueued, core.OneWayJobRetryWait:
+			updated.State = core.OneWayJobPaused
+			updated.NextAttemptAt = time.Time{}
+		default:
+			return core.OneWayJob{}, fmt.Errorf("%w: cannot pause %s", ErrActiveOneWayJob, job.State)
+		}
+	case OneWayJobControlResume:
+		switch job.State {
+		case core.OneWayJobQueued:
+			return job, nil
+		case core.OneWayJobPaused:
+			updated.State = core.OneWayJobQueued
+			updated.NextAttemptAt = time.Time{}
+		default:
+			return core.OneWayJob{}, fmt.Errorf("cannot resume one-way job in %s state", job.State)
+		}
+	case OneWayJobControlRetry:
+		switch job.State {
+		case core.OneWayJobQueued:
+			return job, nil
+		case core.OneWayJobRetryWait, core.OneWayJobFailed:
+			updated.State = core.OneWayJobQueued
+			updated.RetryCount = 0
+			updated.NextAttemptAt = time.Time{}
+			updated.LastError = ""
+		default:
+			return core.OneWayJob{}, fmt.Errorf("cannot retry one-way job in %s state", job.State)
+		}
+	default:
+		return core.OneWayJob{}, fmt.Errorf("unsupported one-way job control %q", control)
+	}
+	updated.UpdatedAt = now.UTC()
+	if err := jobs.UpdateOneWayJob(ctx, updated); err != nil {
+		return core.OneWayJob{}, err
+	}
+	return updated, nil
 }
 
 func (queue OneWayJobQueue) backoff(retry int) time.Duration {

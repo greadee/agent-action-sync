@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"syncgate/internal/config"
 	"syncgate/internal/core"
 	"syncgate/internal/daemon"
+	"syncgate/internal/storage/sqlite"
 	syncengine "syncgate/internal/sync"
 	"syncgate/internal/transfer"
 	tcptls "syncgate/internal/transport/tcp"
@@ -39,6 +41,16 @@ func main() {
 		runStatusServer(os.Args[2:])
 	case "daemon":
 		runDaemon(os.Args[2:])
+	case "daemon-status":
+		runDaemonStatus(os.Args[2:])
+	case "scan":
+		runScan(os.Args[2:])
+	case "job-pause":
+		runJobControl(os.Args[2:], syncengine.OneWayJobControlPause)
+	case "job-resume":
+		runJobControl(os.Args[2:], syncengine.OneWayJobControlResume)
+	case "job-retry":
+		runJobControl(os.Args[2:], syncengine.OneWayJobControlRetry)
 	default:
 		exitf("unknown command %q", os.Args[1])
 	}
@@ -54,6 +66,86 @@ func runDaemon(args []string) {
 	if err := daemon.RunConfig(ctx, *configPath, daemon.Options{}); err != nil {
 		exitf("%v", err)
 	}
+}
+
+func runDaemonStatus(args []string) {
+	flags := flag.NewFlagSet("daemon-status", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	_ = flags.Parse(args)
+
+	store, closeStore := openLocalStore(*configPath)
+	defer closeStore()
+	jobs, err := store.OneWayJobs().ListOneWayJobs(context.Background())
+	if err != nil {
+		exitf("list one-way jobs: %v", err)
+	}
+	printDiagnostics(os.Stdout, syncengine.DiagnosticReport{
+		GeneratedAt: time.Now().UTC(),
+		Work:        syncengine.PendingOrBlockedWork(jobs),
+	}, len(jobs)+1)
+}
+
+func runScan(args []string) {
+	flags := flag.NewFlagSet("scan", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	shareID := flags.String("share", "", "source share ID to scan")
+	_ = flags.Parse(args)
+	if *shareID == "" {
+		exitf("--share is required")
+	}
+
+	cfg, err := config.LoadFile(context.Background(), *configPath)
+	if err != nil {
+		exitf("%v", err)
+	}
+	localDaemon, err := daemon.Bootstrap(context.Background(), cfg, daemon.Options{})
+	if err != nil {
+		exitf("%v", err)
+	}
+	defer localDaemon.Close()
+	diagnostic, err := localDaemon.ScanOnce(context.Background(), core.ShareID(*shareID))
+	if err != nil {
+		exitf("scan share %s: %v", *shareID, err)
+	}
+	printDiagnostics(os.Stdout, syncengine.DiagnosticReport{
+		GeneratedAt: time.Now().UTC(),
+		RecentScans: []syncengine.ScanDiagnostic{diagnostic},
+		Work:        localDaemon.Diagnostics().Work,
+	}, 1)
+}
+
+func runJobControl(args []string, control syncengine.OneWayJobControl) {
+	flags := flag.NewFlagSet("job-"+string(control), flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	jobID := flags.String("job", "", "one-way job ID")
+	_ = flags.Parse(args)
+	if *jobID == "" {
+		exitf("--job is required")
+	}
+
+	store, closeStore := openLocalStore(*configPath)
+	defer closeStore()
+	job, err := syncengine.ControlOneWayJob(context.Background(), store.OneWayJobs(), *jobID, control, time.Now().UTC())
+	if err != nil {
+		exitf("%v", err)
+	}
+	fmt.Printf("syncgate job=%s state=%s retries=%d\n", job.ID, job.State, job.RetryCount)
+}
+
+func openLocalStore(configPath string) (*sqlite.Store, func()) {
+	cfg, err := config.LoadFile(context.Background(), configPath)
+	if err != nil {
+		exitf("%v", err)
+	}
+	store, err := sqlite.Open(filepath.Join(cfg.DataDir, daemon.DatabaseFileName))
+	if err != nil {
+		exitf("open local storage: %v", err)
+	}
+	if err := store.Migrate(context.Background()); err != nil {
+		_ = store.Close()
+		exitf("migrate local storage: %v", err)
+	}
+	return store, func() { _ = store.Close() }
 }
 
 func runStatusServer(args []string) {

@@ -24,6 +24,7 @@ const (
 
 var ErrAlreadyRunning = errors.New("daemon is already running")
 var ErrClosed = errors.New("daemon is closed")
+var ErrAutomaticPeerWorkDisabled = errors.New("automatic peer job execution is disabled until trusted transport is configured")
 
 type Options struct {
 	OpenStore          func(string) (storage.Store, error)
@@ -34,6 +35,10 @@ type Options struct {
 	Now                func() time.Time
 	TombstoneRetention time.Duration
 	RecentScanLimit    int
+	JobExecutor        syncengine.OneWayJobExecutor
+	JobPollInterval    time.Duration
+	JobRetryBase       time.Duration
+	JobMaxBackoff      time.Duration
 }
 
 type Daemon struct {
@@ -53,11 +58,18 @@ type Daemon struct {
 	recentScans     []syncengine.ScanDiagnostic
 	recentScanLimit int
 	nowFn           func() time.Time
+	checkShareRoot  func(string) error
+	jobExecutor     syncengine.OneWayJobExecutor
+	jobPollInterval time.Duration
+	jobRetryBase    time.Duration
+	jobMaxBackoff   time.Duration
 }
 
 type shareRuntime struct {
-	manual  chan struct{}
-	runtime syncengine.ShareRuntime
+	rootPath string
+	manual   chan struct{}
+	scan     syncengine.ScheduledScan
+	runtime  syncengine.ShareRuntime
 }
 
 func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon, error) {
@@ -159,6 +171,11 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 		runtimes:        runtimes,
 		recentScanLimit: options.RecentScanLimit,
 		nowFn:           options.Now,
+		checkShareRoot:  checkRoot,
+		jobExecutor:     options.JobExecutor,
+		jobPollInterval: options.JobPollInterval,
+		jobRetryBase:    options.JobRetryBase,
+		jobMaxBackoff:   options.JobMaxBackoff,
 	}, nil
 }
 
@@ -237,22 +254,43 @@ func (daemon *Daemon) startRuntimes(ctx context.Context) error {
 		daemon.runtimeWG.Add(1)
 		go daemon.retainOutcomes(shareID, outcomes)
 	}
+	if err := daemon.startJobQueue(ctx); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (daemon *Daemon) retainOutcomes(shareID core.ShareID, outcomes <-chan syncengine.ScanOutcome) {
 	defer daemon.runtimeWG.Done()
 	for outcome := range outcomes {
-		finishedAt := daemon.currentTime()
-		diagnostic := syncengine.NewScanDiagnostic(shareID, outcome, finishedAt)
-		daemon.diagnosticsMu.Lock()
-		daemon.recentScans = append(daemon.recentScans, diagnostic)
-		if len(daemon.recentScans) > daemon.recentScanLimit {
-			start := len(daemon.recentScans) - daemon.recentScanLimit
-			daemon.recentScans = append([]syncengine.ScanDiagnostic(nil), daemon.recentScans[start:]...)
-		}
-		daemon.diagnosticsMu.Unlock()
+		daemon.recordScanOutcome(shareID, outcome)
 	}
+}
+
+func (daemon *Daemon) startJobQueue(ctx context.Context) error {
+	execute := daemon.jobExecutor
+	if execute == nil {
+		execute = func(context.Context, core.OneWayJob) error { return ErrAutomaticPeerWorkDisabled }
+	}
+	outcomes, err := (syncengine.OneWayJobQueue{
+		Jobs:          daemon.Store.OneWayJobs(),
+		Execute:       execute,
+		MaxConcurrent: daemon.Config.Transfer.MaxParallelTransfers,
+		PollInterval:  daemon.jobPollInterval,
+		RetryBase:     daemon.jobRetryBase,
+		MaxBackoff:    daemon.jobMaxBackoff,
+		Now:           daemon.nowFn,
+	}).Run(ctx)
+	if err != nil {
+		return fmt.Errorf("start one-way job queue: %w", err)
+	}
+	daemon.runtimeWG.Add(1)
+	go func() {
+		defer daemon.runtimeWG.Done()
+		for range outcomes {
+		}
+	}()
+	return nil
 }
 
 func (daemon *Daemon) currentTime() time.Time {
@@ -266,7 +304,15 @@ func (daemon *Daemon) Diagnostics() syncengine.DiagnosticReport {
 	daemon.diagnosticsMu.RLock()
 	recent := append([]syncengine.ScanDiagnostic(nil), daemon.recentScans...)
 	daemon.diagnosticsMu.RUnlock()
-	return syncengine.DiagnosticReport{GeneratedAt: daemon.currentTime(), RecentScans: recent}
+	report := syncengine.DiagnosticReport{GeneratedAt: daemon.currentTime(), RecentScans: recent}
+	if daemon.Store == nil {
+		return report
+	}
+	jobs, err := daemon.Store.OneWayJobs().ListOneWayJobs(context.Background())
+	if err == nil {
+		report.Work = syncengine.PendingOrBlockedWork(jobs)
+	}
+	return report
 }
 
 func (daemon *Daemon) RequestScan(ctx context.Context, shareID core.ShareID) error {
@@ -294,6 +340,58 @@ func (daemon *Daemon) RequestScan(ctx context.Context, shareID core.ShareID) err
 	default:
 		return nil
 	}
+}
+
+func (daemon *Daemon) ScanOnce(ctx context.Context, shareID core.ShareID) (syncengine.ScanDiagnostic, error) {
+	if daemon == nil {
+		return syncengine.ScanDiagnostic{}, ErrClosed
+	}
+	if ctx == nil {
+		return syncengine.ScanDiagnostic{}, errors.New("scan context is required")
+	}
+	daemon.mu.Lock()
+	if daemon.closed {
+		daemon.mu.Unlock()
+		return syncengine.ScanDiagnostic{}, ErrClosed
+	}
+	if daemon.cancel != nil {
+		daemon.mu.Unlock()
+		return syncengine.ScanDiagnostic{}, ErrAlreadyRunning
+	}
+	runtime, ok := daemon.runtimes[shareID]
+	checkRoot := daemon.checkShareRoot
+	daemon.mu.Unlock()
+	if !ok {
+		return syncengine.ScanDiagnostic{}, fmt.Errorf("share %s does not have an automatic scan runtime", shareID)
+	}
+	if checkRoot == nil {
+		checkRoot = syncengine.CheckShareRoot
+	}
+	outcome := syncengine.ScanOutcome{Trigger: syncengine.ScanRequest{Reason: syncengine.ScanTriggerManual}}
+	if err := checkRoot(runtime.rootPath); err != nil {
+		outcome.Skipped = true
+		outcome.Unavailable = true
+		outcome.Err = err
+		return daemon.recordScanOutcome(shareID, outcome), nil
+	}
+	result, err := runtime.scan(ctx)
+	outcome.Started = true
+	outcome.Result = result
+	outcome.Err = err
+	diagnostic := daemon.recordScanOutcome(shareID, outcome)
+	return diagnostic, err
+}
+
+func (daemon *Daemon) recordScanOutcome(shareID core.ShareID, outcome syncengine.ScanOutcome) syncengine.ScanDiagnostic {
+	diagnostic := syncengine.NewScanDiagnostic(shareID, outcome, daemon.currentTime())
+	daemon.diagnosticsMu.Lock()
+	daemon.recentScans = append(daemon.recentScans, diagnostic)
+	if len(daemon.recentScans) > daemon.recentScanLimit {
+		start := len(daemon.recentScans) - daemon.recentScanLimit
+		daemon.recentScans = append([]syncengine.ScanDiagnostic(nil), daemon.recentScans[start:]...)
+	}
+	daemon.diagnosticsMu.Unlock()
+	return diagnostic
 }
 
 func buildShareRuntimes(
@@ -348,7 +446,9 @@ func buildShareRuntimes(
 			return result, err
 		}
 		runtimes[core.ShareID(share.ID)] = shareRuntime{
-			manual: manual,
+			rootPath: share.RootPath,
+			manual:   manual,
+			scan:     scan,
 			runtime: syncengine.ShareRuntime{
 				Watcher: syncengine.ShareWatcherSupervisor{
 					RootPath: share.RootPath,

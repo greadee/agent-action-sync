@@ -41,6 +41,8 @@ One-way job behavior:
 - Queue rows reference an existing transfer ID; transfer bytes and verified chunks remain the resume source of truth.
 - Runnable jobs are claimed transactionally, bounded by configured concurrency, and retried with capped backoff.
 - Paused jobs are excluded until resumed. Running jobs are returned to queued state during restart recovery.
+- The daemon waits for active job workers before closing SQLite. Without a trusted transport executor, queued peer work fails closed and never opens a remote connection.
+- Local CLI controls pause, resume, or retry persisted jobs idempotently; status reads SQLite directly and does not open a listener.
 
 Diagnostics behavior:
 

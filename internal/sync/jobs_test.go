@@ -102,6 +102,82 @@ func TestOneWayJobQueuePauseResumeAndRestartRecovery(t *testing.T) {
 	}
 }
 
+func TestOneWayJobQueueWaitsForActiveWorkerBeforeClosing(t *testing.T) {
+	store := newMemoryJobStore(core.OneWayJob{ID: "cancel", TransferID: "transfer-cancel", ShareID: "share-1", RelativePath: "cancel.txt", State: core.OneWayJobQueued})
+	started := make(chan struct{}, 1)
+	stopped := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	queue, err := (OneWayJobQueue{
+		Jobs:          store,
+		MaxConcurrent: 1,
+		PollInterval:  time.Millisecond,
+		Execute: func(ctx context.Context, _ core.OneWayJob) error {
+			started <- struct{}{}
+			<-ctx.Done()
+			stopped <- struct{}{}
+			return ctx.Err()
+		},
+	}).Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	<-started
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not receive cancellation")
+	}
+	select {
+	case _, ok := <-queue:
+		if ok {
+			t.Fatal("queue emitted an outcome after cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queue did not close after active worker stopped")
+	}
+}
+
+func TestControlOneWayJobIsIdempotent(t *testing.T) {
+	store := newMemoryJobStore(
+		core.OneWayJob{ID: "queued", TransferID: "transfer-queued", ShareID: "share-1", RelativePath: "queued.txt", State: core.OneWayJobQueued},
+		core.OneWayJob{ID: "failed", TransferID: "transfer-failed", ShareID: "share-1", RelativePath: "failed.txt", State: core.OneWayJobFailed, RetryCount: 3, LastError: "token=secret"},
+		core.OneWayJob{ID: "running", TransferID: "transfer-running", ShareID: "share-1", RelativePath: "running.txt", State: core.OneWayJobRunning},
+	)
+	now := time.Unix(100, 0).UTC()
+
+	paused, err := ControlOneWayJob(context.Background(), store, "queued", OneWayJobControlPause, now)
+	if err != nil || paused.State != core.OneWayJobPaused {
+		t.Fatalf("pause = %+v, err=%v", paused, err)
+	}
+	pausedAgain, err := ControlOneWayJob(context.Background(), store, "queued", OneWayJobControlPause, now)
+	if err != nil || pausedAgain.State != core.OneWayJobPaused {
+		t.Fatalf("duplicate pause = %+v, err=%v", pausedAgain, err)
+	}
+
+	resumed, err := ControlOneWayJob(context.Background(), store, "queued", OneWayJobControlResume, now)
+	if err != nil || resumed.State != core.OneWayJobQueued {
+		t.Fatalf("resume = %+v, err=%v", resumed, err)
+	}
+	resumedAgain, err := ControlOneWayJob(context.Background(), store, "queued", OneWayJobControlResume, now)
+	if err != nil || resumedAgain.State != core.OneWayJobQueued {
+		t.Fatalf("duplicate resume = %+v, err=%v", resumedAgain, err)
+	}
+
+	retried, err := ControlOneWayJob(context.Background(), store, "failed", OneWayJobControlRetry, now)
+	if err != nil || retried.State != core.OneWayJobQueued || retried.RetryCount != 0 || retried.LastError != "" {
+		t.Fatalf("retry = %+v, err=%v", retried, err)
+	}
+	retriedAgain, err := ControlOneWayJob(context.Background(), store, "failed", OneWayJobControlRetry, now)
+	if err != nil || retriedAgain.State != core.OneWayJobQueued {
+		t.Fatalf("duplicate retry = %+v, err=%v", retriedAgain, err)
+	}
+
+	if _, err := ControlOneWayJob(context.Background(), store, "running", OneWayJobControlPause, now); !errors.Is(err, ErrActiveOneWayJob) {
+		t.Fatalf("pause running error = %v, want active job error", err)
+	}
+}
+
 func nextJobOutcome(t *testing.T, outcomes <-chan OneWayJobOutcome) OneWayJobOutcome {
 	t.Helper()
 	select {
@@ -139,6 +215,15 @@ func (store *memoryJobStore) GetOneWayJob(_ context.Context, id string) (core.On
 		return core.OneWayJob{}, storage.ErrNotFound
 	}
 	return job, nil
+}
+func (store *memoryJobStore) ListOneWayJobs(_ context.Context) ([]core.OneWayJob, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	jobs := make([]core.OneWayJob, 0, len(store.jobs))
+	for _, job := range store.jobs {
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
 }
 func (store *memoryJobStore) ListRunnableOneWayJobs(_ context.Context, now time.Time) ([]core.OneWayJob, error) {
 	store.mu.Lock()
