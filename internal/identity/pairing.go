@@ -16,7 +16,11 @@ import (
 	"syncgate/internal/core"
 )
 
-const PairingProtocol = "syncgate-pairing-v2"
+const (
+	PairingProtocol     = "syncgate-pairing-v2"
+	MaxPairingInviteTTL = 24 * time.Hour
+	pairingClockSkew    = 5 * time.Minute
+)
 
 var (
 	ErrPairingInviteExpired       = errors.New("pairing invite expired")
@@ -33,6 +37,7 @@ type PairingInvite struct {
 	Fingerprint   string            `json:"fingerprint"`
 	Protocol      string            `json:"protocol"`
 	Coordinator   string            `json:"coordinator,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
 	ExpiresAt     time.Time         `json:"expires_at"`
 	CodeHash      string            `json:"code_hash"`
 	RequestedCaps []core.Capability `json:"requested_capabilities,omitempty"`
@@ -47,6 +52,9 @@ func NewPairingInvite(identity DeviceIdentity, displayName string, ttl time.Dura
 func NewPairingInviteAt(deviceIdentity DeviceIdentity, displayName string, ttl time.Duration, requestedCaps []core.Capability, reader io.Reader, now time.Time) (PairingInvite, error) {
 	if ttl <= 0 {
 		return PairingInvite{}, fmt.Errorf("pairing invite ttl must be positive")
+	}
+	if ttl > MaxPairingInviteTTL {
+		return PairingInvite{}, fmt.Errorf("pairing invite ttl cannot exceed %s", MaxPairingInviteTTL)
 	}
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
@@ -70,6 +78,7 @@ func NewPairingInviteAt(deviceIdentity DeviceIdentity, displayName string, ttl t
 		PublicKey:     base64.StdEncoding.EncodeToString(validated.PublicKey),
 		Fingerprint:   validated.Fingerprint,
 		Protocol:      PairingProtocol,
+		CreatedAt:     now.UTC(),
 		ExpiresAt:     now.UTC().Add(ttl),
 		CodeHash:      base64.RawURLEncoding.EncodeToString(codeHash[:]),
 		OneTimeCode:   code,
@@ -130,7 +139,15 @@ func ValidatePairingInvite(invite PairingInvite, now time.Time) (PairingPeer, er
 	if invite.InviteID == "" || invite.CodeHash == "" || invite.Signature == "" {
 		return PairingPeer{}, fmt.Errorf("%w: required invitation proof is missing", ErrPairingInviteInvalid)
 	}
-	if !now.UTC().Before(invite.ExpiresAt.UTC()) {
+	createdAt := invite.CreatedAt.UTC()
+	expiresAt := invite.ExpiresAt.UTC()
+	if createdAt.IsZero() || expiresAt.IsZero() || !expiresAt.After(createdAt) || expiresAt.Sub(createdAt) > MaxPairingInviteTTL {
+		return PairingPeer{}, fmt.Errorf("%w: invitation lifetime is invalid", ErrPairingInviteInvalid)
+	}
+	if createdAt.After(now.UTC().Add(pairingClockSkew)) {
+		return PairingPeer{}, fmt.Errorf("%w: creation time is too far in the future", ErrPairingInviteInvalid)
+	}
+	if !now.UTC().Before(expiresAt) {
 		return PairingPeer{}, ErrPairingInviteExpired
 	}
 	if strings.TrimSpace(invite.DisplayName) == "" {
@@ -196,6 +213,7 @@ type pairingUnsignedInvite struct {
 	Fingerprint   string            `json:"fingerprint"`
 	Protocol      string            `json:"protocol"`
 	Coordinator   string            `json:"coordinator,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
 	ExpiresAt     time.Time         `json:"expires_at"`
 	CodeHash      string            `json:"code_hash"`
 	RequestedCaps []core.Capability `json:"requested_capabilities,omitempty"`
@@ -205,7 +223,7 @@ func pairingSigningPayload(invite PairingInvite) ([]byte, error) {
 	payload, err := json.Marshal(pairingUnsignedInvite{
 		InviteID: invite.InviteID, DeviceID: invite.DeviceID, DisplayName: invite.DisplayName,
 		PublicKey: invite.PublicKey, Fingerprint: invite.Fingerprint, Protocol: invite.Protocol,
-		Coordinator: invite.Coordinator, ExpiresAt: invite.ExpiresAt.UTC(), CodeHash: invite.CodeHash,
+		Coordinator: invite.Coordinator, CreatedAt: invite.CreatedAt.UTC(), ExpiresAt: invite.ExpiresAt.UTC(), CodeHash: invite.CodeHash,
 		RequestedCaps: invite.RequestedCaps,
 	})
 	if err != nil {
@@ -220,6 +238,7 @@ func pairingInviteID(invite PairingInvite) string {
 		string(invite.DeviceID),
 		invite.PublicKey,
 		invite.CodeHash,
+		invite.CreatedAt.UTC().Format(time.RFC3339Nano),
 		invite.ExpiresAt.UTC().Format(time.RFC3339Nano),
 	}, "\x00")))
 	return base64.RawURLEncoding.EncodeToString(sum[:16])

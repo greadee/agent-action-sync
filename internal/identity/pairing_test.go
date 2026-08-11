@@ -94,3 +94,18 @@ func TestPairingInviteRejectsTamperingAndConfirmationMismatch(t *testing.T) {
 		t.Fatalf("tampered invite error = %v", err)
 	}
 }
+
+func TestPairingInviteRejectsExcessiveLifetime(t *testing.T) {
+	privateKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
+	deviceIdentity, err := FromKeyPair(privateKey.Public().(ed25519.PublicKey), privateKey)
+	if err != nil {
+		t.Fatalf("FromKeyPair: %v", err)
+	}
+	_, err = NewPairingInviteAt(
+		deviceIdentity, "Laptop", MaxPairingInviteTTL+time.Second, nil,
+		bytes.NewReader(bytes.Repeat([]byte{11}, PairingCodeByteCount)), time.Unix(400, 0).UTC(),
+	)
+	if err == nil {
+		t.Fatal("expected excessive invitation lifetime to fail")
+	}
+}
