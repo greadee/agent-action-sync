@@ -33,6 +33,29 @@ const (
 	CapabilityRemoteAccess  Capability = "remote_access"
 )
 
+func ShareCapabilities() []Capability {
+	return []Capability{
+		CapabilityList,
+		CapabilityRead,
+		CapabilityUpload,
+		CapabilityModify,
+		CapabilityRename,
+		CapabilityDelete,
+		CapabilityAccessHistory,
+		CapabilityRestore,
+		CapabilitySync,
+	}
+}
+
+func IsShareCapability(candidate Capability) bool {
+	for _, capability := range ShareCapabilities() {
+		if candidate == capability {
+			return true
+		}
+	}
+	return false
+}
+
 type Revision struct {
 	ID               RevisionID
 	ShareID          ShareID
