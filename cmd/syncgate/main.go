@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	"syncgate/internal/config"
 	"syncgate/internal/core"
 	"syncgate/internal/daemon"
+	"syncgate/internal/pairing"
 	"syncgate/internal/storage/sqlite"
 	syncengine "syncgate/internal/sync"
 	"syncgate/internal/transfer"
@@ -43,6 +47,14 @@ func main() {
 		runDaemon(os.Args[2:])
 	case "identity-migrate":
 		runIdentityMigrate(os.Args[2:])
+	case "pair-create":
+		runPairCreate(os.Args[2:])
+	case "pair-inspect":
+		runPairInspect(os.Args[2:])
+	case "pair-accept":
+		runPairAccept(os.Args[2:])
+	case "pair-revoke":
+		runPairRevoke(os.Args[2:])
 	case "daemon-status":
 		runDaemonStatus(os.Args[2:])
 	case "scan":
@@ -72,6 +84,177 @@ func runIdentityMigrate(args []string) {
 		exitf("%v", err)
 	}
 	fmt.Printf("syncgate identity migrated: device=%s\n", migrated.DeviceID)
+}
+
+func runPairCreate(args []string) {
+	flags := flag.NewFlagSet("pair-create", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	ttl := flags.Duration("ttl", 10*time.Minute, "invitation lifetime")
+	requestedValue := flags.String("request", "", "advisory comma-separated share capabilities")
+	_ = flags.Parse(args)
+	requested, err := parsePairingCapabilities(*requestedValue)
+	if err != nil {
+		exitf("invalid --request: %v", err)
+	}
+
+	localDaemon := openPairingDaemon(*configPath)
+	defer localDaemon.Close()
+	created, err := (pairing.Service{Audit: localDaemon.Store.Audit()}).CreateInvitation(
+		context.Background(), localDaemon.Identity, localDaemon.Config.DeviceName, *ttl, requested,
+	)
+	if err != nil {
+		exitf("create pairing invitation: %v", err)
+	}
+	fmt.Printf("syncgate pairing invitation device=%s expires_at=%s\n", created.Invite.DeviceID, created.Invite.ExpiresAt.Format(time.RFC3339))
+	fmt.Printf("fingerprint=%s\n", created.Invite.Fingerprint)
+	fmt.Printf("code=%s\n", created.Invite.OneTimeCode)
+	fmt.Printf("invite=%s\n", created.Encoded)
+}
+
+func runPairInspect(args []string) {
+	flags := flag.NewFlagSet("pair-inspect", flag.ExitOnError)
+	encoded := flags.String("invite", "", "encoded pairing invitation")
+	_ = flags.Parse(args)
+	if strings.TrimSpace(*encoded) == "" {
+		exitf("--invite is required")
+	}
+	invite, err := (pairing.Service{}).InspectInvitation(*encoded)
+	if err != nil {
+		exitf("inspect pairing invitation: %v", err)
+	}
+	fmt.Printf("syncgate pairing peer device=%s name=%q\n", invite.DeviceID, invite.DisplayName)
+	fmt.Printf("fingerprint=%s\n", invite.Fingerprint)
+	fmt.Printf("expires_at=%s\n", invite.ExpiresAt.Format(time.RFC3339))
+	fmt.Printf("requested_capabilities=%s\n", formatPairingCapabilities(invite.RequestedCaps))
+}
+
+func runPairAccept(args []string) {
+	flags := flag.NewFlagSet("pair-accept", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	encoded := flags.String("invite", "", "encoded pairing invitation")
+	fingerprint := flags.String("fingerprint", "", "independently confirmed peer fingerprint")
+	code := flags.String("code", "", "independently confirmed one-time code")
+	lanOnly := flags.Bool("lan-only", true, "restrict all grants to LAN sessions")
+	var grantValues repeatedFlag
+	flags.Var(&grantValues, "grant", "explicit SHARE=capability,capability grant; repeat per share")
+	_ = flags.Parse(args)
+	if strings.TrimSpace(*encoded) == "" || strings.TrimSpace(*fingerprint) == "" || strings.TrimSpace(*code) == "" {
+		exitf("--invite, --fingerprint, and --code are required")
+	}
+	grants := make([]pairing.Grant, 0, len(grantValues))
+	for _, value := range grantValues {
+		grant, err := parsePairingGrant(value, *lanOnly)
+		if err != nil {
+			exitf("invalid --grant %q: %v", value, err)
+		}
+		grants = append(grants, grant)
+	}
+
+	localDaemon := openPairingDaemon(*configPath)
+	defer localDaemon.Close()
+	result, err := (pairing.Service{Pairings: localDaemon.Store.Pairings()}).Accept(context.Background(), pairing.AcceptRequest{
+		LocalDeviceID: localDaemon.Identity.DeviceID, EncodedInvite: *encoded,
+		ExpectedFingerprint: *fingerprint, OneTimeCode: *code, Grants: grants,
+	})
+	if err != nil {
+		exitf("accept pairing invitation: %v", err)
+	}
+	state := "accepted"
+	if result.AlreadyAccepted {
+		state = "already_accepted"
+	}
+	fmt.Printf("syncgate pairing device=%s state=%s explicit_grants=%d\n", result.Peer.DeviceID, state, len(grants))
+}
+
+func runPairRevoke(args []string) {
+	flags := flag.NewFlagSet("pair-revoke", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	deviceID := flags.String("device", "", "paired device ID to revoke")
+	_ = flags.Parse(args)
+	if strings.TrimSpace(*deviceID) == "" {
+		exitf("--device is required")
+	}
+
+	localDaemon := openPairingDaemon(*configPath)
+	defer localDaemon.Close()
+	result, err := (pairing.Service{Pairings: localDaemon.Store.Pairings()}).Revoke(
+		context.Background(), localDaemon.Identity.DeviceID, core.DeviceID(strings.TrimSpace(*deviceID)),
+	)
+	if err != nil {
+		exitf("revoke pairing: %v", err)
+	}
+	state := "revoked"
+	if result.AlreadyRevoked {
+		state = "already_revoked"
+	}
+	fmt.Printf("syncgate pairing device=%s state=%s\n", strings.TrimSpace(*deviceID), state)
+}
+
+func openPairingDaemon(configPath string) *daemon.Daemon {
+	cfg, err := config.LoadFile(context.Background(), configPath)
+	if err != nil {
+		exitf("%v", err)
+	}
+	localDaemon, err := daemon.Bootstrap(context.Background(), cfg, daemon.Options{})
+	if err != nil {
+		exitf("initialize local pairing state: %v", err)
+	}
+	return localDaemon
+}
+
+type repeatedFlag []string
+
+func (values *repeatedFlag) String() string { return strings.Join(*values, ";") }
+func (values *repeatedFlag) Set(value string) error {
+	*values = append(*values, value)
+	return nil
+}
+
+func parsePairingGrant(value string, lanOnly bool) (pairing.Grant, error) {
+	shareValue, capabilityValue, ok := strings.Cut(value, "=")
+	shareID := core.ShareID(strings.TrimSpace(shareValue))
+	if !ok || shareID == "" {
+		return pairing.Grant{}, errors.New("expected SHARE=capability,capability")
+	}
+	capabilities, err := parsePairingCapabilities(capabilityValue)
+	if err != nil {
+		return pairing.Grant{}, err
+	}
+	if len(capabilities) == 0 {
+		return pairing.Grant{}, errors.New("at least one capability is required")
+	}
+	return pairing.Grant{ShareID: shareID, Capabilities: capabilities, LANOnly: lanOnly}, nil
+}
+
+func parsePairingCapabilities(value string) ([]core.Capability, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	seen := make(map[core.Capability]bool)
+	capabilities := make([]core.Capability, 0)
+	for _, item := range strings.Split(value, ",") {
+		capability := core.Capability(strings.TrimSpace(item))
+		if !core.IsShareCapability(capability) {
+			return nil, fmt.Errorf("unsupported capability %q", capability)
+		}
+		if seen[capability] {
+			return nil, fmt.Errorf("duplicate capability %q", capability)
+		}
+		seen[capability] = true
+		capabilities = append(capabilities, capability)
+	}
+	sort.Slice(capabilities, func(i, j int) bool { return capabilities[i] < capabilities[j] })
+	return capabilities, nil
+}
+
+func formatPairingCapabilities(capabilities []core.Capability) string {
+	values := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		values = append(values, string(capability))
+	}
+	sort.Strings(values)
+	return strings.Join(values, ",")
 }
 
 func runDaemon(args []string) {

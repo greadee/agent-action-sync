@@ -17,7 +17,8 @@ The initial agent is split into these domains:
 - `internal/storage`: persistence interfaces. SQLite will be the first concrete implementation.
 - `internal/transfer`: transfer state machine and scheduler contracts.
 - `internal/sync`: future folder scan, manifest, one-way sync, tombstone, and conflict logic.
-- `internal/identity`: device key generation, fingerprinting, and production Windows credential storage; pairing follows in a later slice.
+- `internal/identity`: device key generation, signed pairing invitations, fingerprints, and production Windows credential storage.
+- `internal/pairing`: explicit pairing acceptance, least-privilege grants, audit, and revocation workflows.
 - `cmd/syncgate`: future foreground agent entry point.
 
 The sync domain must not import concrete transport, SQLite, UI, coordinator, relay, or platform-specific packages.

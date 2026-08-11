@@ -45,3 +45,18 @@ func TestPrintDiagnosticsIncludesRequiredSections(t *testing.T) {
 		t.Fatalf("diagnostics output did not apply recent limit:\n%s", got)
 	}
 }
+
+func TestParsePairingGrantRequiresExplicitSupportedCapabilities(t *testing.T) {
+	grant, err := parsePairingGrant("drop=sync,upload", true)
+	if err != nil {
+		t.Fatalf("parsePairingGrant: %v", err)
+	}
+	if grant.ShareID != "drop" || !grant.LANOnly || len(grant.Capabilities) != 2 {
+		t.Fatalf("grant = %+v", grant)
+	}
+	for _, invalid := range []string{"drop=", "=read", "drop=remote_access", "drop=read,read"} {
+		if _, err := parsePairingGrant(invalid, true); err == nil {
+			t.Fatalf("expected grant %q to fail", invalid)
+		}
+	}
+}

@@ -166,6 +166,14 @@ CREATE TABLE audit_events (
     metadata_json TEXT NOT NULL DEFAULT '{}',
     occurred_at TEXT NOT NULL
 );
+
+CREATE TABLE pairing_acceptances (
+    invite_id TEXT PRIMARY KEY,
+    peer_device_id TEXT NOT NULL REFERENCES devices(device_id),
+    fingerprint TEXT NOT NULL,
+    audit_id TEXT NOT NULL REFERENCES audit_events(audit_id),
+    accepted_at TEXT NOT NULL
+);
 ```
 
 ## Notes
@@ -176,4 +184,5 @@ CREATE TABLE audit_events (
 - The history, one-way incoming, and partial-transfer paths are application-managed and excluded from ordinary synchronization. Durable one-way intent files live under `.sync-incoming/` only until the revision/index transaction succeeds.
 - Tombstones are immutable deletion history. `expires_at` is metadata only until an explicit retention policy is implemented; expired rows are not automatically removed.
 - One-way jobs contain queue/retry metadata and reference an existing transfer; transfer chunks remain the sole resume source of truth.
+- Pairing acceptance rows make signed invitations idempotent per local database. Device trust, explicit permissions, acceptance, and audit are committed atomically.
 - A reappeared path is restored by advancing its `file_index.current_revision_id` to a non-deleted revision. The prior tombstone remains available as history, while active deletion propagation considers only tombstones still referenced by a deleted index entry.

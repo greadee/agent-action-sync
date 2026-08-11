@@ -30,7 +30,7 @@
 |---|---|---|---|---|---|
 | Path traversal | Paired or browser client sends malicious path | Receive request | Normalize path and verify containment before writes; reject symlinks and Windows-reserved names | Platform-specific path edge cases and TOCTOU filesystem changes | Fuzz path normalization and containment tests |
 | Malicious paired device | Trusted device is compromised | Peer protocol | Per-share capabilities enforced by receiver | Allowed shares remain exposed | Authorization integration tests |
-| Stolen laptop | Attacker obtains paired device | Device identity | Device revocation and share-level permissions | Offline data already synced | Revocation tests once implemented |
+| Stolen laptop | Attacker obtains paired device | Device identity | Atomic device revocation removes share permissions and authorization rejects revoked trust | Offline data already synced | Pairing revocation and authorization tests |
 | Relay compromise | Relay operator observes traffic | Relay transport | Endpoint encryption, relay forwards opaque streams | Traffic volume metadata visible | Relay metadata review |
 | Coordinator compromise | Coordinator operator observes presence | Presence service | Store minimal metadata only | Device online timing visible | Coordinator data-minimization tests |
 | School computer compromise | Managed browser may record activity | Browser portal | Short sessions, explicit logout, restricted shares | Downloaded files can remain on lab computer | Browser session expiry tests |
