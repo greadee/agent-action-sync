@@ -28,10 +28,10 @@ never from a caller field or certificate name.
 SyncGate pins the paired Ed25519 public key, rather than one exact generated
 certificate. This permits certificate renewal without changing device identity.
 TLS session tickets are disabled, and the trusted-device database is consulted
-for every new handshake, so revocation blocks new sessions. This slice does not
+for every new handshake, so revocation blocks new sessions. Revocation does not
 forcibly terminate a stream that completed authentication before revocation;
-per-action authorization and revocation rechecks belong to the authenticated
-session authorization layer.
+receiver-side one-way preparation, durable work creation, job execution, and
+apply therefore recheck current trust and share authorization for each action.
 
 ## Manual transport workflow
 
@@ -53,8 +53,10 @@ syncgate send-once --config config.json --addr 192.0.2.10:47821 `
 ```
 
 The sender must name the expected paired receiver. The receiver accepts only
-trusted paired identities. Share capability authorization is not attached to
-this manual transfer path until the next slice.
+trusted paired identities. The authenticated one-way workflow additionally
+binds `Session.RemoteDeviceID` to the manifest source, transfer, queue job, and
+apply request. The manual send-once/receive-once commands remain a separate
+single-transfer path.
 
 ## Security scope
 

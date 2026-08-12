@@ -39,8 +39,11 @@ one-way execution slices.
 
 ## Receiver preparation boundary
 
-The receiver validates a change request and its advertised source revision
-before any transfer work is created. It checks the request and policy scope,
+The receiver takes the source identity from the verified transport session and
+requires the manifest's source device to match it exactly. A caller-supplied
+device field never selects authorization identity. The receiver then validates
+the change request and its advertised source revision before any transfer work
+is created. It checks the request and policy scope,
 canonical relative path, source revision identity/share/origin, parent revision,
 entry type, action compatibility, and the target drift decision. Only after
 those checks does it call the authoritative share store for `sync` and the
@@ -49,11 +52,25 @@ slice; this service performs no file, revision, or file-index writes. The
 descriptor carries the target revision observed during preparation so apply can
 reject a stale decision before touching the destination.
 
+When a decision permits work, the receiver creates the receive transfer and
+one-way job in one SQLite transaction. Both rows carry the session-derived peer
+ID, share, path, and revision scope; the job also records its action capability.
+The transaction rechecks trusted device state, `sync`, the action capability,
+and the LAN-only restriction before inserting either row. A failed check leaves
+neither row behind. An idempotent replay is reauthorized before it can return an
+existing result, and mismatched peer or work scope fails closed.
+
+The queue reloads the referenced receive transfer and rechecks its identity,
+scope, current trust, and capabilities before invoking its executor. Send jobs
+do not use this receiver-side authorization gate.
+
 ## Safe apply and recovery
 
 File transfers commit first to a deterministic path under `.sync-incoming/` on
 the target share's volume. Apply verifies the staged file again, rechecks the
-target's current revision, and writes a durable intent before changing the
+session-derived peer against the prepared source, reauthorizes current `sync`
+and action capabilities, rechecks the target's current revision, and writes a
+durable intent before changing the
 destination. Existing files or directories move to a deterministic
 `.sync-history/one-way/` path before an authoritative replacement or deletion.
 The apply path rejects symlink components and unindexed filesystem drift.
@@ -70,3 +87,8 @@ destination content, finish an incomplete file/directory/deletion operation,
 and commit state without creating another history version. Intent and ready
 artifacts are removed after success. `.sync-incoming/`, `.sync-history/`, and
 partial files are excluded from authoritative scans.
+
+Revoking a peer does not need to terminate an already authenticated TLS stream
+to stop one-way work. New durable work, queued receive execution, and apply all
+consult current receiver state, so revocation blocks the next action before a
+filesystem or durable-state mutation.
