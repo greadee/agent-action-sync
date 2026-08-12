@@ -21,9 +21,9 @@ const (
 	defaultMaxHeaderBytes    = 16 << 10
 )
 
-// AdministrationService is the daemon-owned service boundary required by the
-// HTTP server. Later slices extend this boundary with read and command methods.
-type AdministrationService interface {
+// AdministrationReadiness is the lifecycle subset the HTTP server needs.
+// The full AdministrationService adds bounded read and command operations.
+type AdministrationReadiness interface {
 	Ready() bool
 }
 
@@ -33,7 +33,7 @@ type HealthResponse struct {
 
 type ServerOptions struct {
 	Address           string
-	Service           AdministrationService
+	Service           AdministrationReadiness
 	Authenticator     *AdminAuthenticator
 	V1Handler         http.Handler
 	ReadHeaderTimeout time.Duration
@@ -46,7 +46,7 @@ type ServerOptions struct {
 
 type Server struct {
 	httpServer      *http.Server
-	service         AdministrationService
+	service         AdministrationReadiness
 	authenticator   *AdminAuthenticator
 	v1Handler       http.Handler
 	shutdownTimeout time.Duration
