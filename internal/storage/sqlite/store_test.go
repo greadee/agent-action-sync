@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -793,6 +794,84 @@ func TestCommitOneWayApplyRollsBackAndAcceptsIdenticalRetry(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedOneWayWorkIsAtomicAndRechecksRevocationOnReplay(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	work := seedAuthenticatedOneWayWork(t, store, map[core.Capability]bool{
+		core.CapabilitySync:   true,
+		core.CapabilityModify: true,
+	})
+
+	created, err := store.OneWayWork().CreateAuthenticatedOneWayWork(ctx, work)
+	if err != nil || created.AlreadyCreated {
+		t.Fatalf("first CreateAuthenticatedOneWayWork = %+v, err=%v", created, err)
+	}
+	transferRecord, err := store.Transfers().GetTransfer(ctx, work.Transfer.ID)
+	if err != nil || transferRecord.PeerDeviceID != work.Transfer.PeerDeviceID {
+		t.Fatalf("stored transfer = %+v, err=%v", transferRecord, err)
+	}
+	job, err := store.OneWayJobs().GetOneWayJob(ctx, work.Job.ID)
+	if err != nil || job.PeerDeviceID != work.Job.PeerDeviceID || job.RequiredCapability != core.CapabilityModify || !job.Remote {
+		t.Fatalf("stored job = %+v, err=%v", job, err)
+	}
+
+	duplicate, err := store.OneWayWork().CreateAuthenticatedOneWayWork(ctx, work)
+	if err != nil || !duplicate.AlreadyCreated {
+		t.Fatalf("duplicate CreateAuthenticatedOneWayWork = %+v, err=%v", duplicate, err)
+	}
+	if err := store.Devices().RevokeDevice(ctx, work.Transfer.PeerDeviceID); err != nil {
+		t.Fatalf("RevokeDevice: %v", err)
+	}
+	if _, err := store.OneWayWork().CreateAuthenticatedOneWayWork(ctx, work); err == nil {
+		t.Fatal("revoked peer replay was accepted")
+	}
+}
+
+func TestAuthenticatedOneWayWorkRejectsCapabilityWithoutPartialRows(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	work := seedAuthenticatedOneWayWork(t, store, map[core.Capability]bool{core.CapabilitySync: true})
+
+	if _, err := store.OneWayWork().CreateAuthenticatedOneWayWork(ctx, work); err == nil {
+		t.Fatal("work without action capability was accepted")
+	}
+	if _, err := store.Transfers().GetTransfer(ctx, work.Transfer.ID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("transfer persisted after authorization failure: %v", err)
+	}
+	if _, err := store.OneWayJobs().GetOneWayJob(ctx, work.Job.ID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("job persisted after authorization failure: %v", err)
+	}
+}
+
+func seedAuthenticatedOneWayWork(t *testing.T, store *Store, capabilities map[core.Capability]bool) storage.AuthenticatedOneWayWork {
+	t.Helper()
+	ctx := context.Background()
+	peerID := core.DeviceID("DEVICE-AUTHENTICATED")
+	shareID := core.ShareID("share-authenticated-work")
+	if err := store.Devices().TrustDevice(ctx, storage.Device{ID: peerID, DisplayName: "source", PublicKey: []byte("public-key"), Fingerprint: "fingerprint", TrustState: storage.TrustTrusted}); err != nil {
+		t.Fatalf("TrustDevice: %v", err)
+	}
+	if err := store.Shares().SaveShare(ctx, storage.Share{ID: shareID, Name: "target", RootPath: t.TempDir(), Mode: storage.ShareOneWayTarget}); err != nil {
+		t.Fatalf("SaveShare: %v", err)
+	}
+	if err := store.Shares().SetPermission(ctx, core.SharePermission{ShareID: shareID, DeviceID: peerID, Capabilities: capabilities}); err != nil {
+		t.Fatalf("SetPermission: %v", err)
+	}
+	now := time.Unix(700, 0).UTC()
+	transferRecord := core.Transfer{
+		ID: "transfer-authenticated", Direction: core.TransferReceive, PeerDeviceID: peerID, ShareID: shareID,
+		RelativePath: "docs/report.txt", State: core.TransferQueued, Size: 12, ChunkSize: 4,
+		ContentHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", HashAlgorithm: "sha256", CreatedAt: now, UpdatedAt: now,
+	}
+	job := core.OneWayJob{
+		ID: "job-authenticated", TransferID: transferRecord.ID, PeerDeviceID: peerID, ShareID: shareID,
+		RevisionID: "revision-authenticated", RelativePath: transferRecord.RelativePath, RequiredCapability: core.CapabilityModify,
+		Remote: true,
+		State:  core.OneWayJobQueued, CreatedAt: now, UpdatedAt: now,
+	}
+	return storage.AuthenticatedOneWayWork{Transfer: transferRecord, Job: job, RequiredCapabilities: []core.Capability{core.CapabilitySync, core.CapabilityModify}, Remote: true}
+}
+
 func TestOneWayJobsPersistClaimAndRecoverAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "jobs.db")
@@ -813,7 +892,7 @@ func TestOneWayJobsPersistClaimAndRecoverAcrossRestart(t *testing.T) {
 	if err := store.Transfers().SaveTransfer(ctx, core.Transfer{ID: "transfer-job", Direction: core.TransferReceive, PeerDeviceID: "DEVICE-1", ShareID: shareID, RelativePath: "payload.txt", State: core.TransferPaused, ChunkSize: 4, CreatedAt: time.Unix(100, 0).UTC(), UpdatedAt: time.Unix(100, 0).UTC()}); err != nil {
 		t.Fatalf("SaveTransfer: %v", err)
 	}
-	job := core.OneWayJob{ID: "job-1", TransferID: "transfer-job", ShareID: shareID, RevisionID: "revision-1", RelativePath: "payload.txt", State: core.OneWayJobQueued, CreatedAt: time.Unix(100, 0).UTC(), UpdatedAt: time.Unix(100, 0).UTC()}
+	job := core.OneWayJob{ID: "job-1", TransferID: "transfer-job", PeerDeviceID: "DEVICE-1", ShareID: shareID, RevisionID: "revision-1", RelativePath: "payload.txt", RequiredCapability: core.CapabilityUpload, State: core.OneWayJobQueued, CreatedAt: time.Unix(100, 0).UTC(), UpdatedAt: time.Unix(100, 0).UTC()}
 	if err := store.OneWayJobs().SaveOneWayJob(ctx, job); err != nil {
 		t.Fatalf("SaveOneWayJob: %v", err)
 	}

@@ -5,14 +5,23 @@ The sync scanner is the first source-of-truth component for folder synchronizati
 Watcher trigger behavior:
 
 - A platform watcher is supplied behind the `Watcher` interface.
+- Windows uses `ReadDirectoryChangesW` with a bounded native buffer and
+  reconnects through a per-share supervisor after backend failure.
 - Events are debounced into one scan request and never mutate the index directly.
 - The trigger bounds events represented by one debounce window.
 - An explicit overflow, a bounded-queue overflow error, or another watcher error requests a full recovery scan.
 - The scheduler owns the resulting request and performs the authoritative scan.
+- A missing share root produces a full recovery request while the supervisor
+  retries; the scheduler's root preflight marks the scan unavailable instead of
+  treating the root as empty.
 
 Scheduling behavior:
 
 - Startup, periodic, manual, and watcher-triggered requests share one scheduler.
+- The daemon composes automatic runtimes for `one_way_source` and
+  `upload_only` shares; target and one-shot modes do not start source scanners.
+- Each runtime uses its share's configured scan interval and deletion limits at
+  the composition boundary, so callers cannot silently bypass guardrails.
 - A scan never overlaps another scan; one pending trigger is retained while a scan is running.
 - Scan cancellation is passed through to the scan operation.
 - Scan failures use bounded exponential periodic backoff and reset after success.
@@ -32,10 +41,14 @@ One-way job behavior:
 - Queue rows reference an existing transfer ID; transfer bytes and verified chunks remain the resume source of truth.
 - Runnable jobs are claimed transactionally, bounded by configured concurrency, and retried with capped backoff.
 - Paused jobs are excluded until resumed. Running jobs are returned to queued state during restart recovery.
+- The daemon waits for active job workers before closing SQLite. Without a trusted transport executor, queued peer work fails closed and never opens a remote connection.
+- Local CLI controls pause, resume, or retry persisted jobs idempotently; status reads SQLite directly and does not open a listener.
 
 Diagnostics behavior:
 
 - Scan outcomes can be summarized as recent scan diagnostics with trigger, status, counts, deletion-guard reasons, and sanitized errors.
+- The daemon retains a bounded recent outcome history in memory and waits for
+  active scan runtimes to stop before closing SQLite during shutdown.
 - One-way jobs are summarized only when pending or blocked: queued, running, retry-wait, paused, or failed.
 - Ignored-path diagnostics report share ID, relative path, and matching pattern without printing share roots.
 - The CLI can print a local JSON diagnostics snapshot with `syncgate diagnostics --file <path> --recent 5`.

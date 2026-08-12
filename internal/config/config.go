@@ -22,14 +22,25 @@ const (
 	DefaultDeletionLimitCount   = 100
 	DefaultDeletionLimitPercent = 10
 	DefaultTargetDriftPolicy    = "reject"
+	RuntimeModeProduction       = "production"
+	RuntimeModeDevelopment      = "development"
+	IdentityStoreWindows        = "windows_credential_manager"
+	IdentityStoreDevelopment    = "development_file"
 )
 
 type Config struct {
-	DeviceName string         `json:"device_name"`
-	DataDir    string         `json:"data_dir"`
-	LocalAPI   LocalAPIConfig `json:"local_api"`
-	Transfer   TransferConfig `json:"transfer"`
-	Shares     []ShareConfig  `json:"shares"`
+	DeviceName  string         `json:"device_name"`
+	DataDir     string         `json:"data_dir"`
+	RuntimeMode string         `json:"runtime_mode"`
+	Identity    IdentityConfig `json:"identity"`
+	LocalAPI    LocalAPIConfig `json:"local_api"`
+	Transfer    TransferConfig `json:"transfer"`
+	Shares      []ShareConfig  `json:"shares"`
+}
+
+type IdentityConfig struct {
+	Store                        string `json:"store"`
+	AllowInsecureDevelopmentFile bool   `json:"allow_insecure_development_file"`
 }
 
 type LocalAPIConfig struct {
@@ -77,6 +88,15 @@ func LoadFile(ctx context.Context, path string) (Config, error) {
 func (cfg *Config) ApplyDefaultsAndValidate() error {
 	cfg.DeviceName = strings.TrimSpace(cfg.DeviceName)
 	cfg.DataDir = strings.TrimSpace(cfg.DataDir)
+	cfg.RuntimeMode = strings.TrimSpace(cfg.RuntimeMode)
+	cfg.Identity.Store = strings.TrimSpace(cfg.Identity.Store)
+
+	if cfg.RuntimeMode == "" {
+		cfg.RuntimeMode = RuntimeModeProduction
+	}
+	if cfg.Identity.Store == "" {
+		cfg.Identity.Store = IdentityStoreWindows
+	}
 
 	if cfg.LocalAPI.Host == "" {
 		cfg.LocalAPI.Host = DefaultLocalAPIHost
@@ -96,6 +116,27 @@ func (cfg *Config) ApplyDefaultsAndValidate() error {
 	}
 	if cfg.DataDir == "" {
 		return errors.New("data_dir is required")
+	}
+	switch cfg.RuntimeMode {
+	case RuntimeModeProduction:
+		if cfg.Identity.Store != IdentityStoreWindows {
+			return fmt.Errorf("production runtime requires identity.store %q", IdentityStoreWindows)
+		}
+		if cfg.Identity.AllowInsecureDevelopmentFile {
+			return errors.New("production runtime cannot allow insecure development identity storage")
+		}
+	case RuntimeModeDevelopment:
+		switch cfg.Identity.Store {
+		case IdentityStoreWindows:
+		case IdentityStoreDevelopment:
+			if !cfg.Identity.AllowInsecureDevelopmentFile {
+				return errors.New("development file identity storage requires allow_insecure_development_file=true")
+			}
+		default:
+			return fmt.Errorf("unsupported identity.store %q", cfg.Identity.Store)
+		}
+	default:
+		return fmt.Errorf("unsupported runtime_mode %q", cfg.RuntimeMode)
 	}
 	if !isLoopbackHost(cfg.LocalAPI.Host) {
 		return fmt.Errorf("local_api.host must be loopback, got %q", cfg.LocalAPI.Host)

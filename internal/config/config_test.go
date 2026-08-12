@@ -20,6 +20,9 @@ func TestConfigDefaultsAndValidate(t *testing.T) {
 	if cfg.LocalAPI.Host != DefaultLocalAPIHost {
 		t.Fatalf("default local API host = %q", cfg.LocalAPI.Host)
 	}
+	if cfg.RuntimeMode != RuntimeModeProduction || cfg.Identity.Store != IdentityStoreWindows {
+		t.Fatalf("identity defaults = runtime %q store %q", cfg.RuntimeMode, cfg.Identity.Store)
+	}
 	if cfg.Transfer.ChunkSizeBytes != 4*1024*1024 {
 		t.Fatalf("default chunk size = %d", cfg.Transfer.ChunkSizeBytes)
 	}
@@ -32,6 +35,43 @@ func TestConfigDefaultsAndValidate(t *testing.T) {
 	}
 	if share.TargetDriftPolicy != DefaultTargetDriftPolicy {
 		t.Fatalf("default target drift policy = %q", share.TargetDriftPolicy)
+	}
+}
+
+func TestConfigRequiresExplicitDevelopmentIdentityOptIn(t *testing.T) {
+	cfg := Config{
+		DeviceName:  "DEV",
+		DataDir:     t.TempDir(),
+		RuntimeMode: RuntimeModeDevelopment,
+		Identity:    IdentityConfig{Store: IdentityStoreDevelopment},
+		Shares: []ShareConfig{{
+			ID: "drop", Name: "Drop", RootPath: t.TempDir(), Mode: "one_way_source",
+		}},
+	}
+	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
+		t.Fatal("expected development file identity store without explicit opt-in to fail")
+	}
+	cfg.Identity.AllowInsecureDevelopmentFile = true
+	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
+		t.Fatalf("validate explicit development identity store: %v", err)
+	}
+}
+
+func TestConfigRejectsDevelopmentIdentityInProduction(t *testing.T) {
+	cfg := Config{
+		DeviceName:  "PROD",
+		DataDir:     t.TempDir(),
+		RuntimeMode: RuntimeModeProduction,
+		Identity: IdentityConfig{
+			Store:                        IdentityStoreDevelopment,
+			AllowInsecureDevelopmentFile: true,
+		},
+		Shares: []ShareConfig{{
+			ID: "drop", Name: "Drop", RootPath: t.TempDir(), Mode: "one_way_source",
+		}},
+	}
+	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
+		t.Fatal("expected production development identity store to fail")
 	}
 }
 

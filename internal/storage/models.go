@@ -75,3 +75,36 @@ type AuditEvent struct {
 	Metadata      map[string]string
 	OccurredAt    time.Time
 }
+
+type PairingAcceptance struct {
+	InviteID    string
+	Device      Device
+	Permissions []core.SharePermission
+	AuditEvent  AuditEvent
+	AcceptedAt  time.Time
+}
+
+type PairingAcceptanceResult struct {
+	AlreadyAccepted bool
+}
+
+type PairingRevocation struct {
+	DeviceID   core.DeviceID
+	AuditEvent AuditEvent
+	RevokedAt  time.Time
+}
+
+type PairingRevocationResult struct {
+	AlreadyRevoked bool
+}
+
+type AuthenticatedOneWayWork struct {
+	Transfer             core.Transfer
+	Job                  core.OneWayJob
+	RequiredCapabilities []core.Capability
+	Remote               bool
+}
+
+type AuthenticatedOneWayWorkResult struct {
+	AlreadyCreated bool
+}

@@ -20,8 +20,11 @@ chunk-transfer details are intentionally outside this contract.
 
 Every message includes protocol version, request ID, device identity, share ID,
 and revision IDs where relevant. Request/response correlation uses `request_id`.
-The source remains authoritative only after later receiver-side authorization and
-policy validation.
+Device identity fields are protocol assertions, not authentication inputs. The
+receiver binds them to the peer ID derived from the verified transport session;
+any mismatch is rejected before authorization or durable work. The source
+remains authoritative only after receiver-side authorization and policy
+validation.
 
 ## Bounds and validation
 
@@ -41,10 +44,13 @@ policy validation.
   trimmed message. Successful and duplicate responses cannot include an error.
 
 The protocol types do not open files, create transfers, authorize peers, or
-apply revisions. Receiver preparation validates the request and advertised
-revision, then checks stored `sync` and action capabilities before returning a
-non-persistent descriptor that includes the observed target revision. For file
-changes, the transfer layer commits verified bytes to a receiver-selected
+apply revisions. Receiver preparation validates the session-bound request and
+advertised revision, then checks stored `sync` and action capabilities before
+returning a descriptor that includes the authenticated peer and observed target
+revision. The receiver atomically persists that identity on the receive transfer
+and one-way job only after reauthorization. For file changes, the transfer layer
+commits verified bytes to a receiver-selected
 `.sync-incoming/` path; no peer-supplied staging path is accepted. The apply
-executor revalidates content and target state before destination work and uses
-the source revision ID for the atomic revision/index commit.
+executor reauthorizes the authenticated peer, content, and target state before
+destination work and uses the source revision ID for the atomic revision/index
+commit.

@@ -30,7 +30,7 @@ func TestOneWayApplyRecoversFileCommitAndIsIdempotent(t *testing.T) {
 
 	failing := &failOnceOneWayApplyStore{next: fixture.store.FileIndex()}
 	executor := fixture.executor(failing)
-	if _, err := executor.Apply(fixture.ctx, syncengine.OneWayApplyRequest{Prepared: prepared, ShareRoot: fixture.root}); !errors.Is(err, errInjectedApplyCommit) {
+	if _, err := executor.Apply(fixture.ctx, syncengine.OneWayApplyRequest{AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.root}); !errors.Is(err, errInjectedApplyCommit) {
 		t.Fatalf("first Apply error = %v, want injected commit failure", err)
 	}
 	if contents := readTextFile(t, filepath.Join(fixture.root, "docs", "report.txt")); contents != "authoritative report" {
@@ -44,7 +44,7 @@ func TestOneWayApplyRecoversFileCommitAndIsIdempotent(t *testing.T) {
 		t.Fatalf("current revision after interrupted commit = %s, want %s", current.ID, base.ID)
 	}
 
-	result, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{Prepared: prepared, ShareRoot: fixture.root})
+	result, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.root})
 	if err != nil {
 		t.Fatalf("retry Apply: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestOneWayApplyRecoversFileCommitAndIsIdempotent(t *testing.T) {
 		t.Fatalf("accepted current revision = %+v, err=%v", current, err)
 	}
 
-	duplicate, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{Prepared: prepared, ShareRoot: fixture.root})
+	duplicate, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.root})
 	if err != nil {
 		t.Fatalf("duplicate Apply: %v", err)
 	}
@@ -67,6 +67,69 @@ func TestOneWayApplyRecoversFileCommitAndIsIdempotent(t *testing.T) {
 		t.Fatalf("duplicate result = %+v", duplicate)
 	}
 	assertInternalApplyPathsIgnored(t, fixture)
+}
+
+func TestAuthenticatedOneWaySessionCreatesAndAppliesOnlyAuthorizedWork(t *testing.T) {
+	fixture := newOneWayApplyFixture(t)
+	contents := "authenticated payload"
+	revision := fixture.fileRevision("authenticated.txt", contents, "revision-authenticated", "", 1)
+	preparation := fixture.preparationRequest(syncengine.OneWayActionAdd, revision, "", syncengine.TargetDriftReject)
+	service := syncengine.AuthenticatedOneWayWorkService{
+		Preparation:   syncengine.OneWayChangePreparationService{Shares: fixture.store.Shares()},
+		Work:          fixture.store.OneWayWork(),
+		Now:           func() time.Time { return fixture.now },
+		NewTransferID: func() (core.TransferID, error) { return "transfer-authenticated", nil },
+		NewJobID:      func() (string, error) { return "job-authenticated", nil },
+	}
+	result, err := service.PrepareAndQueue(fixture.ctx, integrationPeerSession(fixture.sourceDeviceID), syncengine.AuthenticatedOneWayWorkRequest{
+		Advertisement: fixture.advertisement(preparation),
+		Preparation:   preparation,
+		ChunkSize:     1024,
+	})
+	if err != nil {
+		t.Fatalf("PrepareAndQueue: %v", err)
+	}
+	storedTransfer, err := fixture.store.Transfers().GetTransfer(fixture.ctx, result.Transfer.ID)
+	if err != nil || storedTransfer.PeerDeviceID != fixture.sourceDeviceID {
+		t.Fatalf("stored transfer = %+v, err=%v", storedTransfer, err)
+	}
+	storedJob, err := fixture.store.OneWayJobs().GetOneWayJob(fixture.ctx, result.Job.ID)
+	if err != nil || storedJob.PeerDeviceID != fixture.sourceDeviceID || storedJob.RequiredCapability != core.CapabilityUpload {
+		t.Fatalf("stored job = %+v, err=%v", storedJob, err)
+	}
+	fixture.stageFile(t, result.Prepared, contents)
+	if _, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{
+		AuthenticatedPeerID: storedJob.PeerDeviceID,
+		Prepared:            result.Prepared,
+		ShareRoot:           fixture.root,
+	}); err != nil {
+		t.Fatalf("Apply authenticated work: %v", err)
+	}
+	if got := readTextFile(t, filepath.Join(fixture.root, revision.RelativePath)); got != contents {
+		t.Fatalf("applied contents = %q", got)
+	}
+
+	if err := fixture.store.Devices().RevokeDevice(fixture.ctx, fixture.sourceDeviceID); err != nil {
+		t.Fatalf("RevokeDevice: %v", err)
+	}
+	blockedRevision := fixture.fileRevision("blocked-new-work.txt", "blocked", "revision-blocked-new-work", "", 1)
+	blockedPreparation := fixture.preparationRequest(syncengine.OneWayActionAdd, blockedRevision, "", syncengine.TargetDriftReject)
+	service.NewTransferID = func() (core.TransferID, error) { return "transfer-blocked", nil }
+	service.NewJobID = func() (string, error) { return "job-blocked", nil }
+	_, err = service.PrepareAndQueue(fixture.ctx, integrationPeerSession(fixture.sourceDeviceID), syncengine.AuthenticatedOneWayWorkRequest{
+		Advertisement: fixture.advertisement(blockedPreparation),
+		Preparation:   blockedPreparation,
+		ChunkSize:     1024,
+	})
+	if !errors.Is(err, syncengine.ErrChangeAuthorization) {
+		t.Fatalf("revoked PrepareAndQueue error = %v, want %v", err, syncengine.ErrChangeAuthorization)
+	}
+	if _, err := fixture.store.Transfers().GetTransfer(fixture.ctx, "transfer-blocked"); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("revoked peer created transfer: %v", err)
+	}
+	if _, err := fixture.store.OneWayJobs().GetOneWayJob(fixture.ctx, "job-blocked"); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("revoked peer created job: %v", err)
+	}
 }
 
 func TestOneWayApplyDirectoryAndDeletionPreserveHistory(t *testing.T) {
@@ -77,7 +140,7 @@ func TestOneWayApplyDirectoryAndDeletionPreserveHistory(t *testing.T) {
 			EntryType: core.EntryDirectory, OriginDeviceID: fixture.sourceDeviceID, Sequence: 1, CreatedAt: fixture.now,
 		}
 		prepared := fixture.prepare(t, syncengine.OneWayActionAdd, revision, "", syncengine.TargetDriftReject)
-		result, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{Prepared: prepared, ShareRoot: fixture.root})
+		result, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.root})
 		if err != nil {
 			t.Fatalf("Apply directory: %v", err)
 		}
@@ -97,7 +160,7 @@ func TestOneWayApplyDirectoryAndDeletionPreserveHistory(t *testing.T) {
 		}
 		deletePrepared := fixture.prepare(t, syncengine.OneWayActionDelete, deletion, revision.ID, syncengine.TargetDriftReject)
 		deleted, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{
-			Prepared: deletePrepared, ShareRoot: fixture.root, TombstoneID: "tombstone-directory",
+			AuthenticatedPeerID: deletePrepared.AuthenticatedPeerID, Prepared: deletePrepared, ShareRoot: fixture.root, TombstoneID: "tombstone-directory",
 		})
 		if err != nil {
 			t.Fatalf("Apply directory deletion: %v", err)
@@ -118,7 +181,7 @@ func TestOneWayApplyDirectoryAndDeletionPreserveHistory(t *testing.T) {
 		}
 		prepared := fixture.prepare(t, syncengine.OneWayActionDelete, deletion, base.ID, syncengine.TargetDriftReject)
 		request := syncengine.OneWayApplyRequest{
-			Prepared: prepared, ShareRoot: fixture.root, TombstoneID: "tombstone-delete",
+			AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.root, TombstoneID: "tombstone-delete",
 			TombstoneExpiresAt: fixture.now.Add(24 * time.Hour),
 		}
 		result, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, request)
@@ -154,7 +217,7 @@ func TestOneWayApplyPreservesKnownTargetDrift(t *testing.T) {
 	prepared := fixture.prepare(t, syncengine.OneWayActionModify, source, target.ID, syncengine.TargetDriftPreserveConflictCopy)
 	fixture.stageFile(t, prepared, "source edit")
 
-	result, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{Prepared: prepared, ShareRoot: fixture.root})
+	result, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.root})
 	if err != nil {
 		t.Fatalf("Apply drifted change: %v", err)
 	}
@@ -177,7 +240,7 @@ func TestOneWayApplyRejectsFilesystemDriftBeforeIntent(t *testing.T) {
 		t.Fatalf("write local drift: %v", err)
 	}
 
-	_, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{Prepared: prepared, ShareRoot: fixture.root})
+	_, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.root})
 	if !errors.Is(err, syncengine.ErrOneWayApplyContent) {
 		t.Fatalf("Apply drift error = %v", err)
 	}
@@ -187,6 +250,59 @@ func TestOneWayApplyRejectsFilesystemDriftBeforeIntent(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(fixture.root, transfer.DefaultHistoryDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("history should not be created, stat error = %v", err)
+	}
+}
+
+func TestOneWayApplyRejectsRevokedPeerBeforeFilesystemOrStateChange(t *testing.T) {
+	fixture := newOneWayApplyFixture(t)
+	source := fixture.fileRevision("blocked.txt", "blocked payload", "revision-blocked", "", 1)
+	prepared := fixture.prepare(t, syncengine.OneWayActionAdd, source, "", syncengine.TargetDriftReject)
+	fixture.stageFile(t, prepared, "blocked payload")
+	if err := fixture.store.Devices().RevokeDevice(fixture.ctx, fixture.sourceDeviceID); err != nil {
+		t.Fatalf("RevokeDevice: %v", err)
+	}
+
+	_, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{
+		AuthenticatedPeerID: fixture.sourceDeviceID,
+		Prepared:            prepared,
+		ShareRoot:           fixture.root,
+	})
+	if !errors.Is(err, syncengine.ErrOneWayApplyAuthorization) {
+		t.Fatalf("Apply error = %v, want %v", err, syncengine.ErrOneWayApplyAuthorization)
+	}
+	if _, err := os.Stat(filepath.Join(fixture.root, source.RelativePath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("destination changed after revocation, stat error = %v", err)
+	}
+	if _, err := fixture.store.Revisions().GetCurrentRevision(fixture.ctx, fixture.shareID, source.RelativePath); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("revision state changed after revocation: %v", err)
+	}
+	incoming := filepath.Join(fixture.root, syncengine.DefaultOneWayIncomingDir, "one-way")
+	entries, err := os.ReadDir(incoming)
+	if err != nil {
+		t.Fatalf("ReadDir staged artifacts: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".intent") {
+			t.Fatalf("apply intent %s was written after revocation", entry.Name())
+		}
+	}
+}
+
+func TestOneWayApplyRejectsAuthenticatedIdentityChange(t *testing.T) {
+	fixture := newOneWayApplyFixture(t)
+	source := fixture.fileRevision("identity.txt", "payload", "revision-identity", "", 1)
+	prepared := fixture.prepare(t, syncengine.OneWayActionAdd, source, "", syncengine.TargetDriftReject)
+
+	_, err := fixture.executor(fixture.store.FileIndex()).Apply(fixture.ctx, syncengine.OneWayApplyRequest{
+		AuthenticatedPeerID: "DIFFERENT-PEER",
+		Prepared:            prepared,
+		ShareRoot:           fixture.root,
+	})
+	if !errors.Is(err, syncengine.ErrInvalidOneWayApply) {
+		t.Fatalf("Apply error = %v, want %v", err, syncengine.ErrInvalidOneWayApply)
+	}
+	if _, err := os.Stat(filepath.Join(fixture.root, source.RelativePath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("destination changed after identity mismatch, stat error = %v", err)
 	}
 }
 
@@ -245,13 +361,23 @@ func newOneWayApplyFixture(t *testing.T) *oneWayApplyFixture {
 func (fixture *oneWayApplyFixture) executor(applier storage.OneWayApplyStore) syncengine.OneWayApplyExecutor {
 	return syncengine.OneWayApplyExecutor{
 		Revisions: fixture.store.Revisions(), Applier: applier, Tombstones: fixture.store.Tombstones(),
-		Now: func() time.Time { return fixture.now },
+		Shares: fixture.store.Shares(),
+		Now:    func() time.Time { return fixture.now },
 	}
 }
 
 func (fixture *oneWayApplyFixture) prepare(t *testing.T, action syncengine.OneWayAction, revision core.Revision, targetRevisionID core.RevisionID, driftPolicy syncengine.TargetDriftPolicy) syncengine.PreparedOneWayChange {
 	t.Helper()
-	prepared, err := (syncengine.OneWayChangePreparationService{Shares: fixture.store.Shares()}).Prepare(fixture.ctx, syncengine.OneWayChangePreparationRequest{
+	prepared, err := (syncengine.OneWayChangePreparationService{Shares: fixture.store.Shares()}).Prepare(fixture.ctx, fixture.preparationRequest(action, revision, targetRevisionID, driftPolicy))
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	return prepared
+}
+
+func (fixture *oneWayApplyFixture) preparationRequest(action syncengine.OneWayAction, revision core.Revision, targetRevisionID core.RevisionID, driftPolicy syncengine.TargetDriftPolicy) syncengine.OneWayChangePreparationRequest {
+	return syncengine.OneWayChangePreparationRequest{
+		AuthenticatedPeerID: fixture.sourceDeviceID,
 		Change: syncengine.OneWayChangeRequest{
 			ProtocolVersion: syncengine.RevisionManifestProtocolVersion, RequestID: "request-" + string(revision.ID),
 			SourceDeviceID: fixture.sourceDeviceID, TargetDeviceID: fixture.targetDeviceID, ShareID: fixture.shareID,
@@ -260,11 +386,24 @@ func (fixture *oneWayApplyFixture) prepare(t *testing.T, action syncengine.OneWa
 		Source:         syncengine.OneWaySourcePolicy{ShareID: fixture.shareID, DeviceID: fixture.sourceDeviceID, Mode: storage.ShareOneWaySource},
 		Target:         syncengine.OneWayTargetPolicy{ShareID: fixture.shareID, Mode: storage.ShareOneWayTarget, DriftPolicy: driftPolicy},
 		SourceRevision: revision, TargetRevisionID: targetRevisionID,
-	})
-	if err != nil {
-		t.Fatalf("Prepare: %v", err)
 	}
-	return prepared
+}
+
+func (fixture *oneWayApplyFixture) advertisement(preparation syncengine.OneWayChangePreparationRequest) syncengine.RevisionAdvertisementRequest {
+	revision := preparation.SourceRevision
+	return syncengine.RevisionAdvertisementRequest{
+		ProtocolVersion: preparation.Change.ProtocolVersion,
+		RequestID:       "advertisement-" + preparation.Change.RequestID,
+		SourceDeviceID:  preparation.Change.SourceDeviceID,
+		TargetDeviceID:  preparation.Change.TargetDeviceID,
+		ShareID:         preparation.Change.ShareID,
+		Limits:          syncengine.RevisionManifestLimits{MaxEntries: 1, MaxBytes: 4096},
+		Revisions: []syncengine.RevisionManifestEntry{{
+			RevisionID: revision.ID, ParentRevisionID: revision.ParentRevisionID, RelativePath: revision.RelativePath,
+			EntryType: revision.EntryType, Size: revision.Size, ContentHash: revision.ContentHash,
+			HashAlgorithm: revision.HashAlgorithm, Sequence: revision.Sequence, IsDeleted: revision.IsDeleted,
+		}},
+	}
 }
 
 func (fixture *oneWayApplyFixture) seedFile(t *testing.T, relativePath, contents string, revisionID, parentID core.RevisionID, sequence int64) core.Revision {
@@ -341,6 +480,10 @@ func hashText(value string) string {
 	digest := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(digest[:])
 }
+
+type integrationPeerSession core.DeviceID
+
+func (session integrationPeerSession) RemoteDeviceID() core.DeviceID { return core.DeviceID(session) }
 
 var errInjectedApplyCommit = errors.New("injected one-way apply commit failure")
 

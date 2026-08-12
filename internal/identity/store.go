@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,4 +71,14 @@ func (store DevFileStore) Load() (DeviceIdentity, error) {
 		return DeviceIdentity{}, fmt.Errorf("decode private key: %w", err)
 	}
 	return FromKeyPair(ed25519.PublicKey(publicKey), ed25519.PrivateKey(privateKey))
+}
+
+func (store DevFileStore) Delete() error {
+	if store.Path == "" {
+		return fmt.Errorf("identity store path is required")
+	}
+	if err := os.Remove(store.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("delete development identity file: %w", err)
+	}
+	return nil
 }

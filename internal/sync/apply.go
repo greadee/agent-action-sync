@@ -25,10 +25,11 @@ import (
 const DefaultOneWayIncomingDir = ".sync-incoming"
 
 var (
-	ErrInvalidOneWayApply = errors.New("invalid one-way apply request")
-	ErrOneWayApplyState   = errors.New("one-way apply state changed")
-	ErrOneWayApplyDrift   = errors.New("one-way apply filesystem drift")
-	ErrOneWayApplyContent = errors.New("one-way apply content verification failed")
+	ErrInvalidOneWayApply       = errors.New("invalid one-way apply request")
+	ErrOneWayApplyState         = errors.New("one-way apply state changed")
+	ErrOneWayApplyDrift         = errors.New("one-way apply filesystem drift")
+	ErrOneWayApplyContent       = errors.New("one-way apply content verification failed")
+	ErrOneWayApplyAuthorization = errors.New("one-way apply authorization failed")
 )
 
 var oneWayApplyPathLocks = struct {
@@ -42,10 +43,11 @@ type oneWayApplyPathLock struct {
 }
 
 type OneWayApplyRequest struct {
-	Prepared           PreparedOneWayChange
-	ShareRoot          string
-	TombstoneID        core.TombstoneID
-	TombstoneExpiresAt time.Time
+	AuthenticatedPeerID core.DeviceID
+	Prepared            PreparedOneWayChange
+	ShareRoot           string
+	TombstoneID         core.TombstoneID
+	TombstoneExpiresAt  time.Time
 }
 
 type OneWayApplyResult struct {
@@ -65,6 +67,7 @@ type OneWayApplyExecutor struct {
 	Revisions  storage.RevisionStore
 	Applier    storage.OneWayApplyStore
 	Tombstones storage.TombstoneStore
+	Shares     storage.ShareStore
 	Now        func() time.Time
 }
 
@@ -104,11 +107,20 @@ func BuildOneWayReceiveSpec(shareRoot string, prepared PreparedOneWayChange) (tr
 }
 
 func (executor OneWayApplyExecutor) Apply(ctx context.Context, request OneWayApplyRequest) (OneWayApplyResult, error) {
-	if executor.Revisions == nil || executor.Applier == nil || executor.Tombstones == nil {
-		return OneWayApplyResult{}, fmt.Errorf("%w: revision, apply, and tombstone stores are required", ErrInvalidOneWayApply)
+	if executor.Revisions == nil || executor.Applier == nil || executor.Tombstones == nil || executor.Shares == nil {
+		return OneWayApplyResult{}, fmt.Errorf("%w: revision, apply, tombstone, and share stores are required", ErrInvalidOneWayApply)
 	}
 	if err := validateOneWayApplyRequest(request); err != nil {
 		return OneWayApplyResult{}, err
+	}
+	requiredCapability, err := oneWayActionCapability(request.Prepared.Change.Action)
+	if err != nil {
+		return OneWayApplyResult{}, err
+	}
+	for _, capability := range []core.Capability{core.CapabilitySync, requiredCapability} {
+		if err := executor.Shares.Authorize(ctx, request.AuthenticatedPeerID, request.Prepared.Change.ShareID, capability, request.Prepared.Remote); err != nil {
+			return OneWayApplyResult{}, fmt.Errorf("%w: %s capability: %v", ErrOneWayApplyAuthorization, capability, err)
+		}
 	}
 	releasePath := lockOneWayApplyPath(request.ShareRoot, request.Prepared.SourceRevision)
 	defer releasePath()
@@ -263,11 +275,17 @@ func lockOneWayApplyPath(root string, revision core.Revision) func() {
 }
 
 func validateOneWayApplyRequest(request OneWayApplyRequest) error {
+	if request.AuthenticatedPeerID == "" {
+		return fmt.Errorf("%w: authenticated peer ID is required", ErrInvalidOneWayApply)
+	}
 	if request.ShareRoot == "" {
 		return fmt.Errorf("%w: share root is required", ErrInvalidOneWayApply)
 	}
 	if err := validateApplyPreparedChange(request.Prepared); err != nil {
 		return err
+	}
+	if request.AuthenticatedPeerID != request.Prepared.AuthenticatedPeerID {
+		return fmt.Errorf("%w: apply peer does not match prepared peer", ErrInvalidOneWayApply)
 	}
 	if request.Prepared.SourceRevision.IsDeleted {
 		if request.TombstoneID == "" {
@@ -290,6 +308,9 @@ func validateApplyTombstoneExpiry(revision core.Revision, appliedAt, expiresAt t
 }
 
 func validateApplyPreparedChange(prepared PreparedOneWayChange) error {
+	if prepared.AuthenticatedPeerID == "" || prepared.AuthenticatedPeerID != prepared.Change.SourceDeviceID {
+		return fmt.Errorf("%w: prepared authenticated peer does not match source", ErrInvalidOneWayApply)
+	}
 	if !prepared.Decision.Apply {
 		return fmt.Errorf("%w: prepared decision does not permit filesystem work", ErrInvalidOneWayApply)
 	}

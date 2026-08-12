@@ -39,3 +39,25 @@ func TestValidateMigrationsRejectsVersionGaps(t *testing.T) {
 		t.Fatal("expected version gap to be rejected")
 	}
 }
+
+func TestPairingMigrationContainsAcceptanceLedger(t *testing.T) {
+	if !strings.Contains(Migrations[2].SQL, "CREATE TABLE IF NOT EXISTS pairing_acceptances") {
+		t.Fatal("pairing migration is missing acceptance ledger")
+	}
+}
+
+func TestAuthenticatedWorkMigrationBindsJobsToPeers(t *testing.T) {
+	sql := Migrations[3].SQL
+	for _, column := range []string{"peer_device_id", "required_capability"} {
+		if !strings.Contains(sql, column) {
+			t.Fatalf("authenticated work migration is missing %q", column)
+		}
+	}
+}
+
+func TestOneWayJobNetworkScopeMigrationPreservesRemoteDefault(t *testing.T) {
+	sql := Migrations[4].SQL
+	if !strings.Contains(sql, "remote INTEGER NOT NULL DEFAULT 1") {
+		t.Fatal("one-way job network scope migration must preserve the prior remote authorization behavior")
+	}
+}

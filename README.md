@@ -62,12 +62,14 @@ syncgate send-once --addr 127.0.0.1:47821 --file C:\path\file.bin --relative-pat
 Useful docs:
 
 - [Architecture overview](docs/architecture/overview.md)
-- [Agent coordination model](docs/architecture/agent-coordination.md)
+- [Phase 0 project skeleton decisions](docs/adr/phase-0-project-skeleton.md)
+- [Phase 1 transfer foundation decisions](docs/adr/phase-1-transfer-foundation.md)
+- [Phase 2 sync scanner decisions](docs/adr/phase-2-sync-scanner.md)
 - [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)
 - [Protocol outline](docs/protocol/transfer-protocol.md)
-- [Phase 1 plan](docs/architecture/phase-1-plan.md)
+- [Trusted one-way sync runbook](docs/operations/trusted-one-way-sync-runbook.md)
 
 ## Security Position
 
