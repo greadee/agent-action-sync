@@ -19,6 +19,7 @@ type Store interface {
 	Tombstones() TombstoneStore
 	Transfers() TransferStore
 	OneWayJobs() OneWayJobStore
+	OneWayWork() OneWayWorkStore
 	Pairings() PairingStore
 	Audit() AuditStore
 	Close() error
@@ -106,6 +107,10 @@ type OneWayJobStore interface {
 	ClaimOneWayJob(ctx context.Context, id string, now time.Time) (core.OneWayJob, error)
 	UpdateOneWayJob(ctx context.Context, job core.OneWayJob) error
 	RecoverRunningOneWayJobs(ctx context.Context, now time.Time) error
+}
+
+type OneWayWorkStore interface {
+	CreateAuthenticatedOneWayWork(ctx context.Context, work AuthenticatedOneWayWork) (AuthenticatedOneWayWorkResult, error)
 }
 
 type AuditStore interface {

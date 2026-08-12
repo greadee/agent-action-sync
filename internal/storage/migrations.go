@@ -205,6 +205,16 @@ CREATE INDEX IF NOT EXISTS pairing_acceptances_peer_idx
     ON pairing_acceptances(peer_device_id, accepted_at);
 `),
 	},
+	{
+		Version: 4,
+		Name:    "authenticated one-way job identity",
+		SQL: strings.TrimSpace(`
+ALTER TABLE one_way_jobs ADD COLUMN peer_device_id TEXT REFERENCES devices(device_id);
+ALTER TABLE one_way_jobs ADD COLUMN required_capability TEXT;
+CREATE INDEX IF NOT EXISTS one_way_jobs_peer_idx
+    ON one_way_jobs(peer_device_id, state, created_at);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

@@ -97,3 +97,14 @@ type PairingRevocation struct {
 type PairingRevocationResult struct {
 	AlreadyRevoked bool
 }
+
+type AuthenticatedOneWayWork struct {
+	Transfer             core.Transfer
+	Job                  core.OneWayJob
+	RequiredCapabilities []core.Capability
+	Remote               bool
+}
+
+type AuthenticatedOneWayWorkResult struct {
+	AlreadyCreated bool
+}

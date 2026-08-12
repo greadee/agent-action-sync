@@ -45,3 +45,12 @@ func TestPairingMigrationContainsAcceptanceLedger(t *testing.T) {
 		t.Fatal("pairing migration is missing acceptance ledger")
 	}
 }
+
+func TestAuthenticatedWorkMigrationBindsJobsToPeers(t *testing.T) {
+	sql := Migrations[3].SQL
+	for _, column := range []string{"peer_device_id", "required_capability"} {
+		if !strings.Contains(sql, column) {
+			t.Fatalf("authenticated work migration is missing %q", column)
+		}
+	}
+}

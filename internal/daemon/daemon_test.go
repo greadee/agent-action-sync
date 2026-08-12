@@ -588,13 +588,16 @@ func saveDaemonJob(t *testing.T, daemon *Daemon, id string, state core.OneWayJob
 		t.Fatalf("save transfer: %v", err)
 	}
 	if err := daemon.Store.OneWayJobs().SaveOneWayJob(context.Background(), core.OneWayJob{
-		ID:           id,
-		TransferID:   transferID,
-		ShareID:      "share-1",
-		RelativePath: id + ".txt",
-		State:        state,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                 id,
+		TransferID:         transferID,
+		PeerDeviceID:       daemon.Identity.DeviceID,
+		ShareID:            "share-1",
+		RevisionID:         core.RevisionID("revision-" + id),
+		RelativePath:       id + ".txt",
+		RequiredCapability: core.CapabilityModify,
+		State:              state,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}); err != nil {
 		t.Fatalf("save one-way job: %v", err)
 	}
