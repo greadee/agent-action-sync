@@ -13,9 +13,11 @@ import (
 )
 
 type OneWayJobExecutor func(context.Context, core.OneWayJob) error
+type OneWayJobAuthorizer func(context.Context, core.OneWayJob) error
 
 type OneWayJobQueue struct {
 	Jobs          storage.OneWayJobStore
+	Authorize     OneWayJobAuthorizer
 	Execute       OneWayJobExecutor
 	MaxConcurrent int
 	PollInterval  time.Duration
@@ -99,7 +101,13 @@ func (queue OneWayJobQueue) loop(ctx context.Context, outcomes chan<- OneWayJobO
 			go func(job core.OneWayJob) {
 				defer workers.Done()
 				defer func() { <-active }()
-				err := queue.Execute(ctx, job)
+				var err error
+				if queue.Authorize != nil {
+					err = queue.Authorize(ctx, job)
+				}
+				if err == nil {
+					err = queue.Execute(ctx, job)
+				}
 				if ctx.Err() != nil {
 					return
 				}

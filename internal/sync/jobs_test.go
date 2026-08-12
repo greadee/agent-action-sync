@@ -68,6 +68,30 @@ func TestOneWayJobQueueRetriesWithBackoffAndReusesTransferReference(t *testing.T
 	}
 }
 
+func TestOneWayJobQueueRejectsUnauthorizedWorkBeforeExecution(t *testing.T) {
+	store := newMemoryJobStore(core.OneWayJob{ID: "unauthorized", TransferID: "transfer-1", ShareID: "share-1", RelativePath: "blocked.txt", State: core.OneWayJobQueued})
+	var executions atomic.Int32
+	queue, err := (OneWayJobQueue{
+		Jobs:          store,
+		Authorize:     func(context.Context, core.OneWayJob) error { return errors.New("peer revoked") },
+		Execute:       func(context.Context, core.OneWayJob) error { executions.Add(1); return nil },
+		MaxConcurrent: 1,
+		PollInterval:  time.Millisecond,
+	}).Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
+		outcome := nextJobOutcome(t, queue)
+		if outcome.Err == nil || outcome.Completed {
+			t.Fatalf("unauthorized outcome = %+v", outcome)
+		}
+	}
+	if executions.Load() != 0 {
+		t.Fatalf("executor ran %d times", executions.Load())
+	}
+}
+
 func TestOneWayJobQueuePauseResumeAndRestartRecovery(t *testing.T) {
 	job := core.OneWayJob{ID: "paused", TransferID: "transfer-paused", ShareID: "share-1", RelativePath: "paused.txt", State: core.OneWayJobPaused}
 	store := newMemoryJobStore(job)

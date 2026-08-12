@@ -301,7 +301,10 @@ func (daemon *Daemon) startJobQueue(ctx context.Context) error {
 		execute = func(context.Context, core.OneWayJob) error { return ErrAutomaticPeerWorkDisabled }
 	}
 	outcomes, err := (syncengine.OneWayJobQueue{
-		Jobs:          daemon.Store.OneWayJobs(),
+		Jobs: daemon.Store.OneWayJobs(),
+		Authorize: func(ctx context.Context, job core.OneWayJob) error {
+			return syncengine.AuthorizeAuthenticatedOneWayJob(ctx, daemon.Store.Transfers(), daemon.Store.Shares(), job, true)
+		},
 		Execute:       execute,
 		MaxConcurrent: daemon.Config.Transfer.MaxParallelTransfers,
 		PollInterval:  daemon.jobPollInterval,
