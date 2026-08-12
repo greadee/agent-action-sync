@@ -34,6 +34,7 @@ type OneWayChangePreparationRequest struct {
 // does not create files, transfer rows, revisions, or file-index updates.
 type PreparedOneWayChange struct {
 	AuthenticatedPeerID core.DeviceID
+	Remote              bool
 	Change              OneWayChangeRequest
 	SourceRevision      core.Revision
 	TargetRevisionID    core.RevisionID
@@ -84,6 +85,7 @@ func (service OneWayChangePreparationService) Prepare(ctx context.Context, reque
 
 	return PreparedOneWayChange{
 		AuthenticatedPeerID: request.AuthenticatedPeerID,
+		Remote:              request.Remote,
 		Change:              request.Change,
 		SourceRevision:      request.SourceRevision,
 		TargetRevisionID:    request.TargetRevisionID,

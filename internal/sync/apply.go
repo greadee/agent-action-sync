@@ -118,7 +118,7 @@ func (executor OneWayApplyExecutor) Apply(ctx context.Context, request OneWayApp
 		return OneWayApplyResult{}, err
 	}
 	for _, capability := range []core.Capability{core.CapabilitySync, requiredCapability} {
-		if err := executor.Shares.Authorize(ctx, request.AuthenticatedPeerID, request.Prepared.Change.ShareID, capability, true); err != nil {
+		if err := executor.Shares.Authorize(ctx, request.AuthenticatedPeerID, request.Prepared.Change.ShareID, capability, request.Prepared.Remote); err != nil {
 			return OneWayApplyResult{}, fmt.Errorf("%w: %s capability: %v", ErrOneWayApplyAuthorization, capability, err)
 		}
 	}
