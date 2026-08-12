@@ -243,6 +243,9 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 	daemon.cancel = cancel
 	daemon.mu.Unlock()
 	if err := daemon.startRuntimes(runCtx); err != nil {
+		if runCtx.Err() != nil && errors.Is(err, context.Canceled) {
+			return daemon.Close()
+		}
 		_ = daemon.Close()
 		return err
 	}
