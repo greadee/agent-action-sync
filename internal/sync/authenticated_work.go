@@ -115,7 +115,8 @@ func (service AuthenticatedOneWayWorkService) PrepareAndQueue(ctx context.Contex
 		ID: jobID, TransferID: transferID, PeerDeviceID: prepared.AuthenticatedPeerID,
 		ShareID: prepared.Change.ShareID, RevisionID: prepared.SourceRevision.ID,
 		RelativePath: prepared.RelativePath, RequiredCapability: requiredCapability,
-		State: core.OneWayJobQueued, CreatedAt: now, UpdatedAt: now,
+		Remote: request.Preparation.Remote,
+		State:  core.OneWayJobQueued, CreatedAt: now, UpdatedAt: now,
 	}
 	created, err := service.Work.CreateAuthenticatedOneWayWork(ctx, storage.AuthenticatedOneWayWork{
 		Transfer: transferRecord, Job: job,

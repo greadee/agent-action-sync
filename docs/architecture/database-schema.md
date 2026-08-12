@@ -122,6 +122,7 @@ CREATE TABLE one_way_jobs (
     revision_id TEXT,
     relative_path TEXT NOT NULL,
     required_capability TEXT NOT NULL,
+    remote INTEGER NOT NULL DEFAULT 1,
     state TEXT NOT NULL CHECK (state IN ('queued','running','retry_wait','paused','completed','failed')),
     retry_count INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TEXT,
@@ -185,7 +186,7 @@ CREATE TABLE pairing_acceptances (
 - Plaintext file contents, private keys, passwords, and session tokens must never be stored in audit metadata.
 - The history, one-way incoming, and partial-transfer paths are application-managed and excluded from ordinary synchronization. Durable one-way intent files live under `.sync-incoming/` only until the revision/index transaction succeeds.
 - Tombstones are immutable deletion history. `expires_at` is metadata only until an explicit retention policy is implemented; expired rows are not automatically removed.
-- One-way jobs contain queue/retry metadata and reference an existing transfer; transfer chunks remain the sole resume source of truth. Receiver jobs repeat the authenticated peer ID and required action capability so execution can reject identity/scope drift and reauthorize current trust before work begins.
+- One-way jobs contain queue/retry metadata and reference an existing transfer; transfer chunks remain the sole resume source of truth. Receiver jobs repeat the authenticated peer ID, required action capability, and authenticated LAN/remote scope so execution can reject identity/scope drift and reauthorize current trust before work begins or after restart.
 - Authenticated receiver transfer and job rows are inserted atomically only after the same transaction verifies trusted device state plus `sync` and action capabilities. Failed or revoked authorization leaves neither row behind.
 - Pairing acceptance rows make signed invitations idempotent per local database. Device trust, explicit permissions, acceptance, and audit are committed atomically.
 - A reappeared path is restored by advancing its `file_index.current_revision_id` to a non-deleted revision. The prior tombstone remains available as history, while active deletion propagation considers only tombstones still referenced by a deleted index entry.

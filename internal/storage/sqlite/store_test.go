@@ -811,7 +811,7 @@ func TestAuthenticatedOneWayWorkIsAtomicAndRechecksRevocationOnReplay(t *testing
 		t.Fatalf("stored transfer = %+v, err=%v", transferRecord, err)
 	}
 	job, err := store.OneWayJobs().GetOneWayJob(ctx, work.Job.ID)
-	if err != nil || job.PeerDeviceID != work.Job.PeerDeviceID || job.RequiredCapability != core.CapabilityModify {
+	if err != nil || job.PeerDeviceID != work.Job.PeerDeviceID || job.RequiredCapability != core.CapabilityModify || !job.Remote {
 		t.Fatalf("stored job = %+v, err=%v", job, err)
 	}
 
@@ -866,7 +866,8 @@ func seedAuthenticatedOneWayWork(t *testing.T, store *Store, capabilities map[co
 	job := core.OneWayJob{
 		ID: "job-authenticated", TransferID: transferRecord.ID, PeerDeviceID: peerID, ShareID: shareID,
 		RevisionID: "revision-authenticated", RelativePath: transferRecord.RelativePath, RequiredCapability: core.CapabilityModify,
-		State: core.OneWayJobQueued, CreatedAt: now, UpdatedAt: now,
+		Remote: true,
+		State:  core.OneWayJobQueued, CreatedAt: now, UpdatedAt: now,
 	}
 	return storage.AuthenticatedOneWayWork{Transfer: transferRecord, Job: job, RequiredCapabilities: []core.Capability{core.CapabilitySync, core.CapabilityModify}, Remote: true}
 }

@@ -23,6 +23,7 @@ type OneWayJob struct {
 	RevisionID         RevisionID
 	RelativePath       string
 	RequiredCapability Capability
+	Remote             bool
 	State              OneWayJobState
 	RetryCount         int
 	NextAttemptAt      time.Time

@@ -215,6 +215,13 @@ CREATE INDEX IF NOT EXISTS one_way_jobs_peer_idx
     ON one_way_jobs(peer_device_id, state, created_at);
 `),
 	},
+	{
+		Version: 5,
+		Name:    "one-way job network scope",
+		SQL: strings.TrimSpace(`
+ALTER TABLE one_way_jobs ADD COLUMN remote INTEGER NOT NULL DEFAULT 1;
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

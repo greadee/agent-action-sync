@@ -54,3 +54,10 @@ func TestAuthenticatedWorkMigrationBindsJobsToPeers(t *testing.T) {
 		}
 	}
 }
+
+func TestOneWayJobNetworkScopeMigrationPreservesRemoteDefault(t *testing.T) {
+	sql := Migrations[4].SQL
+	if !strings.Contains(sql, "remote INTEGER NOT NULL DEFAULT 1") {
+		t.Fatal("one-way job network scope migration must preserve the prior remote authorization behavior")
+	}
+}

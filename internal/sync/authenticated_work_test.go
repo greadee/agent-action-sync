@@ -35,7 +35,7 @@ func TestAuthenticatedOneWayWorkBindsSessionPeerToDurableWork(t *testing.T) {
 	if result.Transfer.ID != "transfer-authenticated" || result.Job.TransferID != result.Transfer.ID || result.Job.RevisionID != result.Prepared.SourceRevision.ID {
 		t.Fatalf("durable work does not match prepared change: %+v", result)
 	}
-	if result.Job.RequiredCapability != core.CapabilityModify || len(work.calls) != 1 {
+	if result.Job.RequiredCapability != core.CapabilityModify || !result.Job.Remote || len(work.calls) != 1 {
 		t.Fatalf("work calls = %+v", work.calls)
 	}
 	got := work.calls[0]

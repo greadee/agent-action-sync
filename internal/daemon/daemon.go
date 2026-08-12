@@ -306,7 +306,7 @@ func (daemon *Daemon) startJobQueue(ctx context.Context) error {
 	outcomes, err := (syncengine.OneWayJobQueue{
 		Jobs: daemon.Store.OneWayJobs(),
 		Authorize: func(ctx context.Context, job core.OneWayJob) error {
-			return syncengine.AuthorizeAuthenticatedOneWayJob(ctx, daemon.Store.Transfers(), daemon.Store.Shares(), job, true)
+			return syncengine.AuthorizeAuthenticatedOneWayJob(ctx, daemon.Store.Transfers(), daemon.Store.Shares(), job, job.Remote)
 		},
 		Execute:       execute,
 		MaxConcurrent: daemon.Config.Transfer.MaxParallelTransfers,
