@@ -109,6 +109,15 @@ func NewAdminV1Handler(service AdministrationService) http.Handler {
 			}
 			return
 		}
+		if strings.HasSuffix(request.URL.Path, "/actions") {
+			controller, ok := service.(JobController)
+			if !ok {
+				writeError(writer, request, errUnavailable)
+			} else {
+				NewJobControlHandler(controller).ServeHTTP(writer, request)
+			}
+			return
+		}
 		if statusHandler != nil && (request.URL.Path == "/api/v1/status" || request.URL.Path == "/api/v1/diagnostics") {
 			NewStatusDiagnosticsHandler(statusHandler).ServeHTTP(writer, request)
 			return

@@ -27,6 +27,7 @@ type AdministrationServiceOptions struct {
 	Runtime     func() RuntimeSnapshot
 	Diagnostics func() syncengine.DiagnosticReport
 	Scan        func(context.Context, core.ShareID) error
+	Control     func(context.Context, string, JobActionName) (storage.AdminJob, error)
 }
 
 type LocalAdministrationService struct {
@@ -35,6 +36,7 @@ type LocalAdministrationService struct {
 	runtime     func() RuntimeSnapshot
 	diagnostics func() syncengine.DiagnosticReport
 	scan        func(context.Context, core.ShareID) error
+	control     func(context.Context, string, JobActionName) (storage.AdminJob, error)
 }
 
 func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdministrationService, error) {
@@ -44,7 +46,7 @@ func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdmin
 	if options.Ready == nil {
 		return nil, errors.New("administration readiness function is required")
 	}
-	return &LocalAdministrationService{queries: options.Queries, ready: options.Ready, runtime: options.Runtime, diagnostics: options.Diagnostics, scan: options.Scan}, nil
+	return &LocalAdministrationService{queries: options.Queries, ready: options.Ready, runtime: options.Runtime, diagnostics: options.Diagnostics, scan: options.Scan, control: options.Control}, nil
 }
 
 func (service *LocalAdministrationService) Ready() bool {

@@ -66,6 +66,8 @@ func mapError(err error) *APIError {
 		return &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "resource was not found", Internal: err}
 	case errors.Is(err, errConflict):
 		return &APIError{Status: http.StatusConflict, Code: "conflict", Message: "request conflicts with current state", Internal: err}
+	case errors.Is(err, ErrJobStateConflict):
+		return &APIError{Status: http.StatusConflict, Code: "job_state_conflict", Message: "job cannot be controlled in its current state", Internal: err}
 	case errors.Is(err, errUnavailable):
 		return &APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "service is unavailable", Internal: err}
 	case errors.Is(err, errPayloadTooLarge):
