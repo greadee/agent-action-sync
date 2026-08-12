@@ -65,6 +65,8 @@ Useful docs:
 - [Phase 0 project skeleton decisions](docs/adr/phase-0-project-skeleton.md)
 - [Phase 1 transfer foundation decisions](docs/adr/phase-1-transfer-foundation.md)
 - [Phase 2 sync scanner decisions](docs/adr/phase-2-sync-scanner.md)
+- [Phase 3 local administration API decision](docs/adr/phase-3-local-admin-api.md)
+- [Local administration API contract](docs/protocol/local-admin-api-openapi.json)
 - [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)

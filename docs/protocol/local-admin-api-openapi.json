@@ -1,0 +1,190 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Private Sync Gate Local Administration API",
+    "version": "1.0.0",
+    "description": "Loopback-only, owner-controlled administration API for the local daemon."
+  },
+  "servers": [
+    { "url": "http://127.0.0.1:47820", "description": "Local daemon loopback listener" }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Check daemon liveness",
+        "security": [],
+        "responses": {
+          "200": { "description": "Daemon is live", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthResponse" }, "example": { "status": "ok" } } } },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "operationId": "getStatus",
+        "summary": "Read daemon status",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Current status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StatusResponse" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/diagnostics": {
+      "get": {
+        "operationId": "getDiagnostics",
+        "summary": "Read bounded diagnostics",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Diagnostic report", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DiagnosticReport" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/shares": {
+      "get": {
+        "operationId": "listShares",
+        "summary": "List configured shares",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }],
+        "responses": { "200": { "description": "Share page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SharePage" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/devices": {
+      "get": {
+        "operationId": "listDevices",
+        "summary": "List paired devices",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }],
+        "responses": { "200": { "description": "Device page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DevicePage" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/devices/{device_id}": {
+      "get": {
+        "operationId": "getDevice",
+        "summary": "Read one paired device",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/DeviceID" }],
+        "responses": { "200": { "description": "Device details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Device" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "summary": "List synchronization jobs",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }],
+        "responses": { "200": { "description": "Job page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobPage" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/jobs/{job_id}": {
+      "get": {
+        "operationId": "getJob",
+        "summary": "Read one synchronization job",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/JobID" }],
+        "responses": { "200": { "description": "Job details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/audit-events": {
+      "get": {
+        "operationId": "listAuditEvents",
+        "summary": "List administrative audit events",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }],
+        "responses": { "200": { "description": "Audit event page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuditEventPage" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/shares/{share_id}/scans": {
+      "post": {
+        "operationId": "startShareScan",
+        "summary": "Request a bounded share scan",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ShareID" }],
+        "responses": { "202": { "description": "Scan accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptedCommand" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/jobs/{job_id}/actions": {
+      "post": {
+        "operationId": "actOnJob",
+        "summary": "Request a job action",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/JobID" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobAction" }, "example": { "action": "pause" } } } },
+        "responses": { "200": { "description": "Updated job", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/pairing/invitations": {
+      "post": {
+        "operationId": "createPairingInvitation",
+        "summary": "Create a short-lived pairing invitation",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvitationRequest" } } } },
+        "responses": { "201": { "description": "Invitation created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invitation" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/pairing/inspect": {
+      "post": {
+        "operationId": "inspectPairingInvitation",
+        "summary": "Inspect an invitation without accepting it",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EncodedInvitation" } } } },
+        "responses": { "200": { "description": "Invitation metadata", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvitationInspection" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/pairing/acceptances": {
+      "post": {
+        "operationId": "acceptPairingInvitation",
+        "summary": "Accept a pairing invitation",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptanceRequest" } } } },
+        "responses": { "201": { "description": "Pairing accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Acceptance" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/devices/{device_id}/revocation": {
+      "post": {
+        "operationId": "revokeDevice",
+        "summary": "Revoke a paired device",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/DeviceID" }],
+        "responses": { "200": { "description": "Device revoked", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Revocation" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "local-admin-token" } },
+    "parameters": {
+      "Limit": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
+      "Cursor": { "name": "cursor", "in": "query", "schema": { "type": "string", "maxLength": 512 } },
+      "DeviceID": { "name": "device_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 128 } },
+      "JobID": { "name": "job_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 128 } },
+      "ShareID": { "name": "share_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 128 } }
+    },
+    "responses": {
+      "BadRequest": { "description": "Invalid request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unauthorized": { "description": "Missing or invalid local credential", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "Resource not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Conflict": { "description": "Command conflicts with current state", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unavailable": { "description": "Daemon service unavailable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Error": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message"], "properties": { "code": { "type": "string" }, "message": { "type": "string", "maxLength": 512 }, "request_id": { "type": "string", "maxLength": 128 } } } } },
+      "HealthResponse": { "type": "object", "required": ["status"], "properties": { "status": { "type": "string", "enum": ["ok"] } } },
+      "StatusResponse": { "type": "object", "required": ["status", "version", "uptime_seconds"], "properties": { "status": { "type": "string" }, "version": { "type": "string" }, "uptime_seconds": { "type": "integer", "minimum": 0 } } },
+      "DiagnosticReport": { "type": "object", "required": ["generated_at", "checks"], "properties": { "generated_at": { "type": "string", "format": "date-time" }, "checks": { "type": "array", "maxItems": 200, "items": { "type": "object", "required": ["name", "status"], "properties": { "name": { "type": "string", "maxLength": 128 }, "status": { "type": "string", "enum": ["ok", "warning", "error"] }, "detail": { "type": "string", "maxLength": 1024 } } } } } },
+      "PageInfo": { "type": "object", "required": ["limit", "has_more"], "properties": { "limit": { "type": "integer", "minimum": 1, "maximum": 200 }, "next_cursor": { "type": "string", "maxLength": 512 }, "has_more": { "type": "boolean" } } },
+      "Share": { "type": "object", "required": ["id", "name", "enabled"], "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "enabled": { "type": "boolean" }, "job_id": { "type": "string" } } },
+      "Device": { "type": "object", "required": ["id", "name", "fingerprint", "state"], "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "fingerprint": { "type": "string" }, "state": { "type": "string", "enum": ["paired", "revoked", "offline"] }, "last_seen_at": { "type": "string", "format": "date-time" } } },
+      "Job": { "type": "object", "required": ["id", "share_id", "state"], "properties": { "id": { "type": "string" }, "share_id": { "type": "string" }, "state": { "type": "string", "enum": ["idle", "scanning", "running", "paused", "failed"] }, "updated_at": { "type": "string", "format": "date-time" } } },
+      "AuditEvent": { "type": "object", "required": ["id", "kind", "occurred_at"], "properties": { "id": { "type": "string" }, "kind": { "type": "string" }, "occurred_at": { "type": "string", "format": "date-time" }, "result": { "type": "string" } } },
+      "SharePage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/Share" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
+      "DevicePage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/Device" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
+      "JobPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/Job" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
+      "AuditEventPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/AuditEvent" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
+      "AcceptedCommand": { "type": "object", "required": ["accepted", "job_id"], "properties": { "accepted": { "type": "boolean", "const": true }, "job_id": { "type": "string" } } },
+      "JobAction": { "type": "object", "required": ["action"], "additionalProperties": false, "properties": { "action": { "type": "string", "enum": ["pause", "resume", "retry"] } } },
+      "InvitationRequest": { "type": "object", "required": ["ttl_seconds"], "additionalProperties": false, "properties": { "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 }, "capabilities": { "type": "array", "maxItems": 16, "items": { "type": "string", "maxLength": 64 } } } },
+      "Invitation": { "type": "object", "required": ["invitation", "expires_at"], "properties": { "invitation": { "type": "string", "maxLength": 65536 }, "expires_at": { "type": "string", "format": "date-time" } } },
+      "EncodedInvitation": { "type": "object", "required": ["invitation"], "additionalProperties": false, "properties": { "invitation": { "type": "string", "minLength": 1, "maxLength": 65536 } } },
+      "InvitationInspection": { "type": "object", "required": ["valid", "expires_at"], "properties": { "valid": { "type": "boolean" }, "expires_at": { "type": "string", "format": "date-time" }, "device_name": { "type": "string", "maxLength": 256 }, "capabilities": { "type": "array", "maxItems": 16, "items": { "type": "string" } } } },
+      "AcceptanceRequest": { "type": "object", "required": ["invitation"], "additionalProperties": false, "properties": { "invitation": { "type": "string", "minLength": 1, "maxLength": 65536 }, "display_name": { "type": "string", "maxLength": 256 } } },
+      "Acceptance": { "type": "object", "required": ["accepted", "device_id"], "properties": { "accepted": { "type": "boolean", "const": true }, "device_id": { "type": "string" } } },
+      "Revocation": { "type": "object", "required": ["device_id", "revoked"], "properties": { "device_id": { "type": "string" }, "revoked": { "type": "boolean", "const": true } } }
+    }
+  }
+}
