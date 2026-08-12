@@ -183,6 +183,7 @@
       "JobPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/Job" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
       "AuditEventPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/AuditEvent" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
       "AcceptedCommand": { "type": "object", "required": ["accepted", "job_id"], "properties": { "accepted": { "type": "boolean", "const": true }, "job_id": { "type": "string" } } },
+      "ScanAccepted": { "type": "object", "required": ["accepted", "share_id"], "properties": { "accepted": { "type": "boolean", "const": true }, "share_id": { "type": "string" } } },
       "JobAction": { "type": "object", "required": ["action"], "additionalProperties": false, "properties": { "action": { "type": "string", "enum": ["pause", "resume", "retry"] } } },
       "InvitationRequest": { "type": "object", "required": ["ttl_seconds"], "additionalProperties": false, "properties": { "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 }, "capabilities": { "type": "array", "maxItems": 16, "items": { "type": "string", "maxLength": 64 } } } },
       "Invitation": { "type": "object", "required": ["invitation", "expires_at"], "properties": { "invitation": { "type": "string", "maxLength": 65536 }, "expires_at": { "type": "string", "format": "date-time" } } },
