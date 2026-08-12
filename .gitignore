@@ -1,3 +1,4 @@
 .tools/
 .cache/
+.local-planning/
 syncgate.exe
