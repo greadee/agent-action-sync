@@ -61,7 +61,7 @@
         "summary": "Read one paired device",
         "security": [{ "bearerAuth": [] }],
         "parameters": [{ "$ref": "#/components/parameters/DeviceID" }],
-        "responses": { "200": { "description": "Device details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Device" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+        "responses": { "200": { "description": "Device details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceDetail" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
     "/api/v1/jobs": {

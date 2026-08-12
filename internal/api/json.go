@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"syncgate/internal/storage"
 )
 
 const maxJSONBodyBytes int64 = 1 << 20
@@ -59,6 +61,8 @@ func mapError(err error) *APIError {
 	case errors.Is(err, errForbidden):
 		return &APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "request is not allowed", Internal: err}
 	case errors.Is(err, errNotFound):
+		return &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "resource was not found", Internal: err}
+	case errors.Is(err, storage.ErrNotFound):
 		return &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "resource was not found", Internal: err}
 	case errors.Is(err, errConflict):
 		return &APIError{Status: http.StatusConflict, Code: "conflict", Message: "request conflicts with current state", Internal: err}
