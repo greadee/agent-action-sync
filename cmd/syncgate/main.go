@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"syncgate/internal/api"
 	"syncgate/internal/config"
 	"syncgate/internal/core"
 	"syncgate/internal/daemon"
@@ -41,8 +40,6 @@ func main() {
 		runReceiveOnce(os.Args[2:])
 	case "send-once":
 		runSendOnce(os.Args[2:])
-	case "status-server":
-		runStatusServer(os.Args[2:])
 	case "daemon":
 		runDaemon(os.Args[2:])
 	case "identity-migrate":
@@ -347,20 +344,6 @@ func openLocalStore(configPath string) (*sqlite.Store, func()) {
 		exitf("migrate local storage: %v", err)
 	}
 	return store, func() { _ = store.Close() }
-}
-
-func runStatusServer(args []string) {
-	flags := flag.NewFlagSet("status-server", flag.ExitOnError)
-	listen := flags.String("listen", "127.0.0.1:47820", "loopback status server address")
-	_ = flags.Parse(args)
-	server, err := api.NewHealthServer(*listen, time.Now().UTC())
-	if err != nil {
-		exitf("%v", err)
-	}
-	fmt.Printf("syncgate status server on %s\n", *listen)
-	if err := server.ListenAndServe(); err != nil {
-		exitf("%v", err)
-	}
 }
 
 func runCheckConfig(args []string) {

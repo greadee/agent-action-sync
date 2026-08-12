@@ -17,6 +17,7 @@ func TestMapErrorStatusAndStableMessages(t *testing.T) {
 	}{
 		{name: "bad request", err: errBadRequest, status: 400, code: "invalid_request"},
 		{name: "unauthorized", err: errUnauthorized, status: 401, code: "unauthorized"},
+		{name: "forbidden", err: errForbidden, status: 403, code: "forbidden"},
 		{name: "not found", err: errNotFound, status: 404, code: "not_found"},
 		{name: "conflict", err: errConflict, status: 409, code: "conflict"},
 		{name: "too large", err: errPayloadTooLarge, status: 413, code: "payload_too_large"},

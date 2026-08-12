@@ -20,6 +20,7 @@ const maxJSONBodyBytes int64 = 1 << 20
 var (
 	errBadRequest       = errors.New("bad request")
 	errUnauthorized     = errors.New("unauthorized")
+	errForbidden        = errors.New("forbidden")
 	errNotFound         = errors.New("not found")
 	errConflict         = errors.New("conflict")
 	errUnavailable      = errors.New("unavailable")
@@ -55,6 +56,8 @@ func mapError(err error) *APIError {
 		return &APIError{Status: http.StatusBadRequest, Code: "invalid_request", Message: "request is invalid", Internal: err}
 	case errors.Is(err, errUnauthorized):
 		return &APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "authentication is required", Internal: err}
+	case errors.Is(err, errForbidden):
+		return &APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "request is not allowed", Internal: err}
 	case errors.Is(err, errNotFound):
 		return &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "resource was not found", Internal: err}
 	case errors.Is(err, errConflict):
@@ -110,6 +113,10 @@ func decodeJSON(request *http.Request, destination any) error {
 	}
 	body, err := io.ReadAll(io.LimitReader(request.Body, maxJSONBodyBytes+1))
 	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			return errPayloadTooLarge
+		}
 		return fmt.Errorf("%w: read request body", errBadRequest)
 	}
 	if int64(len(body)) > maxJSONBodyBytes {
