@@ -126,6 +126,7 @@ func TestOneWayChangePreparationRejectsPolicyBeforeAuthorization(t *testing.T) {
 
 func validPreparationRequest(action OneWayAction) OneWayChangePreparationRequest {
 	return OneWayChangePreparationRequest{
+		AuthenticatedPeerID: "DEVICE-1",
 		Change: OneWayChangeRequest{
 			ProtocolVersion:        RevisionManifestProtocolVersion,
 			RequestID:              "request-prepare-1",
@@ -144,6 +145,19 @@ func validPreparationRequest(action OneWayAction) OneWayChangePreparationRequest
 			HashAlgorithm: "sha256", ParentRevisionID: "revision-1", OriginDeviceID: "DEVICE-1", Sequence: 2,
 		},
 		TargetRevisionID: "revision-1",
+	}
+}
+
+func TestOneWayChangePreparationRejectsCallerSourceIdentityMismatch(t *testing.T) {
+	request := validPreparationRequest(OneWayActionModify)
+	request.AuthenticatedPeerID = "DEVICE-AUTHENTICATED"
+	shares := &recordingShareStore{}
+	_, err := (OneWayChangePreparationService{Shares: shares}).Prepare(context.Background(), request)
+	if !errors.Is(err, ErrAuthenticatedPeerMismatch) {
+		t.Fatalf("error = %v, want %v", err, ErrAuthenticatedPeerMismatch)
+	}
+	if len(shares.calls) != 0 {
+		t.Fatalf("identity mismatch reached authorization: %+v", shares.calls)
 	}
 }
 

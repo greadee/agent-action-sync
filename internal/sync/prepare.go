@@ -14,28 +14,31 @@ var (
 	ErrSourceRevisionMismatch    = errors.New("source revision does not match change request")
 	ErrUnsupportedSourceRevision = errors.New("unsupported source revision")
 	ErrChangeAuthorization       = errors.New("one-way change authorization failed")
+	ErrAuthenticatedPeerMismatch = errors.New("authenticated peer does not match one-way source")
 )
 
 // OneWayChangePreparationRequest contains the authenticated request context
 // and the source revision already obtained from the validated advertisement.
 // It is intentionally free of filesystem paths or open handles.
 type OneWayChangePreparationRequest struct {
-	Change           OneWayChangeRequest
-	Source           OneWaySourcePolicy
-	Target           OneWayTargetPolicy
-	SourceRevision   core.Revision
-	TargetRevisionID core.RevisionID
-	Remote           bool
+	AuthenticatedPeerID core.DeviceID
+	Change              OneWayChangeRequest
+	Source              OneWaySourcePolicy
+	Target              OneWayTargetPolicy
+	SourceRevision      core.Revision
+	TargetRevisionID    core.RevisionID
+	Remote              bool
 }
 
 // PreparedOneWayChange is a validated descriptor for later transfer work. It
 // does not create files, transfer rows, revisions, or file-index updates.
 type PreparedOneWayChange struct {
-	Change           OneWayChangeRequest
-	SourceRevision   core.Revision
-	TargetRevisionID core.RevisionID
-	RelativePath     string
-	Decision         OneWayDecision
+	AuthenticatedPeerID core.DeviceID
+	Change              OneWayChangeRequest
+	SourceRevision      core.Revision
+	TargetRevisionID    core.RevisionID
+	RelativePath        string
+	Decision            OneWayDecision
 }
 
 type OneWayChangePreparationService struct {
@@ -80,17 +83,24 @@ func (service OneWayChangePreparationService) Prepare(ctx context.Context, reque
 	}
 
 	return PreparedOneWayChange{
-		Change:           request.Change,
-		SourceRevision:   request.SourceRevision,
-		TargetRevisionID: request.TargetRevisionID,
-		RelativePath:     request.SourceRevision.RelativePath,
-		Decision:         decision,
+		AuthenticatedPeerID: request.AuthenticatedPeerID,
+		Change:              request.Change,
+		SourceRevision:      request.SourceRevision,
+		TargetRevisionID:    request.TargetRevisionID,
+		RelativePath:        request.SourceRevision.RelativePath,
+		Decision:            decision,
 	}, nil
 }
 
 func validatePreparationRequest(request OneWayChangePreparationRequest) error {
+	if request.AuthenticatedPeerID == "" {
+		return fmt.Errorf("%w: authenticated peer ID is required", ErrInvalidChangePreparation)
+	}
 	if err := request.Change.Validate(); err != nil {
 		return fmt.Errorf("%w: change: %v", ErrInvalidChangePreparation, err)
+	}
+	if request.AuthenticatedPeerID != request.Change.SourceDeviceID {
+		return fmt.Errorf("%w: authenticated %s, request names %s", ErrAuthenticatedPeerMismatch, request.AuthenticatedPeerID, request.Change.SourceDeviceID)
 	}
 	if request.Source.ShareID != request.Change.ShareID || request.Target.ShareID != request.Change.ShareID || request.Source.DeviceID != request.Change.SourceDeviceID {
 		return fmt.Errorf("%w: policy and request scope do not match", ErrInvalidChangePreparation)

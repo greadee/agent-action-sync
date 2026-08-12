@@ -54,14 +54,14 @@ func TestTwoAgentOneWaySyncDuplicateAndRestartResume(t *testing.T) {
 	// Reopen the receiver database before applying the verified staged artifact.
 	// This models a receiver restart between transfer completion and apply.
 	fixture.reopenTarget(t)
-	first, err := fixture.executor().Apply(fixture.ctx, syncengine.OneWayApplyRequest{Prepared: prepared, ShareRoot: fixture.targetRoot})
+	first, err := fixture.executor().Apply(fixture.ctx, syncengine.OneWayApplyRequest{AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.targetRoot})
 	if err != nil {
 		t.Fatalf("apply after receiver restart: %v", err)
 	}
 	if first.AlreadyApplied || first.RevisionID != revision.ID {
 		t.Fatalf("first result = %+v", first)
 	}
-	duplicate, err := fixture.executor().Apply(fixture.ctx, syncengine.OneWayApplyRequest{Prepared: prepared, ShareRoot: fixture.targetRoot})
+	duplicate, err := fixture.executor().Apply(fixture.ctx, syncengine.OneWayApplyRequest{AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.targetRoot})
 	if err != nil {
 		t.Fatalf("duplicate apply: %v", err)
 	}
@@ -226,7 +226,7 @@ func (fixture *twoAgentOneWayFixture) prepare(t *testing.T, revision core.Revisi
 }
 
 func (fixture *twoAgentOneWayFixture) prepareResult(revision core.Revision, action syncengine.OneWayAction, targetRevisionID core.RevisionID, policy syncengine.TargetDriftPolicy) (syncengine.PreparedOneWayChange, error) {
-	return (syncengine.OneWayChangePreparationService{Shares: fixture.target.Shares()}).Prepare(fixture.ctx, syncengine.OneWayChangePreparationRequest{Change: syncengine.OneWayChangeRequest{ProtocolVersion: syncengine.RevisionManifestProtocolVersion, RequestID: "request-" + string(revision.ID), SourceDeviceID: fixture.sourceDeviceID, TargetDeviceID: fixture.targetDeviceID, ShareID: fixture.shareID, RevisionID: revision.ID, ExpectedBaseRevisionID: revision.ParentRevisionID, Action: action}, Source: syncengine.OneWaySourcePolicy{ShareID: fixture.shareID, DeviceID: fixture.sourceDeviceID, Mode: storage.ShareOneWaySource}, Target: syncengine.OneWayTargetPolicy{ShareID: fixture.shareID, Mode: storage.ShareOneWayTarget, DriftPolicy: policy}, SourceRevision: revision, TargetRevisionID: targetRevisionID, Remote: true})
+	return (syncengine.OneWayChangePreparationService{Shares: fixture.target.Shares()}).Prepare(fixture.ctx, syncengine.OneWayChangePreparationRequest{AuthenticatedPeerID: fixture.sourceDeviceID, Change: syncengine.OneWayChangeRequest{ProtocolVersion: syncengine.RevisionManifestProtocolVersion, RequestID: "request-" + string(revision.ID), SourceDeviceID: fixture.sourceDeviceID, TargetDeviceID: fixture.targetDeviceID, ShareID: fixture.shareID, RevisionID: revision.ID, ExpectedBaseRevisionID: revision.ParentRevisionID, Action: action}, Source: syncengine.OneWaySourcePolicy{ShareID: fixture.shareID, DeviceID: fixture.sourceDeviceID, Mode: storage.ShareOneWaySource}, Target: syncengine.OneWayTargetPolicy{ShareID: fixture.shareID, Mode: storage.ShareOneWayTarget, DriftPolicy: policy}, SourceRevision: revision, TargetRevisionID: targetRevisionID, Remote: true})
 }
 
 func (fixture *twoAgentOneWayFixture) applySourceRevision(t *testing.T, revision core.Revision, action syncengine.OneWayAction, policy syncengine.TargetDriftPolicy) syncengine.OneWayApplyResult {
@@ -241,7 +241,7 @@ func (fixture *twoAgentOneWayFixture) applySourceRevision(t *testing.T, revision
 	if !revision.IsDeleted && revision.EntryType == core.EntryFile {
 		fixture.stage(t, prepared)
 	}
-	request := syncengine.OneWayApplyRequest{Prepared: prepared, ShareRoot: fixture.targetRoot}
+	request := syncengine.OneWayApplyRequest{AuthenticatedPeerID: prepared.AuthenticatedPeerID, Prepared: prepared, ShareRoot: fixture.targetRoot}
 	if revision.IsDeleted {
 		request.TombstoneID = core.TombstoneID("tombstone-" + string(revision.ID))
 		request.TombstoneExpiresAt = fixture.now.Add(24 * time.Hour)
@@ -277,7 +277,7 @@ func (fixture *twoAgentOneWayFixture) stage(t *testing.T, prepared syncengine.Pr
 }
 
 func (fixture *twoAgentOneWayFixture) executor() syncengine.OneWayApplyExecutor {
-	return syncengine.OneWayApplyExecutor{Revisions: fixture.target.Revisions(), Applier: fixture.target.FileIndex(), Tombstones: fixture.target.Tombstones(), Now: func() time.Time { return fixture.now }}
+	return syncengine.OneWayApplyExecutor{Revisions: fixture.target.Revisions(), Applier: fixture.target.FileIndex(), Tombstones: fixture.target.Tombstones(), Shares: fixture.target.Shares(), Now: func() time.Time { return fixture.now }}
 }
 
 func (fixture *twoAgentOneWayFixture) reopenTarget(t *testing.T) {
