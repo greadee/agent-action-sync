@@ -7,6 +7,7 @@ import (
 
 	"syncgate/internal/core"
 	"syncgate/internal/storage"
+	syncengine "syncgate/internal/sync"
 )
 
 type AdministrationService interface {
@@ -21,13 +22,17 @@ type AdministrationService interface {
 }
 
 type AdministrationServiceOptions struct {
-	Queries storage.AdministrationQueryStore
-	Ready   func() bool
+	Queries     storage.AdministrationQueryStore
+	Ready       func() bool
+	Runtime     func() RuntimeSnapshot
+	Diagnostics func() syncengine.DiagnosticReport
 }
 
 type LocalAdministrationService struct {
-	queries storage.AdministrationQueryStore
-	ready   func() bool
+	queries     storage.AdministrationQueryStore
+	ready       func() bool
+	runtime     func() RuntimeSnapshot
+	diagnostics func() syncengine.DiagnosticReport
 }
 
 func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdministrationService, error) {
@@ -37,7 +42,7 @@ func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdmin
 	if options.Ready == nil {
 		return nil, errors.New("administration readiness function is required")
 	}
-	return &LocalAdministrationService{queries: options.Queries, ready: options.Ready}, nil
+	return &LocalAdministrationService{queries: options.Queries, ready: options.Ready, runtime: options.Runtime, diagnostics: options.Diagnostics}, nil
 }
 
 func (service *LocalAdministrationService) Ready() bool {
