@@ -88,6 +88,48 @@ func (client *Client) Diagnostics(ctx context.Context, limit int) (AdminDiagnost
 	return result, err
 }
 
+func (client *Client) ListShares(ctx context.Context, limit int) (ShareInventoryPage, error) {
+	var result ShareInventoryPage
+	err := client.do(ctx, http.MethodGet, collectionPath("/api/v1/shares", limit), nil, &result)
+	return result, err
+}
+
+func (client *Client) ListDevices(ctx context.Context, limit int) (DeviceInventoryPage, error) {
+	var result DeviceInventoryPage
+	err := client.do(ctx, http.MethodGet, collectionPath("/api/v1/devices", limit), nil, &result)
+	return result, err
+}
+
+func (client *Client) GetDevice(ctx context.Context, deviceID core.DeviceID) (DeviceDetail, error) {
+	if strings.TrimSpace(string(deviceID)) == "" || strings.ContainsAny(string(deviceID), "/\\") {
+		return DeviceDetail{}, errors.New("device ID is invalid")
+	}
+	var result DeviceDetail
+	err := client.do(ctx, http.MethodGet, "/api/v1/devices/"+url.PathEscape(string(deviceID)), nil, &result)
+	return result, err
+}
+
+func (client *Client) ListJobs(ctx context.Context, limit int) (JobInventoryPage, error) {
+	var result JobInventoryPage
+	err := client.do(ctx, http.MethodGet, collectionPath("/api/v1/jobs", limit), nil, &result)
+	return result, err
+}
+
+func (client *Client) GetJob(ctx context.Context, jobID string) (JobInventory, error) {
+	if strings.TrimSpace(jobID) == "" || strings.ContainsAny(jobID, "/\\") {
+		return JobInventory{}, errors.New("job ID is invalid")
+	}
+	var result JobInventory
+	err := client.do(ctx, http.MethodGet, "/api/v1/jobs/"+url.PathEscape(jobID), nil, &result)
+	return result, err
+}
+
+func (client *Client) ListAuditEvents(ctx context.Context, limit int) (AuditInventoryPage, error) {
+	var result AuditInventoryPage
+	err := client.do(ctx, http.MethodGet, collectionPath("/api/v1/audit-events", limit), nil, &result)
+	return result, err
+}
+
 func (client *Client) RequestScan(ctx context.Context, shareID core.ShareID) (ScanAccepted, error) {
 	if strings.TrimSpace(string(shareID)) == "" || strings.ContainsAny(string(shareID), "/\\") {
 		return ScanAccepted{}, errors.New("share ID is invalid")
@@ -187,4 +229,11 @@ func (client *Client) do(ctx context.Context, method, path string, requestValue,
 		return fmt.Errorf("decode local administration API response: %w", err)
 	}
 	return nil
+}
+
+func collectionPath(path string, limit int) string {
+	if limit > 0 {
+		return path + "?limit=" + url.QueryEscape(fmt.Sprint(limit))
+	}
+	return path
 }
