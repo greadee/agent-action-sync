@@ -61,7 +61,7 @@ func NewJobControlHandler(controller JobController) http.Handler {
 	})
 }
 
-func controlWithJobStore(store storage.OneWayJobStore, now func() time.Time) func(context.Context, string, JobActionName) (storage.AdminJob, error) {
+func ControlWithJobStore(store storage.OneWayJobStore, now func() time.Time) func(context.Context, string, JobActionName) (storage.AdminJob, error) {
 	return func(ctx context.Context, jobID string, action JobActionName) (storage.AdminJob, error) {
 		control := syncengine.OneWayJobControl(action)
 		current := time.Now().UTC()

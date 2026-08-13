@@ -66,7 +66,7 @@ func TestJobControlHandlerMapsConflictAndMalformedRequests(t *testing.T) {
 
 func TestControlWithJobStorePreservesIdempotencyAndMapsActiveConflict(t *testing.T) {
 	store := &controlJobStore{job: core.OneWayJob{ID: "job-1", TransferID: "transfer-1", PeerDeviceID: "device-1", ShareID: "share-1", RevisionID: "revision-1", RelativePath: "safe.txt", RequiredCapability: core.CapabilityUpload, State: core.OneWayJobQueued, CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)}}
-	control := controlWithJobStore(store, func() time.Time { return time.Unix(2, 0) })
+	control := ControlWithJobStore(store, func() time.Time { return time.Unix(2, 0) })
 	paused, err := control(context.Background(), "job-1", JobActionPause)
 	if err != nil || paused.State != core.OneWayJobPaused {
 		t.Fatalf("pause = %#v err=%v", paused, err)
