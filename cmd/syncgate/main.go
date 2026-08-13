@@ -7,19 +7,19 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"syncgate/internal/api"
 	"syncgate/internal/config"
 	"syncgate/internal/core"
 	"syncgate/internal/daemon"
 	"syncgate/internal/pairing"
-	"syncgate/internal/storage/sqlite"
 	syncengine "syncgate/internal/sync"
 	"syncgate/internal/transfer"
 	tcptls "syncgate/internal/transport/tcp"
@@ -94,35 +94,42 @@ func runPairCreate(args []string) {
 		exitf("invalid --request: %v", err)
 	}
 
-	localDaemon := openPairingDaemon(*configPath)
-	defer localDaemon.Close()
-	created, err := (pairing.Service{Audit: localDaemon.Store.Audit()}).CreateInvitation(
-		context.Background(), localDaemon.Identity, localDaemon.Config.DeviceName, *ttl, requested,
-	)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	capabilities := make([]string, len(requested))
+	for index, capability := range requested {
+		capabilities[index] = string(capability)
+	}
+	created, err := client.CreatePairingInvitation(context.Background(), api.InvitationRequest{
+		TTLSeconds: int(ttl.Seconds()), Capabilities: capabilities,
+	})
 	if err != nil {
 		exitf("create pairing invitation: %v", err)
 	}
-	fmt.Printf("syncgate pairing invitation device=%s expires_at=%s\n", created.Invite.DeviceID, created.Invite.ExpiresAt.Format(time.RFC3339))
-	fmt.Printf("fingerprint=%s\n", created.Invite.Fingerprint)
-	fmt.Printf("code=%s\n", created.Invite.OneTimeCode)
-	fmt.Printf("invite=%s\n", created.Encoded)
+	fmt.Printf("syncgate pairing invitation expires_at=%s\n", created.ExpiresAt)
+	fmt.Printf("fingerprint=%s\n", created.Fingerprint)
+	fmt.Printf("code=%s\n", created.OneTimeCode)
+	fmt.Printf("invite=%s\n", created.Invitation)
 }
 
 func runPairInspect(args []string) {
 	flags := flag.NewFlagSet("pair-inspect", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
 	encoded := flags.String("invite", "", "encoded pairing invitation")
 	_ = flags.Parse(args)
 	if strings.TrimSpace(*encoded) == "" {
 		exitf("--invite is required")
 	}
-	invite, err := (pairing.Service{}).InspectInvitation(*encoded)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	invite, err := client.InspectPairingInvitation(context.Background(), *encoded)
 	if err != nil {
 		exitf("inspect pairing invitation: %v", err)
 	}
-	fmt.Printf("syncgate pairing peer device=%s name=%q\n", invite.DeviceID, invite.DisplayName)
+	fmt.Printf("syncgate pairing peer device=%s name=%q\n", invite.DeviceID, invite.DeviceName)
 	fmt.Printf("fingerprint=%s\n", invite.Fingerprint)
-	fmt.Printf("expires_at=%s\n", invite.ExpiresAt.Format(time.RFC3339))
-	fmt.Printf("requested_capabilities=%s\n", formatPairingCapabilities(invite.RequestedCaps))
+	fmt.Printf("expires_at=%s\n", invite.ExpiresAt)
+	fmt.Printf("requested_capabilities=%s\n", strings.Join(invite.Capabilities, ","))
 }
 
 func runPairAccept(args []string) {
@@ -147,11 +154,19 @@ func runPairAccept(args []string) {
 		grants = append(grants, grant)
 	}
 
-	localDaemon := openPairingDaemon(*configPath)
-	defer localDaemon.Close()
-	result, err := (pairing.Service{Pairings: localDaemon.Store.Pairings()}).Accept(context.Background(), pairing.AcceptRequest{
-		LocalDeviceID: localDaemon.Identity.DeviceID, EncodedInvite: *encoded,
-		ExpectedFingerprint: *fingerprint, OneTimeCode: *code, Grants: grants,
+	requestedGrants := make([]api.PairingGrantRequest, len(grants))
+	for index, grant := range grants {
+		capabilities := make([]string, len(grant.Capabilities))
+		for capabilityIndex, capability := range grant.Capabilities {
+			capabilities[capabilityIndex] = string(capability)
+		}
+		lanOnlyValue := grant.LANOnly
+		requestedGrants[index] = api.PairingGrantRequest{ShareID: string(grant.ShareID), Capabilities: capabilities, LANOnly: &lanOnlyValue}
+	}
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.AcceptPairingInvitation(context.Background(), api.AcceptanceRequest{
+		Invitation: *encoded, ExpectedFingerprint: *fingerprint, OneTimeCode: *code, Grants: requestedGrants,
 	})
 	if err != nil {
 		exitf("accept pairing invitation: %v", err)
@@ -160,7 +175,7 @@ func runPairAccept(args []string) {
 	if result.AlreadyAccepted {
 		state = "already_accepted"
 	}
-	fmt.Printf("syncgate pairing device=%s state=%s explicit_grants=%d\n", result.Peer.DeviceID, state, len(grants))
+	fmt.Printf("syncgate pairing device=%s state=%s explicit_grants=%d\n", result.DeviceID, state, len(grants))
 }
 
 func runPairRevoke(args []string) {
@@ -172,11 +187,9 @@ func runPairRevoke(args []string) {
 		exitf("--device is required")
 	}
 
-	localDaemon := openPairingDaemon(*configPath)
-	defer localDaemon.Close()
-	result, err := (pairing.Service{Pairings: localDaemon.Store.Pairings()}).Revoke(
-		context.Background(), localDaemon.Identity.DeviceID, core.DeviceID(strings.TrimSpace(*deviceID)),
-	)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.RevokePairingDevice(context.Background(), core.DeviceID(strings.TrimSpace(*deviceID)))
 	if err != nil {
 		exitf("revoke pairing: %v", err)
 	}
@@ -245,15 +258,6 @@ func parsePairingCapabilities(value string) ([]core.Capability, error) {
 	return capabilities, nil
 }
 
-func formatPairingCapabilities(capabilities []core.Capability) string {
-	values := make([]string, 0, len(capabilities))
-	for _, capability := range capabilities {
-		values = append(values, string(capability))
-	}
-	sort.Strings(values)
-	return strings.Join(values, ",")
-}
-
 func runDaemon(args []string) {
 	flags := flag.NewFlagSet("daemon", flag.ExitOnError)
 	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
@@ -271,16 +275,23 @@ func runDaemonStatus(args []string) {
 	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
 	_ = flags.Parse(args)
 
-	store, closeStore := openLocalStore(*configPath)
-	defer closeStore()
-	jobs, err := store.OneWayJobs().ListOneWayJobs(context.Background())
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	status, err := client.Status(context.Background())
 	if err != nil {
-		exitf("list one-way jobs: %v", err)
+		exitf("read daemon status: %v", err)
+	}
+	fmt.Printf("syncgate daemon status=%s api=%s device=%s shares=%d peer_executor_enabled=%t queue_pending=%d queue_running=%d queue_paused=%d queue_failed=%d\n",
+		status.Status, status.APIVersion, status.DeviceID, status.ActiveShareCount, status.PeerExecutorEnabled,
+		status.Queue.Pending, status.Queue.Running, status.Queue.Paused, status.Queue.Failed)
+	diagnostics, err := client.Diagnostics(context.Background(), 50)
+	if err != nil {
+		exitf("read daemon diagnostics: %v", err)
 	}
 	printDiagnostics(os.Stdout, syncengine.DiagnosticReport{
-		GeneratedAt: time.Now().UTC(),
-		Work:        syncengine.PendingOrBlockedWork(jobs),
-	}, len(jobs)+1)
+		GeneratedAt: diagnostics.GeneratedAt, RecentScans: diagnostics.RecentScans,
+		Work: diagnostics.Work, IgnoredPaths: diagnostics.IgnoredPaths,
+	}, 50)
 }
 
 func runScan(args []string) {
@@ -292,24 +303,13 @@ func runScan(args []string) {
 		exitf("--share is required")
 	}
 
-	cfg, err := config.LoadFile(context.Background(), *configPath)
-	if err != nil {
-		exitf("%v", err)
-	}
-	localDaemon, err := daemon.Bootstrap(context.Background(), cfg, daemon.Options{})
-	if err != nil {
-		exitf("%v", err)
-	}
-	defer localDaemon.Close()
-	diagnostic, err := localDaemon.ScanOnce(context.Background(), core.ShareID(*shareID))
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	accepted, err := client.RequestScan(context.Background(), core.ShareID(*shareID))
 	if err != nil {
 		exitf("scan share %s: %v", *shareID, err)
 	}
-	printDiagnostics(os.Stdout, syncengine.DiagnosticReport{
-		GeneratedAt: time.Now().UTC(),
-		RecentScans: []syncengine.ScanDiagnostic{diagnostic},
-		Work:        localDaemon.Diagnostics().Work,
-	}, 1)
+	fmt.Printf("syncgate scan share=%s accepted=%t\n", accepted.ShareID, accepted.Accepted)
 }
 
 func runJobControl(args []string, control syncengine.OneWayJobControl) {
@@ -321,29 +321,49 @@ func runJobControl(args []string, control syncengine.OneWayJobControl) {
 		exitf("--job is required")
 	}
 
-	store, closeStore := openLocalStore(*configPath)
-	defer closeStore()
-	job, err := syncengine.ControlOneWayJob(context.Background(), store.OneWayJobs(), *jobID, control, time.Now().UTC())
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	job, err := client.ControlJob(context.Background(), *jobID, api.JobActionName(control))
 	if err != nil {
 		exitf("%v", err)
 	}
 	fmt.Printf("syncgate job=%s state=%s retries=%d\n", job.ID, job.State, job.RetryCount)
 }
 
-func openLocalStore(configPath string) (*sqlite.Store, func()) {
-	cfg, err := config.LoadFile(context.Background(), configPath)
+func openAdminClient(configPath string) *api.Client {
+	client, err := newAdminClient(configPath)
 	if err != nil {
 		exitf("%v", err)
 	}
-	store, err := sqlite.Open(filepath.Join(cfg.DataDir, daemon.DatabaseFileName))
+	return client
+}
+
+func newAdminClient(configPath string) (*api.Client, error) {
+	cfg, err := config.LoadFile(context.Background(), configPath)
 	if err != nil {
-		exitf("open local storage: %v", err)
+		return nil, err
 	}
-	if err := store.Migrate(context.Background()); err != nil {
-		_ = store.Close()
-		exitf("migrate local storage: %v", err)
+	credentialStore, err := api.NewAdminCredentialStore(api.AdminCredentialStoreOptions{
+		DataDir: cfg.DataDir, RuntimeMode: cfg.RuntimeMode,
+		AllowInsecureDevelopmentFile: cfg.Identity.AllowInsecureDevelopmentFile,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("configure local administration credential: %w", err)
 	}
-	return store, func() { _ = store.Close() }
+	credential, err := api.LoadAdminCredential(credentialStore)
+	if err != nil {
+		return nil, fmt.Errorf("load local administration credential: %w", err)
+	}
+	client, err := api.NewClient(api.ClientOptions{
+		Address: net.JoinHostPort(cfg.LocalAPI.Host, fmt.Sprint(cfg.LocalAPI.Port)), Credential: credential,
+	})
+	for index := range credential {
+		credential[index] = 0
+	}
+	if err != nil {
+		return nil, fmt.Errorf("configure local administration client: %w", err)
+	}
+	return client, nil
 }
 
 func runCheckConfig(args []string) {
