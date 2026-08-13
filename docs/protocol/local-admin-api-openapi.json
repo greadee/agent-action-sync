@@ -134,7 +134,7 @@
         "summary": "Accept a pairing invitation",
         "security": [{ "bearerAuth": [] }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptanceRequest" } } } },
-        "responses": { "201": { "description": "Pairing accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Acceptance" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+        "responses": { "200": { "description": "Pairing accepted or already accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Acceptance" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
     "/api/v1/devices/{device_id}/revocation": {
@@ -189,9 +189,10 @@
       "Invitation": { "type": "object", "required": ["invitation", "fingerprint", "one_time_code", "expires_at"], "additionalProperties": false, "properties": { "invitation": { "type": "string", "maxLength": 65536 }, "fingerprint": { "type": "string" }, "one_time_code": { "type": "string" }, "expires_at": { "type": "string", "format": "date-time" } } },
       "EncodedInvitation": { "type": "object", "required": ["invitation"], "additionalProperties": false, "properties": { "invitation": { "type": "string", "minLength": 1, "maxLength": 65536 } } },
       "InvitationInspection": { "type": "object", "required": ["valid", "invite_id", "device_id", "device_name", "fingerprint", "created_at", "expires_at", "capabilities"], "additionalProperties": false, "properties": { "valid": { "type": "boolean", "const": true }, "invite_id": { "type": "string" }, "device_id": { "type": "string" }, "device_name": { "type": "string", "maxLength": 256 }, "fingerprint": { "type": "string" }, "created_at": { "type": "string", "format": "date-time" }, "expires_at": { "type": "string", "format": "date-time" }, "capabilities": { "type": "array", "maxItems": 16, "items": { "type": "string" } } } },
-      "AcceptanceRequest": { "type": "object", "required": ["invitation"], "additionalProperties": false, "properties": { "invitation": { "type": "string", "minLength": 1, "maxLength": 65536 }, "display_name": { "type": "string", "maxLength": 256 } } },
-      "Acceptance": { "type": "object", "required": ["accepted", "device_id"], "properties": { "accepted": { "type": "boolean", "const": true }, "device_id": { "type": "string" } } },
-      "Revocation": { "type": "object", "required": ["device_id", "revoked"], "properties": { "device_id": { "type": "string" }, "revoked": { "type": "boolean", "const": true } } }
+      "PairingGrant": { "type": "object", "required": ["share_id", "capabilities"], "additionalProperties": false, "properties": { "share_id": { "type": "string", "minLength": 1, "maxLength": 256 }, "capabilities": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "type": "string" } }, "lan_only": { "type": "boolean", "default": true } } },
+      "AcceptanceRequest": { "type": "object", "required": ["invitation", "expected_fingerprint", "one_time_code", "grants"], "additionalProperties": false, "properties": { "invitation": { "type": "string", "minLength": 1, "maxLength": 65536 }, "expected_fingerprint": { "type": "string", "minLength": 1, "maxLength": 256 }, "one_time_code": { "type": "string", "minLength": 1, "maxLength": 128 }, "grants": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/PairingGrant" } } } },
+      "Acceptance": { "type": "object", "required": ["accepted", "already_accepted", "device_id", "device_name", "fingerprint"], "additionalProperties": false, "properties": { "accepted": { "type": "boolean", "const": true }, "already_accepted": { "type": "boolean" }, "device_id": { "type": "string" }, "device_name": { "type": "string" }, "fingerprint": { "type": "string" } } },
+      "Revocation": { "type": "object", "required": ["device_id", "revoked", "already_revoked"], "additionalProperties": false, "properties": { "device_id": { "type": "string" }, "revoked": { "type": "boolean", "const": true }, "already_revoked": { "type": "boolean" } } }
     }
   }
 }

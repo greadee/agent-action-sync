@@ -71,6 +71,26 @@ func (service *LocalAdministrationService) InspectPairingInvitation(ctx context.
 	return service.pairing.InspectPairingInvitation(ctx, request)
 }
 
+func (service *LocalAdministrationService) AcceptPairingInvitation(ctx context.Context, request AcceptanceRequest) (Acceptance, error) {
+	if err := validateServiceContext(ctx); err != nil {
+		return Acceptance{}, err
+	}
+	if service.pairing == nil {
+		return Acceptance{}, errUnavailable
+	}
+	return service.pairing.AcceptPairingInvitation(ctx, request)
+}
+
+func (service *LocalAdministrationService) RevokePairingDevice(ctx context.Context, deviceID core.DeviceID) (Revocation, error) {
+	if err := validateServiceContext(ctx); err != nil {
+		return Revocation{}, err
+	}
+	if service.pairing == nil {
+		return Revocation{}, errUnavailable
+	}
+	return service.pairing.RevokePairingDevice(ctx, deviceID)
+}
+
 func (service *LocalAdministrationService) Ready() bool {
 	return service != nil && service.ready != nil && service.ready()
 }

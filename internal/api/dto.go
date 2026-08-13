@@ -156,22 +156,79 @@ type InvitationInspection struct {
 }
 
 type AcceptanceRequest struct {
-	Invitation  string `json:"invitation"`
-	DisplayName string `json:"display_name,omitempty"`
+	Invitation          string                `json:"invitation"`
+	ExpectedFingerprint string                `json:"expected_fingerprint"`
+	OneTimeCode         string                `json:"one_time_code"`
+	Grants              []PairingGrantRequest `json:"grants"`
 }
 
 func (request AcceptanceRequest) Validate() error {
-	return (EncodedInvitation{Invitation: request.Invitation}).Validate()
+	if err := (EncodedInvitation{Invitation: request.Invitation}).Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(request.ExpectedFingerprint) == "" || len(request.ExpectedFingerprint) > 256 {
+		return fmt.Errorf("expected_fingerprint must be between 1 and 256 bytes")
+	}
+	if strings.TrimSpace(request.OneTimeCode) == "" || len(request.OneTimeCode) > 128 {
+		return fmt.Errorf("one_time_code must be between 1 and 128 bytes")
+	}
+	if len(request.Grants) > 200 {
+		return fmt.Errorf("grants cannot contain more than 200 values")
+	}
+	seenShares := make(map[string]bool, len(request.Grants))
+	for _, grant := range request.Grants {
+		if err := grant.Validate(); err != nil {
+			return err
+		}
+		if seenShares[grant.ShareID] {
+			return fmt.Errorf("duplicate grant for share %q", grant.ShareID)
+		}
+		seenShares[grant.ShareID] = true
+	}
+	return nil
+}
+
+type PairingGrantRequest struct {
+	ShareID      string   `json:"share_id"`
+	Capabilities []string `json:"capabilities"`
+	LANOnly      *bool    `json:"lan_only,omitempty"`
+}
+
+func (request PairingGrantRequest) Validate() error {
+	if strings.TrimSpace(request.ShareID) == "" || len(request.ShareID) > 256 || strings.ContainsAny(request.ShareID, "/\\") {
+		return fmt.Errorf("grant share_id must be between 1 and 256 bytes and contain no path separators")
+	}
+	if request.ShareID != strings.TrimSpace(request.ShareID) {
+		return fmt.Errorf("grant share_id must be normalized")
+	}
+	if len(request.Capabilities) == 0 || len(request.Capabilities) > 16 {
+		return fmt.Errorf("grant capabilities must contain between 1 and 16 values")
+	}
+	seen := make(map[string]bool, len(request.Capabilities))
+	for _, capability := range request.Capabilities {
+		if !core.IsShareCapability(core.Capability(capability)) {
+			return fmt.Errorf("unsupported grant capability %q", capability)
+		}
+		if seen[capability] {
+			return fmt.Errorf("duplicate grant capability %q", capability)
+		}
+		seen[capability] = true
+	}
+	return nil
 }
 
 type Acceptance struct {
-	Accepted bool   `json:"accepted"`
-	DeviceID string `json:"device_id"`
+	Accepted        bool   `json:"accepted"`
+	AlreadyAccepted bool   `json:"already_accepted"`
+	DeviceID        string `json:"device_id"`
+	DeviceName      string `json:"device_name"`
+	Fingerprint     string `json:"fingerprint"`
 }
 
 type Revocation struct {
-	DeviceID string `json:"device_id"`
-	Revoked  bool   `json:"revoked"`
+	DeviceID       string `json:"device_id"`
+	Revoked        bool   `json:"revoked"`
+	AlreadyRevoked bool   `json:"already_revoked"`
 }
 
 func (action *JobAction) UnmarshalJSON(data []byte) error {
