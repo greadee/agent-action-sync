@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"syncgate/internal/api"
 	"syncgate/internal/config"
 	"syncgate/internal/core"
 	"syncgate/internal/identity"
@@ -28,18 +31,21 @@ var ErrClosed = errors.New("daemon is closed")
 var ErrAutomaticPeerWorkDisabled = errors.New("automatic peer job execution is disabled until trusted transport is configured")
 
 type Options struct {
-	OpenStore          func(string) (storage.Store, error)
-	IdentityStore      identity.PrivateKeyStore
-	NewIdentity        func() (identity.DeviceIdentity, error)
-	CheckShareRoot     func(string) error
-	WatcherFactory     syncengine.WatcherFactory
-	Now                func() time.Time
-	TombstoneRetention time.Duration
-	RecentScanLimit    int
-	JobExecutor        syncengine.OneWayJobExecutor
-	JobPollInterval    time.Duration
-	JobRetryBase       time.Duration
-	JobMaxBackoff      time.Duration
+	OpenStore             func(string) (storage.Store, error)
+	IdentityStore         identity.PrivateKeyStore
+	NewIdentity           func() (identity.DeviceIdentity, error)
+	CheckShareRoot        func(string) error
+	WatcherFactory        syncengine.WatcherFactory
+	Now                   func() time.Time
+	TombstoneRetention    time.Duration
+	RecentScanLimit       int
+	JobExecutor           syncengine.OneWayJobExecutor
+	JobPollInterval       time.Duration
+	JobRetryBase          time.Duration
+	JobMaxBackoff         time.Duration
+	AdminCredentialStore  api.AdminCredentialStore
+	AdminCredentialRandom io.Reader
+	ListenLocalAPI        func(network, address string) (net.Listener, error)
 }
 
 type Daemon struct {
@@ -64,6 +70,8 @@ type Daemon struct {
 	jobPollInterval time.Duration
 	jobRetryBase    time.Duration
 	jobMaxBackoff   time.Duration
+	startedAt       time.Time
+	localAPI        *localAPIState
 }
 
 type shareRuntime struct {
@@ -180,6 +188,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 		jobPollInterval: options.JobPollInterval,
 		jobRetryBase:    options.JobRetryBase,
 		jobMaxBackoff:   options.JobMaxBackoff,
+		startedAt:       options.Now().UTC(),
 	}, nil
 }
 
@@ -190,6 +199,10 @@ func RunConfig(ctx context.Context, configPath string, options Options) error {
 	}
 	daemon, err := Bootstrap(ctx, cfg, options)
 	if err != nil {
+		return err
+	}
+	if err := daemon.ConfigureLocalAPI(options); err != nil {
+		_ = daemon.Close()
 		return err
 	}
 	return daemon.Run(ctx)
@@ -239,7 +252,7 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 		daemon.mu.Unlock()
 		return ErrAlreadyRunning
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(context.Background())
 	daemon.cancel = cancel
 	daemon.mu.Unlock()
 	if err := daemon.startRuntimes(runCtx); err != nil {
@@ -250,8 +263,25 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 
-	<-runCtx.Done()
-	return daemon.Close()
+	serveErrors := daemon.startLocalAPI()
+	if serveErrors == nil {
+		<-ctx.Done()
+		return daemon.Close()
+	}
+	select {
+	case <-ctx.Done():
+		return daemon.Close()
+	case err := <-serveErrors:
+		closeErr := daemon.Close()
+		if err == nil {
+			return closeErr
+		}
+		serveErr := fmt.Errorf("serve local administration API: %w", err)
+		if closeErr != nil {
+			return errors.Join(serveErr, closeErr)
+		}
+		return serveErr
+	}
 }
 
 func (daemon *Daemon) Close() error {
@@ -261,16 +291,20 @@ func (daemon *Daemon) Close() error {
 	daemon.closeOnce.Do(func() {
 		daemon.mu.Lock()
 		daemon.closed = true
+		daemon.markLocalAPIDrainingLocked()
 		cancel := daemon.cancel
 		daemon.cancel = nil
 		daemon.mu.Unlock()
 
+		apiErr := daemon.shutdownLocalAPI()
 		if cancel != nil {
 			cancel()
 		}
 		daemon.runtimeWG.Wait()
 		if daemon.Store != nil {
-			daemon.closeErr = daemon.Store.Close()
+			daemon.closeErr = errors.Join(apiErr, daemon.Store.Close())
+		} else {
+			daemon.closeErr = apiErr
 		}
 	})
 	return daemon.closeErr

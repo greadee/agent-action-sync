@@ -222,6 +222,22 @@ CREATE INDEX IF NOT EXISTS one_way_jobs_peer_idx
 ALTER TABLE one_way_jobs ADD COLUMN remote INTEGER NOT NULL DEFAULT 1;
 `),
 	},
+	{
+		Version: 6,
+		Name:    "bounded administration query indexes",
+		SQL: strings.TrimSpace(`
+CREATE INDEX IF NOT EXISTS admin_permissions_device_idx
+    ON share_permissions(device_id, share_id);
+CREATE INDEX IF NOT EXISTS admin_jobs_page_idx
+    ON one_way_jobs(created_at DESC, job_id DESC);
+CREATE INDEX IF NOT EXISTS admin_jobs_share_state_page_idx
+    ON one_way_jobs(share_id, state, created_at DESC, job_id DESC);
+CREATE INDEX IF NOT EXISTS admin_audit_page_idx
+    ON audit_events(occurred_at DESC, audit_id DESC);
+CREATE INDEX IF NOT EXISTS admin_audit_scope_page_idx
+    ON audit_events(share_id, peer_device_id, occurred_at DESC, audit_id DESC);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

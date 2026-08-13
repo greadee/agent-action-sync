@@ -61,3 +61,12 @@ func TestOneWayJobNetworkScopeMigrationPreservesRemoteDefault(t *testing.T) {
 		t.Fatal("one-way job network scope migration must preserve the prior remote authorization behavior")
 	}
 }
+
+func TestAdministrationQueryMigrationAddsBoundedIndexes(t *testing.T) {
+	sql := Migrations[5].SQL
+	for _, index := range []string{"admin_permissions_device_idx", "admin_jobs_page_idx", "admin_audit_page_idx"} {
+		if !strings.Contains(sql, index) {
+			t.Fatalf("administration query migration is missing %q", index)
+		}
+	}
+}

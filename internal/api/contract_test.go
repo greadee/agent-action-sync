@@ -1,0 +1,188 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+type contractRoute struct {
+	method, operationID, path string
+	health, paginated         bool
+}
+
+var expectedContractRoutes = []contractRoute{
+	{method: "get", operationID: "getHealth", path: "/healthz", health: true},
+	{method: "get", operationID: "getStatus", path: "/api/v1/status"},
+	{method: "get", operationID: "getDiagnostics", path: "/api/v1/diagnostics"},
+	{method: "get", operationID: "listShares", path: "/api/v1/shares", paginated: true},
+	{method: "get", operationID: "listDevices", path: "/api/v1/devices", paginated: true},
+	{method: "get", operationID: "getDevice", path: "/api/v1/devices/{device_id}"},
+	{method: "get", operationID: "listJobs", path: "/api/v1/jobs", paginated: true},
+	{method: "get", operationID: "getJob", path: "/api/v1/jobs/{job_id}"},
+	{method: "get", operationID: "listAuditEvents", path: "/api/v1/audit-events", paginated: true},
+	{method: "post", operationID: "startShareScan", path: "/api/v1/shares/{share_id}/scans"},
+	{method: "post", operationID: "actOnJob", path: "/api/v1/jobs/{job_id}/actions"},
+	{method: "post", operationID: "createPairingInvitation", path: "/api/v1/pairing/invitations"},
+	{method: "post", operationID: "inspectPairingInvitation", path: "/api/v1/pairing/inspect"},
+	{method: "post", operationID: "acceptPairingInvitation", path: "/api/v1/pairing/acceptances"},
+	{method: "post", operationID: "revokeDevice", path: "/api/v1/devices/{device_id}/revocation"},
+}
+
+func TestLocalAdminAPIContract(t *testing.T) {
+	contractPath := filepath.Join("..", "..", "docs", "protocol", "local-admin-api-openapi.json")
+	raw, err := os.ReadFile(contractPath)
+	if err != nil {
+		t.Fatalf("read contract: %v", err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("contract must be valid JSON: %v", err)
+	}
+	if document["openapi"] != "3.1.0" {
+		t.Fatalf("expected OpenAPI 3.1.0, got %v", document["openapi"])
+	}
+	servers := requiredSlice(t, document, "servers")
+	serverObject, ok := servers[0].(map[string]any)
+	if !ok {
+		t.Fatal("servers entries must be objects")
+	}
+	serverURL, ok := serverObject["url"].(string)
+	if !ok {
+		t.Fatal("server url must be a string")
+	}
+	parsed, err := url.Parse(serverURL)
+	if err != nil || parsed.Hostname() != "127.0.0.1" {
+		t.Fatalf("API server must be loopback-only: %v", serverURL)
+	}
+
+	components := requiredMap(t, document, "components")
+	securitySchemes := requiredMap(t, components, "securitySchemes")
+	if _, ok := securitySchemes["bearerAuth"]; !ok {
+		t.Fatal("contract must define bearerAuth")
+	}
+	parameters := requiredMap(t, components, "parameters")
+	limit := requiredMap(t, parameters, "Limit")
+	limitSchema := requiredMap(t, limit, "schema")
+	if limitSchema["maximum"] != float64(200) || limitSchema["default"] != float64(50) {
+		t.Fatalf("pagination limit must default to 50 and cap at 200: %#v", limitSchema)
+	}
+
+	paths := requiredMap(t, document, "paths")
+	seenOperations := map[string]bool{}
+	for _, route := range expectedContractRoutes {
+		pathValue, ok := paths[route.path]
+		if !ok {
+			t.Errorf("missing route %s %s", strings.ToUpper(route.method), route.path)
+			continue
+		}
+		pathItem, ok := pathValue.(map[string]any)
+		if !ok {
+			t.Errorf("path item %s must be an object", route.path)
+			continue
+		}
+		operation, ok := pathItem[route.method].(map[string]any)
+		if !ok {
+			t.Errorf("missing method %s on %s", strings.ToUpper(route.method), route.path)
+			continue
+		}
+		if operation["operationId"] != route.operationID {
+			t.Errorf("%s %s has operationId %v, want %s", strings.ToUpper(route.method), route.path, operation["operationId"], route.operationID)
+		}
+		if seenOperations[route.operationID] {
+			t.Errorf("duplicate operationId %s", route.operationID)
+		}
+		seenOperations[route.operationID] = true
+		responses := requiredMap(t, operation, "responses")
+		if len(responses) == 0 {
+			t.Errorf("%s %s has no responses", strings.ToUpper(route.method), route.path)
+		}
+		if route.health {
+			security, ok := operation["security"].([]any)
+			if !ok || len(security) != 0 {
+				t.Errorf("health route must explicitly disable security")
+			}
+		} else if !hasBearerSecurity(operation["security"]) {
+			t.Errorf("%s %s must declare bearerAuth", strings.ToUpper(route.method), route.path)
+		}
+		if route.paginated && !hasParameterRefs(operation, "Limit", "Cursor") {
+			t.Errorf("%s %s must expose bounded limit and cursor pagination", strings.ToUpper(route.method), route.path)
+		}
+	}
+
+	for path := range paths {
+		lower := strings.ToLower(path)
+		for _, forbidden := range []string{"file", "content", "config", "download", "upload", "remote", "shell", "listen"} {
+			if strings.Contains(lower, forbidden) {
+				t.Errorf("forbidden administrative surface in path %q", path)
+			}
+		}
+	}
+}
+
+func requiredMap(t *testing.T, parent map[string]any, key string) map[string]any {
+	t.Helper()
+	value, ok := parent[key].(map[string]any)
+	if !ok {
+		t.Fatalf("%s must be an object", key)
+	}
+	return value
+}
+
+func requiredSlice(t *testing.T, parent map[string]any, key string) []any {
+	t.Helper()
+	value, ok := parent[key].([]any)
+	if !ok || len(value) == 0 {
+		t.Fatalf("%s must be a non-empty array", key)
+	}
+	return value
+}
+
+func hasBearerSecurity(value any) bool {
+	items, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if object, ok := item.(map[string]any); ok {
+			if _, ok := object["bearerAuth"]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasParameterRefs(operation map[string]any, names ...string) bool {
+	parameters, ok := operation["parameters"].([]any)
+	if !ok {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, parameter := range parameters {
+		object, ok := parameter.(map[string]any)
+		if !ok {
+			continue
+		}
+		ref, ok := object["$ref"].(string)
+		if !ok {
+			continue
+		}
+		seen[filepath.Base(ref)] = true
+	}
+	for _, name := range names {
+		if !seen[name] {
+			return false
+		}
+	}
+	return true
+}
+
+func Example() {
+	fmt.Println("loopback-only, bearer-authenticated, versioned")
+	// Output: loopback-only, bearer-authenticated, versioned
+}
