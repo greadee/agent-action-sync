@@ -28,6 +28,7 @@ type AdministrationServiceOptions struct {
 	Diagnostics func() syncengine.DiagnosticReport
 	Scan        func(context.Context, core.ShareID) error
 	Control     func(context.Context, string, JobActionName) (storage.AdminJob, error)
+	Pairing     *PairingCoordinator
 }
 
 type LocalAdministrationService struct {
@@ -37,6 +38,7 @@ type LocalAdministrationService struct {
 	diagnostics func() syncengine.DiagnosticReport
 	scan        func(context.Context, core.ShareID) error
 	control     func(context.Context, string, JobActionName) (storage.AdminJob, error)
+	pairing     *PairingCoordinator
 }
 
 func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdministrationService, error) {
@@ -46,7 +48,27 @@ func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdmin
 	if options.Ready == nil {
 		return nil, errors.New("administration readiness function is required")
 	}
-	return &LocalAdministrationService{queries: options.Queries, ready: options.Ready, runtime: options.Runtime, diagnostics: options.Diagnostics, scan: options.Scan, control: options.Control}, nil
+	return &LocalAdministrationService{queries: options.Queries, ready: options.Ready, runtime: options.Runtime, diagnostics: options.Diagnostics, scan: options.Scan, control: options.Control, pairing: options.Pairing}, nil
+}
+
+func (service *LocalAdministrationService) CreatePairingInvitation(ctx context.Context, request InvitationRequest) (InvitationDTO, error) {
+	if err := validateServiceContext(ctx); err != nil {
+		return InvitationDTO{}, err
+	}
+	if service.pairing == nil {
+		return InvitationDTO{}, errUnavailable
+	}
+	return service.pairing.CreatePairingInvitation(ctx, request)
+}
+
+func (service *LocalAdministrationService) InspectPairingInvitation(ctx context.Context, request EncodedInvitation) (InvitationInspection, error) {
+	if err := validateServiceContext(ctx); err != nil {
+		return InvitationInspection{}, err
+	}
+	if service.pairing == nil {
+		return InvitationInspection{}, errUnavailable
+	}
+	return service.pairing.InspectPairingInvitation(ctx, request)
 }
 
 func (service *LocalAdministrationService) Ready() bool {

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"syncgate/internal/core"
 )
 
 // These types are transport DTOs. They intentionally do not expose storage,
@@ -111,12 +113,24 @@ func (request InvitationRequest) Validate() error {
 	if len(request.Capabilities) > 16 {
 		return fmt.Errorf("capabilities cannot contain more than 16 values")
 	}
+	seen := make(map[string]bool, len(request.Capabilities))
+	for _, capability := range request.Capabilities {
+		if !core.IsShareCapability(core.Capability(capability)) {
+			return fmt.Errorf("unsupported capability %q", capability)
+		}
+		if seen[capability] {
+			return fmt.Errorf("duplicate capability %q", capability)
+		}
+		seen[capability] = true
+	}
 	return nil
 }
 
 type InvitationDTO struct {
-	Invitation string `json:"invitation"`
-	ExpiresAt  string `json:"expires_at"`
+	Invitation  string `json:"invitation"`
+	Fingerprint string `json:"fingerprint"`
+	OneTimeCode string `json:"one_time_code"`
+	ExpiresAt   string `json:"expires_at"`
 }
 
 type EncodedInvitation struct {
@@ -132,9 +146,13 @@ func (request EncodedInvitation) Validate() error {
 
 type InvitationInspection struct {
 	Valid        bool     `json:"valid"`
+	InviteID     string   `json:"invite_id"`
+	DeviceID     string   `json:"device_id"`
+	DeviceName   string   `json:"device_name"`
+	Fingerprint  string   `json:"fingerprint"`
+	CreatedAt    string   `json:"created_at"`
 	ExpiresAt    string   `json:"expires_at"`
-	DeviceName   string   `json:"device_name,omitempty"`
-	Capabilities []string `json:"capabilities,omitempty"`
+	Capabilities []string `json:"capabilities"`
 }
 
 type AcceptanceRequest struct {

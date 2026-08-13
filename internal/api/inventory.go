@@ -100,6 +100,15 @@ type AuditInventoryPage struct {
 func NewAdminV1Handler(service AdministrationService) http.Handler {
 	statusHandler, _ := service.(StatusReader)
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/pairing/invitations" || request.URL.Path == "/api/v1/pairing/inspect" {
+			manager, ok := service.(PairingInvitationManager)
+			if !ok {
+				writeError(writer, request, errUnavailable)
+			} else {
+				NewPairingInvitationHandler(manager).ServeHTTP(writer, request)
+			}
+			return
+		}
 		if strings.HasSuffix(request.URL.Path, "/scans") {
 			requester, ok := service.(ScanRequester)
 			if !ok {
