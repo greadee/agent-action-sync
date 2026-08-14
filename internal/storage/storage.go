@@ -22,6 +22,14 @@ type Store interface {
 	OneWayWork() OneWayWorkStore
 	Pairings() PairingStore
 	Audit() AuditStore
+	ProjectRegistrations() ProjectRegistrationStore
+	ProjectEvents() ProjectEventStore
+	ProjectArtifacts() ProjectArtifactStore
+	ProjectCheckpoints() ProjectCheckpointStore
+	ProjectRejections() ProjectRejectionStore
+	ProjectProjections() ProjectProjectionStore
+	ProjectInsights() ProjectInsightStore
+	ProjectInsightProjections() ProjectInsightProjectionStore
 	Close() error
 }
 

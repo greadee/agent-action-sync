@@ -238,6 +238,125 @@ CREATE INDEX IF NOT EXISTS admin_audit_scope_page_idx
     ON audit_events(share_id, peer_device_id, occurred_at DESC, audit_id DESC);
 `),
 	},
+	{
+		Version: 7,
+		Name:    "agent project local projections",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS agent_projects (
+    project_id TEXT PRIMARY KEY,
+    share_id TEXT NOT NULL REFERENCES shares(share_id) ON DELETE CASCADE,
+    root_path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    authority_device_id TEXT NOT NULL,
+    manifest_record_id TEXT NOT NULL,
+    manifest_record_hash TEXT NOT NULL,
+    manifest_path TEXT NOT NULL,
+    registered_at TEXT NOT NULL,
+    UNIQUE (share_id)
+);
+
+CREATE TABLE IF NOT EXISTS project_events (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    event_id TEXT NOT NULL,
+    record_hash TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    work_package_id TEXT,
+    execution_id TEXT,
+    producer_worker_id TEXT,
+    producer_device_id TEXT NOT NULL,
+    producer_trade TEXT,
+    producer_model TEXT,
+    status TEXT NOT NULL CHECK (status IN ('accepted','pending')),
+    record_path TEXT NOT NULL,
+    payload_json TEXT NOT NULL CHECK (length(payload_json) <= 1048576),
+    PRIMARY KEY (project_id, event_id),
+    UNIQUE (project_id, record_path)
+);
+CREATE INDEX IF NOT EXISTS project_events_chronology_idx
+    ON project_events(project_id, occurred_at, event_id);
+CREATE INDEX IF NOT EXISTS project_events_work_package_idx
+    ON project_events(project_id, work_package_id, occurred_at, event_id);
+CREATE INDEX IF NOT EXISTS project_events_execution_idx
+    ON project_events(project_id, execution_id, occurred_at, event_id);
+CREATE INDEX IF NOT EXISTS project_events_type_idx
+    ON project_events(project_id, event_type, occurred_at, event_id);
+
+CREATE TABLE IF NOT EXISTS project_artifacts (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    artifact_id TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    record_hash TEXT NOT NULL,
+    name TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    size INTEGER NOT NULL CHECK (size >= 0),
+    content_hash TEXT NOT NULL,
+    blob_path TEXT,
+    work_package_id TEXT,
+    execution_id TEXT,
+    producer_worker_id TEXT,
+    producer_device_id TEXT NOT NULL,
+    producer_model TEXT,
+    created_at TEXT NOT NULL,
+    record_path TEXT NOT NULL,
+    PRIMARY KEY (project_id, artifact_id),
+    UNIQUE (project_id, record_id),
+    UNIQUE (project_id, record_path)
+);
+CREATE INDEX IF NOT EXISTS project_artifacts_chronology_idx
+    ON project_artifacts(project_id, created_at, artifact_id);
+CREATE INDEX IF NOT EXISTS project_artifacts_work_package_idx
+    ON project_artifacts(project_id, work_package_id, created_at, artifact_id);
+CREATE INDEX IF NOT EXISTS project_artifacts_execution_idx
+    ON project_artifacts(project_id, execution_id, created_at, artifact_id);
+
+CREATE TABLE IF NOT EXISTS project_projection_checkpoints (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    stream TEXT NOT NULL,
+    last_record_path TEXT NOT NULL,
+    last_record_hash TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, stream)
+);
+
+CREATE TABLE IF NOT EXISTS project_projection_rejections (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    record_path TEXT NOT NULL,
+    observed_hash TEXT,
+    reason_code TEXT NOT NULL,
+    quarantine_path TEXT,
+    rejected_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, record_path)
+);
+CREATE INDEX IF NOT EXISTS project_projection_rejections_time_idx
+    ON project_projection_rejections(project_id, rejected_at, record_path);
+`),
+	},
+	{
+		Version: 8,
+		Name:    "agent project deterministic work insights",
+		SQL: strings.TrimSpace(`
+ALTER TABLE project_events ADD COLUMN producer_provider TEXT;
+
+CREATE TABLE IF NOT EXISTS project_insights (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    scope TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    definition_version INTEGER NOT NULL CHECK (definition_version > 0),
+    source_event_watermark TEXT NOT NULL,
+    window_start TEXT,
+    window_end TEXT,
+    value_json TEXT NOT NULL CHECK (length(value_json) <= 1048576),
+    sample_count INTEGER NOT NULL CHECK (sample_count >= 0),
+    completeness TEXT NOT NULL CHECK (completeness IN ('complete','partial','insufficient')),
+    evidence TEXT NOT NULL CHECK (evidence IN ('strong','weak','none')),
+    calculated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, scope, metric_name, definition_version)
+);
+CREATE INDEX IF NOT EXISTS project_insights_lookup_idx
+    ON project_insights(project_id, scope, metric_name, definition_version);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

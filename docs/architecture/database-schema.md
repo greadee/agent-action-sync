@@ -177,6 +177,77 @@ CREATE TABLE pairing_acceptances (
     audit_id TEXT NOT NULL REFERENCES audit_events(audit_id),
     accepted_at TEXT NOT NULL
 );
+
+CREATE TABLE agent_projects (
+    project_id TEXT PRIMARY KEY,
+    share_id TEXT NOT NULL REFERENCES shares(share_id) ON DELETE CASCADE,
+    root_path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    authority_device_id TEXT NOT NULL,
+    manifest_record_id TEXT NOT NULL,
+    manifest_record_hash TEXT NOT NULL,
+    manifest_path TEXT NOT NULL,
+    registered_at TEXT NOT NULL,
+    UNIQUE (share_id)
+);
+
+CREATE TABLE project_events (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    event_id TEXT NOT NULL,
+    record_hash TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    work_package_id TEXT,
+    execution_id TEXT,
+    producer_worker_id TEXT,
+    producer_device_id TEXT NOT NULL,
+    producer_trade TEXT,
+    producer_model TEXT,
+    status TEXT NOT NULL,
+    record_path TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY (project_id, event_id),
+    UNIQUE (project_id, record_path)
+);
+
+CREATE TABLE project_artifacts (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    artifact_id TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    record_hash TEXT NOT NULL,
+    name TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    blob_path TEXT,
+    work_package_id TEXT,
+    execution_id TEXT,
+    producer_worker_id TEXT,
+    producer_device_id TEXT NOT NULL,
+    producer_model TEXT,
+    created_at TEXT NOT NULL,
+    record_path TEXT NOT NULL,
+    PRIMARY KEY (project_id, artifact_id)
+);
+
+CREATE TABLE project_projection_checkpoints (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    stream TEXT NOT NULL,
+    last_record_path TEXT NOT NULL,
+    last_record_hash TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, stream)
+);
+
+CREATE TABLE project_projection_rejections (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    record_path TEXT NOT NULL,
+    observed_hash TEXT,
+    reason_code TEXT NOT NULL,
+    quarantine_path TEXT,
+    rejected_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, record_path)
+);
 ```
 
 ## Notes
@@ -190,3 +261,12 @@ CREATE TABLE pairing_acceptances (
 - Authenticated receiver transfer and job rows are inserted atomically only after the same transaction verifies trusted device state plus `sync` and action capabilities. Failed or revoked authorization leaves neither row behind.
 - Pairing acceptance rows make signed invitations idempotent per local database. Device trust, explicit permissions, acceptance, and audit are committed atomically.
 - A reappeared path is restored by advancing its `file_index.current_revision_id` to a non-deleted revision. The prior tombstone remains available as history, while active deletion propagation considers only tombstones still referenced by a deleted index entry.
+- Agent Project tables are local, rebuildable projections. Canonical files under `.agent-project/` remain authoritative and are never modified by a projection reset or rebuild.
+- Event and artifact hashes make duplicate ingestion idempotent while rejecting an identifier reused for different canonical content. Chronological indexes include the record ID as a stable tie-breaker.
+- Event-specific JSON is validated and bounded before insertion. Basic history filters and pagination use typed columns and do not require SQLite JSON extensions.
+- Projection checkpoints advance inside the same transaction as rebuild writes. Local rejection metadata can point at `.agent-project/local/quarantine/`, but it is not portable authority.
+- `project_insights` is a local, versioned Stage 8 projection over accepted
+  `project_events`. Its source-event watermark, definition version, sample
+  count, completeness, and evidence state keep each metric auditable. A
+  history-projection rebuild explicitly invalidates insight rows; canonical
+  records are unchanged.

@@ -31,21 +31,22 @@ var ErrClosed = errors.New("daemon is closed")
 var ErrAutomaticPeerWorkDisabled = errors.New("automatic peer job execution is disabled until trusted transport is configured")
 
 type Options struct {
-	OpenStore             func(string) (storage.Store, error)
-	IdentityStore         identity.PrivateKeyStore
-	NewIdentity           func() (identity.DeviceIdentity, error)
-	CheckShareRoot        func(string) error
-	WatcherFactory        syncengine.WatcherFactory
-	Now                   func() time.Time
-	TombstoneRetention    time.Duration
-	RecentScanLimit       int
-	JobExecutor           syncengine.OneWayJobExecutor
-	JobPollInterval       time.Duration
-	JobRetryBase          time.Duration
-	JobMaxBackoff         time.Duration
-	AdminCredentialStore  api.AdminCredentialStore
-	AdminCredentialRandom io.Reader
-	ListenLocalAPI        func(network, address string) (net.Listener, error)
+	OpenStore               func(string) (storage.Store, error)
+	IdentityStore           identity.PrivateKeyStore
+	NewIdentity             func() (identity.DeviceIdentity, error)
+	CheckShareRoot          func(string) error
+	WatcherFactory          syncengine.WatcherFactory
+	Now                     func() time.Time
+	TombstoneRetention      time.Duration
+	RecentScanLimit         int
+	JobExecutor             syncengine.OneWayJobExecutor
+	JobPollInterval         time.Duration
+	JobRetryBase            time.Duration
+	JobMaxBackoff           time.Duration
+	AdminCredentialStore    api.AdminCredentialStore
+	AdminCredentialRandom   io.Reader
+	ListenLocalAPI          func(network, address string) (net.Listener, error)
+	RequestProjectIngestion func(context.Context, core.ShareID, string)
 }
 
 type Daemon struct {
@@ -59,19 +60,20 @@ type Daemon struct {
 	closed    bool
 	closeErr  error
 
-	runtimes        map[core.ShareID]shareRuntime
-	runtimeWG       sync.WaitGroup
-	diagnosticsMu   sync.RWMutex
-	recentScans     []syncengine.ScanDiagnostic
-	recentScanLimit int
-	nowFn           func() time.Time
-	checkShareRoot  func(string) error
-	jobExecutor     syncengine.OneWayJobExecutor
-	jobPollInterval time.Duration
-	jobRetryBase    time.Duration
-	jobMaxBackoff   time.Duration
-	startedAt       time.Time
-	localAPI        *localAPIState
+	runtimes                map[core.ShareID]shareRuntime
+	runtimeWG               sync.WaitGroup
+	diagnosticsMu           sync.RWMutex
+	recentScans             []syncengine.ScanDiagnostic
+	recentScanLimit         int
+	nowFn                   func() time.Time
+	checkShareRoot          func(string) error
+	jobExecutor             syncengine.OneWayJobExecutor
+	jobPollInterval         time.Duration
+	jobRetryBase            time.Duration
+	jobMaxBackoff           time.Duration
+	startedAt               time.Time
+	localAPI                *localAPIState
+	requestProjectIngestion func(context.Context, core.ShareID, string)
 }
 
 type shareRuntime struct {
@@ -177,18 +179,19 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 
 	closed = true
 	return &Daemon{
-		Config:          cfg,
-		Store:           store,
-		Identity:        deviceIdentity,
-		runtimes:        runtimes,
-		recentScanLimit: options.RecentScanLimit,
-		nowFn:           options.Now,
-		checkShareRoot:  checkRoot,
-		jobExecutor:     options.JobExecutor,
-		jobPollInterval: options.JobPollInterval,
-		jobRetryBase:    options.JobRetryBase,
-		jobMaxBackoff:   options.JobMaxBackoff,
-		startedAt:       options.Now().UTC(),
+		Config:                  cfg,
+		Store:                   store,
+		Identity:                deviceIdentity,
+		runtimes:                runtimes,
+		recentScanLimit:         options.RecentScanLimit,
+		nowFn:                   options.Now,
+		checkShareRoot:          checkRoot,
+		jobExecutor:             options.JobExecutor,
+		jobPollInterval:         options.JobPollInterval,
+		jobRetryBase:            options.JobRetryBase,
+		jobMaxBackoff:           options.JobMaxBackoff,
+		requestProjectIngestion: options.RequestProjectIngestion,
+		startedAt:               options.Now().UTC(),
 	}, nil
 }
 
@@ -337,6 +340,18 @@ func (daemon *Daemon) startJobQueue(ctx context.Context) error {
 	if execute == nil {
 		execute = func(context.Context, core.OneWayJob) error { return ErrAutomaticPeerWorkDisabled }
 	}
+	baseExecute := execute
+	execute = func(executeCtx context.Context, job core.OneWayJob) error {
+		if err := baseExecute(executeCtx, job); err != nil {
+			return err
+		}
+		if daemon.requestProjectIngestion != nil {
+			if rootPath, exists := daemon.configuredShareRoot(job.ShareID); exists {
+				daemon.requestProjectIngestion(executeCtx, job.ShareID, rootPath)
+			}
+		}
+		return nil
+	}
 	outcomes, err := (syncengine.OneWayJobQueue{
 		Jobs: daemon.Store.OneWayJobs(),
 		Authorize: func(ctx context.Context, job core.OneWayJob) error {
@@ -359,6 +374,15 @@ func (daemon *Daemon) startJobQueue(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+func (daemon *Daemon) configuredShareRoot(shareID core.ShareID) (string, bool) {
+	for _, share := range daemon.Config.Shares {
+		if core.ShareID(share.ID) == shareID {
+			return share.RootPath, true
+		}
+	}
+	return "", false
 }
 
 func (daemon *Daemon) currentTime() time.Time {
@@ -510,6 +534,9 @@ func buildShareRuntimes(
 				sequenceMu.Lock()
 				sequence += int64(len(result.Revisions))
 				sequenceMu.Unlock()
+				if options.RequestProjectIngestion != nil {
+					options.RequestProjectIngestion(scanCtx, core.ShareID(share.ID), share.RootPath)
+				}
 			}
 			return result, err
 		}

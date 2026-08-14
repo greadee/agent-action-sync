@@ -70,3 +70,18 @@ func TestAdministrationQueryMigrationAddsBoundedIndexes(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentProjectProjectionMigrationIsAdditiveAndHasNoInsightSnapshots(t *testing.T) {
+	sql := Migrations[6].SQL
+	for _, table := range []string{
+		"agent_projects", "project_events", "project_artifacts",
+		"project_projection_checkpoints", "project_projection_rejections",
+	} {
+		if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS "+table) {
+			t.Fatalf("project projection migration is missing table %q", table)
+		}
+	}
+	if strings.Contains(strings.ToLower(sql), "insight") {
+		t.Fatal("stage 5 migration must not add insight snapshot storage")
+	}
+}

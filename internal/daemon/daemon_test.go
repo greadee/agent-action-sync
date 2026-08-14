@@ -66,6 +66,31 @@ func TestDaemonRunsAuthoritativeStartupAndManualScans(t *testing.T) {
 	}
 }
 
+func TestDaemonRequestsProjectIngestionAfterCommittedScan(t *testing.T) {
+	dataDir := t.TempDir()
+	shareRoot := t.TempDir()
+	writeTestFile(t, filepath.Join(shareRoot, "notes.txt"), "initial")
+	var requests atomic.Int32
+	daemon, err := Bootstrap(context.Background(), testConfigWithInterval(dataDir, shareRoot, 3600), Options{
+		RequestProjectIngestion: func(_ context.Context, shareID core.ShareID, rootPath string) {
+			if shareID == "share-1" && rootPath == shareRoot {
+				requests.Add(1)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer daemon.Close()
+	diagnostic, err := daemon.ScanOnce(context.Background(), "share-1")
+	if err != nil || !diagnostic.Committed {
+		t.Fatalf("scan diagnostic=%#v err=%v", diagnostic, err)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("ingestion requests = %d, want 1", requests.Load())
+	}
+}
+
 func TestDaemonUnavailableRootDoesNotCommitOrCreateDeletion(t *testing.T) {
 	dataDir := t.TempDir()
 	shareRoot := t.TempDir()
