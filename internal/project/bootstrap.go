@@ -293,7 +293,7 @@ func inspectUnclaimedRoot(layout Layout, preflight *ProjectBootstrapPreflight) {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if name == WorkspaceDirectory || name == ControlDirectory || name == ".sync-history" || name == ".sync-incoming" || strings.HasSuffix(name, TemporaryRecordSuffix) {
+		if name == WorkspaceDirectory || name == ControlDirectory || name == ".sync-history" || name == ".sync-incoming" || migrationLocalRootEntry(name) || strings.HasSuffix(name, TemporaryRecordSuffix) {
 			continue
 		}
 		preflight.Issues = append(preflight.Issues, BootstrapIssue{RelativePath: name, Reason: "unclaimed share root contains data outside workspace"})
@@ -306,6 +306,10 @@ func inspectUnclaimedRoot(layout Layout, preflight *ProjectBootstrapPreflight) {
 			preflight.Issues = append(preflight.Issues, BootstrapIssue{RelativePath: ControlDirectory, Reason: "existing control directory has no valid manifest"})
 		}
 	}
+}
+
+func migrationLocalRootEntry(name string) bool {
+	return name == ".git" || name == ".env" || strings.HasPrefix(name, ".env.") || name == ".secrets"
 }
 
 func inspectRegistrationEvent(layout Layout, manifest ProjectManifest, preflight *ProjectBootstrapPreflight) {

@@ -5,7 +5,8 @@ import "testing"
 func TestNewProjectScanPolicyKeepsOnlyMandatoryProjectSafetyExclusions(t *testing.T) {
 	policy := NewProjectScanPolicy([]string{" cache/** ", ".git", "cache/**"})
 	want := []string{
-		".agent-project/local", ".agent-project/local/**", ".git", ".git/**", "cache/**",
+		".agent-project/local", ".agent-project/local/**", ".git", ".git/**",
+		".env", ".env.*", ".secrets", ".secrets/**", "cache/**",
 	}
 	if len(policy.EffectiveIgnorePatterns) != len(want) {
 		t.Fatalf("effective patterns = %#v", policy.EffectiveIgnorePatterns)

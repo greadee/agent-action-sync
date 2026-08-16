@@ -30,6 +30,10 @@ func TestClientSendsCredentialInHeaderAndDecodesCommands(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(ScanAccepted{Accepted: true, ShareID: "drop"})
 		case "/api/v1/jobs/job-1/actions":
 			_ = json.NewEncoder(writer).Encode(JobInventory{ID: "job-1", State: "paused"})
+		case "/api/v1/project-migrations/preflight":
+			_ = json.NewEncoder(writer).Encode(ProjectMigrationPreflight{Status: "ready", Confirmation: strings.Repeat("a", 64)})
+		case "/api/v1/project-migrations/apply":
+			_ = json.NewEncoder(writer).Encode(ProjectMigrationApplyResult{Status: "applied", ProjectID: "project-1"})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -58,6 +62,14 @@ func TestClientSendsCredentialInHeaderAndDecodesCommands(t *testing.T) {
 	job, err := client.ControlJob(context.Background(), "job-1", JobActionPause)
 	if err != nil || job.State != "paused" {
 		t.Fatalf("ControlJob = %+v, err=%v", job, err)
+	}
+	preflight, err := client.PreflightProjectMigration(context.Background(), ProjectMigrationInput{ShareID: "drop", ProjectID: "project-1", Name: "Project"})
+	if err != nil || preflight.Status != "ready" {
+		t.Fatalf("PreflightProjectMigration = %+v, err=%v", preflight, err)
+	}
+	applied, err := client.ApplyProjectMigration(context.Background(), ProjectMigrationApplyInput{ProjectMigrationInput: ProjectMigrationInput{ShareID: "drop", ProjectID: "project-1", Name: "Project"}, Confirmation: preflight.Confirmation})
+	if err != nil || applied.Status != "applied" {
+		t.Fatalf("ApplyProjectMigration = %+v, err=%v", applied, err)
 	}
 }
 

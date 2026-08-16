@@ -47,7 +47,18 @@ syncgate pair-create --config config.json --ttl 10m --request read
 syncgate pair-inspect --config config.json --invite INVITATION
 syncgate pair-accept --config config.json --invite INVITATION --fingerprint FINGERPRINT --code CODE --grant SHARE=read
 syncgate pair-revoke --config config.json --device DEVICE
+syncgate project-migrate-preflight --config config.json --share SHARE --project PROJECT --name NAME
+syncgate project-migrate-apply --config config.json --share SHARE --project PROJECT --name NAME --confirmation CONFIRMATION
 ```
+
+Agent Project inventory, bounded history and artifact metadata, versioned
+insights, and supervised projection rebuilds are also available through the
+documented HTTP contract. Project responses exclude local roots, raw event
+payloads, quarantine details, artifact blob locations, and artifact bytes. See
+[Agent Project administration API](../architecture/project-administration-api.md)
+for cursor, filtering, freshness, rejection metadata, and rebuild behavior.
+See [Agent Project migration and recovery](agent-project-migration.md) for the
+explicit preflight/confirmation workflow and interruption recovery.
 
 Identity migration, daemon startup, configuration validation, diagnostics-file
 inspection, and manual one-shot transfers remain local operations. Invitation,

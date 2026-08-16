@@ -130,6 +130,27 @@ func (client *Client) ListAuditEvents(ctx context.Context, limit int) (AuditInve
 	return result, err
 }
 
+func (client *Client) PreflightProjectMigration(ctx context.Context, input ProjectMigrationInput) (ProjectMigrationPreflight, error) {
+	input = normalizeMigrationInput(input)
+	if err := validateMigrationInput(input); err != nil {
+		return ProjectMigrationPreflight{}, errors.New("project migration input is invalid")
+	}
+	var result ProjectMigrationPreflight
+	err := client.do(ctx, http.MethodPost, "/api/v1/project-migrations/preflight", input, &result)
+	return result, err
+}
+
+func (client *Client) ApplyProjectMigration(ctx context.Context, input ProjectMigrationApplyInput) (ProjectMigrationApplyResult, error) {
+	input.ProjectMigrationInput = normalizeMigrationInput(input.ProjectMigrationInput)
+	input.Confirmation = strings.TrimSpace(input.Confirmation)
+	if err := validateMigrationInput(input.ProjectMigrationInput); err != nil || !validMigrationConfirmation(input.Confirmation) {
+		return ProjectMigrationApplyResult{}, errors.New("project migration apply input is invalid")
+	}
+	var result ProjectMigrationApplyResult
+	err := client.do(ctx, http.MethodPost, "/api/v1/project-migrations/apply", input, &result)
+	return result, err
+}
+
 func (client *Client) RequestScan(ctx context.Context, shareID core.ShareID) (ScanAccepted, error) {
 	if strings.TrimSpace(string(shareID)) == "" || strings.ContainsAny(string(shareID), "/\\") {
 		return ScanAccepted{}, errors.New("share ID is invalid")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"syncgate/internal/core"
 	"syncgate/internal/storage"
@@ -22,23 +23,34 @@ type AdministrationService interface {
 }
 
 type AdministrationServiceOptions struct {
-	Queries     storage.AdministrationQueryStore
-	Ready       func() bool
-	Runtime     func() RuntimeSnapshot
-	Diagnostics func() syncengine.DiagnosticReport
-	Scan        func(context.Context, core.ShareID) error
-	Control     func(context.Context, string, JobActionName) (storage.AdminJob, error)
-	Pairing     *PairingCoordinator
+	Queries                   storage.AdministrationQueryStore
+	Ready                     func() bool
+	Runtime                   func() RuntimeSnapshot
+	Diagnostics               func() syncengine.DiagnosticReport
+	Scan                      func(context.Context, core.ShareID) error
+	Control                   func(context.Context, string, JobActionName) (storage.AdminJob, error)
+	Pairing                   *PairingCoordinator
+	ProjectStore              ProjectQueryStore
+	ProjectRebuild            ProjectRebuildFunc
+	ProjectMigrationPreflight ProjectMigrationPreflightFunc
+	ProjectMigrationApply     ProjectMigrationApplyFunc
 }
 
 type LocalAdministrationService struct {
-	queries     storage.AdministrationQueryStore
-	ready       func() bool
-	runtime     func() RuntimeSnapshot
-	diagnostics func() syncengine.DiagnosticReport
-	scan        func(context.Context, core.ShareID) error
-	control     func(context.Context, string, JobActionName) (storage.AdminJob, error)
-	pairing     *PairingCoordinator
+	queries                   storage.AdministrationQueryStore
+	ready                     func() bool
+	runtime                   func() RuntimeSnapshot
+	diagnostics               func() syncengine.DiagnosticReport
+	scan                      func(context.Context, core.ShareID) error
+	control                   func(context.Context, string, JobActionName) (storage.AdminJob, error)
+	pairing                   *PairingCoordinator
+	projectStore              ProjectQueryStore
+	projectRebuild            ProjectRebuildFunc
+	projectMigrationPreflight ProjectMigrationPreflightFunc
+	projectMigrationApply     ProjectMigrationApplyFunc
+	projectMu                 sync.Mutex
+	rebuilding                map[string]bool
+	migrating                 map[string]bool
 }
 
 func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdministrationService, error) {
@@ -48,7 +60,12 @@ func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdmin
 	if options.Ready == nil {
 		return nil, errors.New("administration readiness function is required")
 	}
-	return &LocalAdministrationService{queries: options.Queries, ready: options.Ready, runtime: options.Runtime, diagnostics: options.Diagnostics, scan: options.Scan, control: options.Control, pairing: options.Pairing}, nil
+	return &LocalAdministrationService{
+		queries: options.Queries, ready: options.Ready, runtime: options.Runtime, diagnostics: options.Diagnostics,
+		scan: options.Scan, control: options.Control, pairing: options.Pairing, projectStore: options.ProjectStore,
+		projectRebuild: options.ProjectRebuild, projectMigrationPreflight: options.ProjectMigrationPreflight,
+		projectMigrationApply: options.ProjectMigrationApply, rebuilding: map[string]bool{}, migrating: map[string]bool{},
+	}, nil
 }
 
 func (service *LocalAdministrationService) CreatePairingInvitation(ctx context.Context, request InvitationRequest) (InvitationDTO, error) {

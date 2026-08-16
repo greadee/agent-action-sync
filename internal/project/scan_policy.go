@@ -14,6 +14,10 @@ var RequiredProjectIgnorePatterns = []string{
 	LocalDirectory + "/**",
 	".git",
 	".git/**",
+	".env",
+	".env.*",
+	".secrets",
+	".secrets/**",
 }
 
 // ProjectScanPolicy separates mandatory project safety exclusions from

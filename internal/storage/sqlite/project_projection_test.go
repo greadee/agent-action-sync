@@ -37,6 +37,60 @@ func TestProjectRegistrationIsIdempotentAndIdentityBound(t *testing.T) {
 	}
 }
 
+func TestProjectRegistrationsPaginateByStableID(t *testing.T) {
+	store := newTestStore(t)
+	for _, projectID := range []string{"project-c", "project-a", "project-b"} {
+		saveProjectRegistration(t, store, projectID)
+	}
+	ctx := context.Background()
+	first, err := store.ProjectRegistrations().ListProjects(ctx, storage.PageRequest{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 2 || first.Items[0].ProjectID != "project-a" || first.Items[1].ProjectID != "project-b" || first.NextCursor == nil {
+		t.Fatalf("first project page = %#v", first)
+	}
+	second, err := store.ProjectRegistrations().ListProjects(ctx, storage.PageRequest{Limit: 2, Cursor: *first.NextCursor})
+	if err != nil || len(second.Items) != 1 || second.Items[0].ProjectID != "project-c" || second.NextCursor != nil {
+		t.Fatalf("second project page = %#v, err=%v", second, err)
+	}
+}
+
+func TestProjectInsightsPaginateByMetricAndScope(t *testing.T) {
+	store := newTestStore(t)
+	saveProjectRegistration(t, store, "project-insights")
+	ctx := context.Background()
+	when := time.Date(2026, time.August, 14, 8, 30, 0, 0, time.UTC)
+	if err := store.ProjectInsightProjections().ReplaceProjectInsights(ctx, "project-insights", func(writer storage.ProjectInsightWriter) error {
+		for _, identity := range []struct {
+			scope, metric string
+			version       int
+		}{{"project", "metric-b", 1}, {"worker:one", "metric-a", 1}, {"project", "metric-a", 2}, {"project", "metric-a", 1}} {
+			if err := writer.SaveProjectInsight(ctx, storage.ProjectInsightProjection{
+				ProjectID: "project-insights", Scope: identity.scope, MetricName: identity.metric, DefinitionVersion: identity.version,
+				SourceEventWatermark: projectionHash("a"), ValueJSON: []byte(`{"value":1}`), SampleCount: 1,
+				Completeness: "complete", Evidence: "strong", CalculatedAt: when,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.ProjectInsights().ListProjectInsights(ctx, storage.ProjectInsightQuery{ProjectID: "project-insights", Page: storage.PageRequest{Limit: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 2 || first.Items[0].MetricName != "metric-a" || first.Items[0].Scope != "project" || first.Items[0].DefinitionVersion != 1 || first.Items[1].DefinitionVersion != 2 || first.NextCursor == nil {
+		t.Fatalf("first insight page = %#v", first)
+	}
+	second, err := store.ProjectInsights().ListProjectInsights(ctx, storage.ProjectInsightQuery{ProjectID: "project-insights", Page: storage.PageRequest{Limit: 2, Cursor: *first.NextCursor}})
+	if err != nil || len(second.Items) != 2 || second.Items[0].Scope != "worker:one" || second.Items[1].MetricName != "metric-b" || second.NextCursor != nil {
+		t.Fatalf("second insight page = %#v, err=%v", second, err)
+	}
+}
+
 func TestProjectEventsAreIdempotentAndPaginateTiedTimestamps(t *testing.T) {
 	store := newTestStore(t)
 	saveProjectRegistration(t, store, "project-events")
@@ -120,6 +174,29 @@ func TestProjectArtifactsAndCheckpointsAreBoundedAndQueryable(t *testing.T) {
 	got, err := store.ProjectCheckpoints().GetProjectCheckpoint(ctx, checkpoint.ProjectID, checkpoint.Stream)
 	if err != nil || got.LastRecordPath != checkpoint.LastRecordPath || !got.UpdatedAt.Equal(checkpoint.UpdatedAt) {
 		t.Fatalf("checkpoint = %#v, err=%v", got, err)
+	}
+}
+
+func TestProjectRejectionsPaginateWithoutExposingContent(t *testing.T) {
+	store := newTestStore(t)
+	saveProjectRegistration(t, store, "project-rejections")
+	ctx := context.Background()
+	rejectedAt := time.Date(2026, time.August, 14, 9, 30, 0, 0, time.UTC)
+	for _, path := range []string{".agent-project/history/events/c.json", ".agent-project/history/events/a.json", ".agent-project/history/events/b.json"} {
+		if err := store.ProjectRejections().RecordProjectRejection(ctx, storage.ProjectProjectionRejection{
+			ProjectID: "project-rejections", RecordPath: path, ObservedHash: projectionHash("a"), ReasonCode: "invalid_record",
+			QuarantinePath: ".agent-project/local/quarantine/private.json", RejectedAt: rejectedAt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := store.ProjectRejections().ListProjectRejections(ctx, storage.ProjectRejectionQuery{ProjectID: "project-rejections", Page: storage.PageRequest{Limit: 2}})
+	if err != nil || len(first.Items) != 2 || !strings.HasSuffix(first.Items[0].RecordPath, "a.json") || first.NextCursor == nil {
+		t.Fatalf("first rejection page=%+v err=%v", first, err)
+	}
+	second, err := store.ProjectRejections().ListProjectRejections(ctx, storage.ProjectRejectionQuery{ProjectID: "project-rejections", Page: storage.PageRequest{Limit: 2, Cursor: *first.NextCursor}})
+	if err != nil || len(second.Items) != 1 || !strings.HasSuffix(second.Items[0].RecordPath, "c.json") || second.NextCursor != nil {
+		t.Fatalf("second rejection page=%+v err=%v", second, err)
 	}
 }
 

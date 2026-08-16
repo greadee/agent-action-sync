@@ -123,6 +123,7 @@ type OneWayWorkStore interface {
 
 type AuditStore interface {
 	Record(ctx context.Context, event AuditEvent) error
+	Get(ctx context.Context, id string) (AuditEvent, error)
 	ListRecent(ctx context.Context, limit int) ([]AuditEvent, error)
 }
 

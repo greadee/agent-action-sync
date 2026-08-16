@@ -54,10 +54,11 @@ registration event rather than issuing a second logical registration. A
 mismatched identity or conflicting immutable record is rejected.
 
 `NewProjectScanPolicy` keeps the portable `.agent-project/` control records in
-the normal share scan. It adds only `.agent-project/local/**` and `.git/**` as
-mandatory project exclusions, preserving existing SyncGate ignores for history,
-incoming transfers, and partial files. It does not inject broad language-cache
-or build-output rules; those remain configured share exclusions. Pass its
+the normal share scan. It adds `.agent-project/local/**`, `.git/**`, `.env*`,
+and `.secrets/**` as mandatory project exclusions, preserving existing SyncGate
+ignores for history, incoming transfers, and partial files. It does not inject
+broad language-cache or build-output rules; those remain configured share
+exclusions. Pass its
 `EffectiveIgnorePatterns` to the scanner, whose existing ignored-path
 diagnostics identify the matching rule.
 

@@ -238,11 +238,11 @@ application coordinator after a successful local write, scan, or apply.
 
 ## Deferred
 
-This decision does not implement or authorize:
+Stages 8 through 10 subsequently delivered deterministic insights, the local
+administration API, safe existing-share migration, and the two-daemon release
+gate while preserving this decision's ownership boundaries. The following
+remain deferred and are not implemented or authorized:
 
-- Deterministic work insights or insight persistence.
-- Project, history, artifact, or insight HTTP endpoints.
-- Existing-share migration CLI/API or the final two-daemon release gate.
 - Multi-writer or two-way project history and automatic conflict resolution.
 - Agent execution, remote commands, task scheduling, or work assignment.
 - Project Context Compiler, trade registry, embeddings, predictive routing, or

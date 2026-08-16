@@ -134,6 +134,78 @@ FROM agent_projects WHERE project_id = ?`, projectID).Scan(
 	return registration, nil
 }
 
+func (store projectRegistrationStore) GetProjectByShare(ctx context.Context, shareID core.ShareID) (storage.ProjectRegistration, error) {
+	if err := ctx.Err(); err != nil {
+		return storage.ProjectRegistration{}, err
+	}
+	if err := storage.ValidateProjectProjectionID(string(shareID)); err != nil {
+		return storage.ProjectRegistration{}, err
+	}
+	var registration storage.ProjectRegistration
+	var storedShareID, authorityDeviceID, registeredAt string
+	err := store.sql.QueryRowContext(ctx, `
+SELECT project_id, share_id, root_path, name, authority_device_id,
+       manifest_record_id, manifest_record_hash, manifest_path, registered_at
+FROM agent_projects WHERE share_id = ?`, shareID).Scan(
+		&registration.ProjectID, &storedShareID, &registration.RootPath, &registration.Name,
+		&authorityDeviceID, &registration.ManifestRecordID, &registration.ManifestRecordHash,
+		&registration.ManifestPath, &registeredAt,
+	)
+	if err != nil {
+		return storage.ProjectRegistration{}, mapNotFound(err, "project share", string(shareID))
+	}
+	registration.ShareID = core.ShareID(storedShareID)
+	registration.AuthorityDeviceID = core.DeviceID(authorityDeviceID)
+	registration.RegisteredAt = parseStoredTime(registeredAt)
+	return registration, nil
+}
+
+func (store projectRegistrationStore) ListProjects(ctx context.Context, requested storage.PageRequest) (storage.Page[storage.ProjectRegistration], error) {
+	if err := ctx.Err(); err != nil {
+		return storage.Page[storage.ProjectRegistration]{}, err
+	}
+	page, err := storage.NormalizePageRequest(requested)
+	if err != nil {
+		return storage.Page[storage.ProjectRegistration]{}, err
+	}
+	if !page.Cursor.Timestamp.IsZero() || page.Cursor.SecondaryID != "" || page.Cursor.Version != 0 {
+		return storage.Page[storage.ProjectRegistration]{}, errors.New("project cursor must contain only an id")
+	}
+	statement := `SELECT project_id, share_id, root_path, name, authority_device_id,
+       manifest_record_id, manifest_record_hash, manifest_path, registered_at
+FROM agent_projects`
+	arguments := []any{}
+	if page.Cursor.ID != "" {
+		statement += ` WHERE project_id > ?`
+		arguments = append(arguments, page.Cursor.ID)
+	}
+	statement += ` ORDER BY project_id LIMIT ?`
+	arguments = append(arguments, page.Limit+1)
+	rows, err := store.sql.QueryContext(ctx, statement, arguments...)
+	if err != nil {
+		return storage.Page[storage.ProjectRegistration]{}, fmt.Errorf("list projects: %w", err)
+	}
+	defer rows.Close()
+	items := make([]storage.ProjectRegistration, 0, page.Limit+1)
+	for rows.Next() {
+		var item storage.ProjectRegistration
+		var shareID, authorityID, registeredAt string
+		if err := rows.Scan(&item.ProjectID, &shareID, &item.RootPath, &item.Name, &authorityID, &item.ManifestRecordID, &item.ManifestRecordHash, &item.ManifestPath, &registeredAt); err != nil {
+			return storage.Page[storage.ProjectRegistration]{}, fmt.Errorf("scan project: %w", err)
+		}
+		item.ShareID = core.ShareID(shareID)
+		item.AuthorityDeviceID = core.DeviceID(authorityID)
+		item.RegisteredAt = parseStoredTime(registeredAt)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return storage.Page[storage.ProjectRegistration]{}, fmt.Errorf("iterate projects: %w", err)
+	}
+	return pageItems(items, page.Limit, func(item storage.ProjectRegistration) storage.PageCursor {
+		return storage.PageCursor{ID: item.ProjectID}
+	}), nil
+}
+
 func (store projectEventStore) SaveProjectEvent(ctx context.Context, event storage.ProjectEventProjection) (storage.ProjectEventProjectionResult, error) {
 	if err := validateProjectEvent(ctx, event); err != nil {
 		return storage.ProjectEventProjectionResult{}, err
@@ -458,6 +530,50 @@ ON CONFLICT(project_id, record_path) DO UPDATE SET
 	return nil
 }
 
+func (store projectRejectionStore) ListProjectRejections(ctx context.Context, query storage.ProjectRejectionQuery) (storage.Page[storage.ProjectProjectionRejection], error) {
+	if err := requireProjectID(ctx, query.ProjectID); err != nil {
+		return storage.Page[storage.ProjectProjectionRejection]{}, err
+	}
+	page, err := validateProjectPage(query.Page)
+	if err != nil {
+		return storage.Page[storage.ProjectProjectionRejection]{}, err
+	}
+	statement := `SELECT project_id, record_path, observed_hash, reason_code, quarantine_path, rejected_at
+FROM project_projection_rejections WHERE project_id = ?`
+	arguments := []any{query.ProjectID}
+	if !page.Cursor.Timestamp.IsZero() {
+		statement += ` AND (rejected_at > ? OR (rejected_at = ? AND record_path > ?))`
+		cursorTime := formatTime(page.Cursor.Timestamp)
+		arguments = append(arguments, cursorTime, cursorTime, page.Cursor.ID)
+	}
+	statement += ` ORDER BY rejected_at, record_path LIMIT ?`
+	arguments = append(arguments, page.Limit+1)
+	rows, err := store.sql.QueryContext(ctx, statement, arguments...)
+	if err != nil {
+		return storage.Page[storage.ProjectProjectionRejection]{}, fmt.Errorf("list project rejections: %w", err)
+	}
+	defer rows.Close()
+	items := make([]storage.ProjectProjectionRejection, 0, page.Limit+1)
+	for rows.Next() {
+		var item storage.ProjectProjectionRejection
+		var observedHash, quarantinePath sql.NullString
+		var rejectedAt string
+		if err := rows.Scan(&item.ProjectID, &item.RecordPath, &observedHash, &item.ReasonCode, &quarantinePath, &rejectedAt); err != nil {
+			return storage.Page[storage.ProjectProjectionRejection]{}, fmt.Errorf("scan project rejection: %w", err)
+		}
+		item.ObservedHash = observedHash.String
+		item.QuarantinePath = quarantinePath.String
+		item.RejectedAt = parseStoredTime(rejectedAt)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return storage.Page[storage.ProjectProjectionRejection]{}, fmt.Errorf("iterate project rejections: %w", err)
+	}
+	return pageItems(items, page.Limit, func(item storage.ProjectProjectionRejection) storage.PageCursor {
+		return storage.PageCursor{Timestamp: item.RejectedAt, ID: item.RecordPath}
+	}), nil
+}
+
 func (store projectProjectionStore) ClearProjectProjection(ctx context.Context, projectID string) error {
 	return store.rebuild(ctx, projectID, nil)
 }
@@ -549,6 +665,10 @@ func (writer projectProjectionWriter) GetProjectCheckpoint(ctx context.Context, 
 }
 func (writer projectProjectionWriter) RecordProjectRejection(ctx context.Context, rejection storage.ProjectProjectionRejection) error {
 	return (projectRejectionStore{sql: writer.sql}).RecordProjectRejection(ctx, rejection)
+}
+
+func (writer projectProjectionWriter) ListProjectRejections(ctx context.Context, query storage.ProjectRejectionQuery) (storage.Page[storage.ProjectProjectionRejection], error) {
+	return (projectRejectionStore{sql: writer.sql}).ListProjectRejections(ctx, query)
 }
 
 func validateProjectRegistration(ctx context.Context, registration storage.ProjectRegistration) error {
@@ -679,7 +799,7 @@ func validateProjectPage(page storage.PageRequest) (storage.PageRequest, error) 
 	if err != nil {
 		return storage.PageRequest{}, err
 	}
-	if page.Cursor.Timestamp.IsZero() != (page.Cursor.ID == "") {
+	if page.Cursor.Timestamp.IsZero() != (page.Cursor.ID == "") || page.Cursor.Version != 0 {
 		return storage.PageRequest{}, errors.New("project page cursor requires timestamp and id")
 	}
 	return page, nil

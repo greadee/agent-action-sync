@@ -14,6 +14,8 @@ Current commands:
 - `daemon-status --config config.example.json` reads local SQLite job state and prints sanitized pending or blocked work without opening a listener.
 - `scan --config config.example.json --share share-id` runs one authoritative local scan for an eligible source share.
 - `job-pause`, `job-resume`, and `job-retry` each accept `--config` and `--job` to apply an idempotent local SQLite job control.
+- `project-migrate-preflight --config config.example.json --share SHARE --project PROJECT --name NAME` performs a bounded, read-only eligibility check and prints a state-bound confirmation value.
+- `project-migrate-apply --config config.example.json --share SHARE --project PROJECT --name NAME --confirmation CONFIRMATION` revalidates and registers the configured one-way source share without moving or deleting workspace content.
 - `diagnostics --file diagnostics.json --recent 5` prints a sanitized local diagnostics snapshot with recent scans, pending or blocked work, and ignored paths.
 - `receive-once --config config.example.json --share-root PATH` accepts one manual file transfer only from a paired, trusted mutual-TLS peer.
 - `send-once --config config.example.json --peer DEVICE-ID --file PATH --relative-path PATH` sends one file after the receiver's certificate key matches that explicitly expected paired device.

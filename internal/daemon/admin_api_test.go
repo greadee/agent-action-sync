@@ -9,6 +9,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -66,6 +68,60 @@ func TestDaemonSupervisesAuthenticatedLocalAPI(t *testing.T) {
 	_ = listener.Close()
 	if _, err := instance.Store.OneWayJobs().ListOneWayJobs(context.Background()); err == nil {
 		t.Fatal("SQLite remained open after API and workers stopped")
+	}
+}
+
+func TestDaemonProjectMigrationAPIUsesConfiguredShareAndPersistsAudit(t *testing.T) {
+	root := t.TempDir()
+	workspaceFile := filepath.Join(root, "workspace", "existing.txt")
+	if err := os.MkdirAll(filepath.Dir(workspaceFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workspaceFile, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfigWithInterval(t.TempDir(), root, 3600)
+	cfg.LocalAPI.Port = freeLocalAPIPort(t)
+	credentialStore := &daemonCredentialStore{credential: daemonAdminCredential(0x49)}
+	options := Options{AdminCredentialStore: credentialStore, WatcherFactory: func(string) (syncengine.Watcher, error) { return newDaemonWatcher(2), nil }}
+	instance, err := Bootstrap(context.Background(), cfg, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.ConfigureLocalAPI(options); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := runDaemon(t, instance, ctx)
+	client, err := api.NewClient(api.ClientOptions{Address: instance.LocalAPIAddress(), Credential: credentialStore.credential})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	waitForAPIStatus(t, "http://"+instance.LocalAPIAddress()+"/healthz", "", http.StatusOK).Body.Close()
+	input := api.ProjectMigrationInput{ShareID: "share-1", ProjectID: "project-api-migration", Name: "API Migration"}
+	preflight, err := client.PreflightProjectMigration(context.Background(), input)
+	if err != nil || preflight.Status != "ready" || preflight.Confirmation == "" {
+		t.Fatalf("preflight=%+v err=%v", preflight, err)
+	}
+	applied, err := client.ApplyProjectMigration(context.Background(), api.ProjectMigrationApplyInput{ProjectMigrationInput: input, Confirmation: preflight.Confirmation})
+	if err != nil || applied.Status != "applied" || !applied.ScanRequested || applied.AuditEventID == "" {
+		t.Fatalf("applied=%+v err=%v", applied, err)
+	}
+	registration, err := instance.Store.ProjectRegistrations().GetProject(context.Background(), input.ProjectID)
+	if err != nil || registration.ShareID != "share-1" || registration.RootPath != root {
+		t.Fatalf("registration=%+v err=%v", registration, err)
+	}
+	if got, err := os.ReadFile(workspaceFile); err != nil || string(got) != "keep" {
+		t.Fatalf("workspace changed: %q err=%v", got, err)
+	}
+	audit, err := instance.Store.Audit().Get(context.Background(), applied.AuditEventID)
+	if err != nil || audit.Metadata["project_id"] != input.ProjectID {
+		t.Fatalf("audit=%+v err=%v", audit, err)
+	}
+	cancel()
+	if err := waitForDaemon(t, done); err != nil {
+		t.Fatal(err)
 	}
 }
 

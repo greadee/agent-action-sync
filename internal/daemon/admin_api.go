@@ -6,9 +6,15 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+
 	"syncgate/internal/api"
+	"syncgate/internal/core"
 	"syncgate/internal/identity"
+	"syncgate/internal/insights"
 	"syncgate/internal/pairing"
+	"syncgate/internal/project"
+	"syncgate/internal/projectmigration"
+	"syncgate/internal/projector"
 	"syncgate/internal/storage"
 )
 
@@ -95,14 +101,69 @@ func (daemon *Daemon) ConfigureLocalAPI(options Options) error {
 			return daemon.Identity, daemon.Config.DeviceName, nil
 		},
 	}
+	migration := &projectmigration.Service{
+		Store: daemon.Store, Now: daemon.currentTime,
+		Bootstrapper: project.ProjectBootstrapper{Now: daemon.currentTime},
+		Projector:    &projector.Projector{Store: daemon.Store, Now: daemon.currentTime},
+		Insights:     &insights.Calculator{Store: daemon.Store, Now: daemon.currentTime},
+		RequestScan:  daemon.RequestScan,
+	}
 	service, err := api.NewAdministrationService(api.AdministrationServiceOptions{
-		Queries:     queries,
-		Ready:       daemon.localAPIReady,
-		Runtime:     daemon.localAPIRuntimeSnapshot,
-		Diagnostics: daemon.Diagnostics,
-		Scan:        daemon.RequestScan,
-		Control:     api.ControlWithJobStore(daemon.Store.OneWayJobs(), daemon.currentTime),
-		Pairing:     pairingCoordinator,
+		Queries:      queries,
+		Ready:        daemon.localAPIReady,
+		Runtime:      daemon.localAPIRuntimeSnapshot,
+		Diagnostics:  daemon.Diagnostics,
+		Scan:         daemon.RequestScan,
+		Control:      api.ControlWithJobStore(daemon.Store.OneWayJobs(), daemon.currentTime),
+		Pairing:      pairingCoordinator,
+		ProjectStore: daemon.Store,
+		ProjectMigrationPreflight: func(ctx context.Context, input api.ProjectMigrationInput) (api.ProjectMigrationPreflight, error) {
+			request, err := daemon.projectMigrationRequest(input)
+			if err != nil {
+				return api.ProjectMigrationPreflight{}, err
+			}
+			result, err := migration.Preflight(ctx, request)
+			if err != nil {
+				return api.ProjectMigrationPreflight{}, mapProjectMigrationError(err)
+			}
+			return projectMigrationPreflightDTO(result), nil
+		},
+		ProjectMigrationApply: func(ctx context.Context, input api.ProjectMigrationApplyInput) (api.ProjectMigrationApplyResult, error) {
+			request, err := daemon.projectMigrationRequest(input.ProjectMigrationInput)
+			if err != nil {
+				return api.ProjectMigrationApplyResult{}, err
+			}
+			result, err := migration.Apply(ctx, request, input.Confirmation)
+			if err != nil {
+				return api.ProjectMigrationApplyResult{}, mapProjectMigrationError(err)
+			}
+			return api.ProjectMigrationApplyResult{
+				Status: result.Status, ProjectID: result.ProjectID, ShareID: string(result.ShareID), CreatedRecords: result.CreatedRecords,
+				ProjectedEvents: result.ProjectedEvents, ProjectedArtifacts: result.ProjectedArtifacts, InsightCount: result.InsightCount,
+				EventWatermark: result.EventWatermark, AuditEventID: result.AuditEventID, ScanRequested: result.ScanRequested,
+			}, nil
+		},
+		ProjectRebuild: func(ctx context.Context, projectID string) (api.ProjectRebuildResult, error) {
+			registration, err := daemon.Store.ProjectRegistrations().GetProject(ctx, projectID)
+			if err != nil {
+				return api.ProjectRebuildResult{}, err
+			}
+			projection := &projector.Projector{Store: daemon.Store, Now: daemon.currentTime}
+			report, err := projection.Rebuild(ctx, registration.RootPath)
+			if err != nil {
+				return api.ProjectRebuildResult{}, err
+			}
+			calculator := &insights.Calculator{Store: daemon.Store, Now: daemon.currentTime}
+			snapshots, err := calculator.Rebuild(ctx, projectID)
+			if err != nil {
+				return api.ProjectRebuildResult{}, err
+			}
+			watermark := ""
+			if len(snapshots) > 0 {
+				watermark = snapshots[0].SourceEventWatermark
+			}
+			return api.ProjectRebuildResult{EventWatermark: watermark, InsightCount: len(snapshots), EventCount: report.ProjectedEvents, ArtifactCount: report.ProjectedArtifacts}, nil
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("configure local administration service: %w", err)
@@ -126,6 +187,48 @@ func (daemon *Daemon) ConfigureLocalAPI(options Options) error {
 	daemon.mu.Unlock()
 	keepListener = true
 	return nil
+}
+
+func (daemon *Daemon) projectMigrationRequest(input api.ProjectMigrationInput) (projectmigration.Request, error) {
+	for _, share := range daemon.Config.Shares {
+		if share.ID != input.ShareID {
+			continue
+		}
+		return projectmigration.Request{
+			ShareID: core.ShareID(share.ID), RootPath: share.RootPath, ShareMode: storage.ShareMode(share.Mode),
+			ConfiguredIgnorePatterns: append([]string(nil), share.IgnorePatterns...), ProjectID: input.ProjectID,
+			Name: input.Name, AuthorityDeviceID: daemon.Identity.DeviceID,
+		}, nil
+	}
+	return projectmigration.Request{}, storage.ErrNotFound
+}
+
+func projectMigrationPreflightDTO(result projectmigration.Preflight) api.ProjectMigrationPreflight {
+	issues := make([]api.ProjectMigrationIssue, 0, len(result.Issues))
+	for _, issue := range result.Issues {
+		issues = append(issues, api.ProjectMigrationIssue{RelativePath: issue.RelativePath, Reason: issue.Reason})
+	}
+	return api.ProjectMigrationPreflight{
+		Status: string(result.Status), ShareID: string(result.ShareID), ProjectID: result.ProjectID, Name: result.Name,
+		RootIdentity: result.RootIdentity, Issues: issues, ExcludedPaths: append([]string(nil), result.ExcludedPaths...),
+		RequiredIgnorePatterns:          append([]string(nil), result.RequiredIgnorePatterns...),
+		MissingConfiguredIgnorePatterns: append([]string(nil), result.MissingConfiguredIgnorePatterns...),
+		ConfigurationChangeRequired:     result.ConfigurationChangeRequired,
+		ExpectedPortableRecords:         append([]string(nil), result.ExpectedPortableRecords...),
+		ExistingProjectID:               result.ExistingProjectID, Confirmation: result.Confirmation,
+	}
+}
+
+func mapProjectMigrationError(err error) error {
+	switch {
+	case errors.Is(err, projectmigration.ErrBlocked), errors.Is(err, projectmigration.ErrPreflightChanged),
+		errors.Is(err, projectmigration.ErrConflict), errors.Is(err, project.ErrRecordConflict), errors.Is(err, storage.ErrConflict):
+		return &api.APIError{Status: 409, Code: "project_migration_conflict", Message: "project migration conflicts with current state", Internal: err}
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return err
+	default:
+		return err
+	}
 }
 
 func (daemon *Daemon) startLocalAPI() <-chan error {

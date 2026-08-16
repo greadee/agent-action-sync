@@ -149,6 +149,24 @@ func NewAdminV1Handler(service AdministrationService) http.Handler {
 			handleInventoryAudit(writer, request, service)
 			return
 		}
+		if request.URL.Path == "/api/v1/projects" || strings.HasPrefix(request.URL.Path, "/api/v1/projects/") {
+			projects, ok := service.(ProjectAdministration)
+			if !ok {
+				writeError(writer, request, errUnavailable)
+			} else {
+				NewProjectHandler(projects).ServeHTTP(writer, request)
+			}
+			return
+		}
+		if request.URL.Path == "/api/v1/project-migrations/preflight" || request.URL.Path == "/api/v1/project-migrations/apply" {
+			migrations, ok := service.(ProjectMigrationAdministration)
+			if !ok {
+				writeError(writer, request, errUnavailable)
+			} else {
+				NewProjectMigrationHandler(migrations).ServeHTTP(writer, request)
+			}
+			return
+		}
 		writeError(writer, request, errNotFound)
 	})
 }

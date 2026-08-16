@@ -1854,6 +1854,35 @@ type auditStore struct {
 	db *sql.DB
 }
 
+func (store auditStore) Get(ctx context.Context, id string) (storage.AuditEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return storage.AuditEvent{}, err
+	}
+	if strings.TrimSpace(id) == "" {
+		return storage.AuditEvent{}, errors.New("audit event ID is required")
+	}
+	row := store.db.QueryRowContext(ctx, `
+SELECT audit_id, event_name, device_id, peer_device_id, share_id, transfer_id, revision_id, transport_type, severity, metadata_json, occurred_at
+FROM audit_events WHERE audit_id = ?`, id)
+	var event storage.AuditEvent
+	var deviceID, peerDeviceID, shareID, transferID, revisionID, transportType sql.NullString
+	var metadataJSON, occurredAt string
+	if err := row.Scan(&event.ID, &event.EventName, &deviceID, &peerDeviceID, &shareID, &transferID, &revisionID, &transportType, &event.Severity, &metadataJSON, &occurredAt); err != nil {
+		return storage.AuditEvent{}, mapNotFound(err, "audit event", id)
+	}
+	event.DeviceID = core.DeviceID(deviceID.String)
+	event.PeerDeviceID = core.DeviceID(peerDeviceID.String)
+	event.ShareID = core.ShareID(shareID.String)
+	event.TransferID = core.TransferID(transferID.String)
+	event.RevisionID = core.RevisionID(revisionID.String)
+	event.TransportType = transportType.String
+	event.OccurredAt = parseStoredTime(occurredAt)
+	if err := json.Unmarshal([]byte(metadataJSON), &event.Metadata); err != nil {
+		return storage.AuditEvent{}, fmt.Errorf("parse audit event %s metadata: %w", event.ID, err)
+	}
+	return event, nil
+}
+
 func (store auditStore) ListRecent(ctx context.Context, limit int) ([]storage.AuditEvent, error) {
 	if limit < 1 {
 		return nil, errors.New("audit event limit must be positive")

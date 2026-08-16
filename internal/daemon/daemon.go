@@ -15,6 +15,9 @@ import (
 	"syncgate/internal/config"
 	"syncgate/internal/core"
 	"syncgate/internal/identity"
+	"syncgate/internal/insights"
+	"syncgate/internal/project"
+	"syncgate/internal/projector"
 	"syncgate/internal/storage"
 	"syncgate/internal/storage/sqlite"
 	syncengine "syncgate/internal/sync"
@@ -46,7 +49,7 @@ type Options struct {
 	AdminCredentialStore    api.AdminCredentialStore
 	AdminCredentialRandom   io.Reader
 	ListenLocalAPI          func(network, address string) (net.Listener, error)
-	RequestProjectIngestion func(context.Context, core.ShareID, string)
+	RequestProjectIngestion func(context.Context, core.ShareID, string) error
 }
 
 type Daemon struct {
@@ -73,7 +76,7 @@ type Daemon struct {
 	jobMaxBackoff           time.Duration
 	startedAt               time.Time
 	localAPI                *localAPIState
-	requestProjectIngestion func(context.Context, core.ShareID, string)
+	requestProjectIngestion func(context.Context, core.ShareID, string) error
 }
 
 type shareRuntime struct {
@@ -169,6 +172,19 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 			DeletionLimitPercent: share.DeletionLimitPercent,
 		}); err != nil {
 			return nil, fmt.Errorf("persist share %q: %w", share.ID, err)
+		}
+	}
+	if options.RequestProjectIngestion == nil {
+		projection := &projector.Projector{Store: store, Now: options.Now}
+		hook := projector.LifecycleHook{Projector: projection}
+		calculator := &insights.Calculator{Store: store, Now: options.Now}
+		options.RequestProjectIngestion = func(ingestCtx context.Context, shareID core.ShareID, rootPath string) error {
+			report, err := hook.AfterShareUpdate(ingestCtx, shareID, rootPath)
+			if err != nil || report.ProjectID == "" {
+				return err
+			}
+			_, err = calculator.Rebuild(ingestCtx, report.ProjectID)
+			return err
 		}
 	}
 
@@ -347,7 +363,9 @@ func (daemon *Daemon) startJobQueue(ctx context.Context) error {
 		}
 		if daemon.requestProjectIngestion != nil {
 			if rootPath, exists := daemon.configuredShareRoot(job.ShareID); exists {
-				daemon.requestProjectIngestion(executeCtx, job.ShareID, rootPath)
+				if err := daemon.requestProjectIngestion(executeCtx, job.ShareID, rootPath); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -514,12 +532,18 @@ func buildShareRuntimes(
 			sequenceMu.Lock()
 			start := sequence
 			sequenceMu.Unlock()
+			ignorePatterns := share.IgnorePatterns
+			if _, projectErr := store.ProjectRegistrations().GetProjectByShare(scanCtx, core.ShareID(share.ID)); projectErr == nil {
+				ignorePatterns = project.NewProjectScanPolicy(share.IgnorePatterns).EffectiveIgnorePatterns
+			} else if !errors.Is(projectErr, storage.ErrNotFound) {
+				return syncengine.ScanCommitResult{}, fmt.Errorf("load project scan policy: %w", projectErr)
+			}
 			result, err := commitService.Run(scanCtx, syncengine.ScanCommitOptions{
 				Plan: syncengine.PlanScanOptions{
 					ScanOptions: syncengine.ScanOptions{
 						ShareID:        core.ShareID(share.ID),
 						RootPath:       share.RootPath,
-						IgnorePatterns: share.IgnorePatterns,
+						IgnorePatterns: ignorePatterns,
 					},
 					DeletionGuard: syncengine.DeletionGuard{
 						MaxCount:   share.DeletionLimitCount,
@@ -535,7 +559,9 @@ func buildShareRuntimes(
 				sequence += int64(len(result.Revisions))
 				sequenceMu.Unlock()
 				if options.RequestProjectIngestion != nil {
-					options.RequestProjectIngestion(scanCtx, core.ShareID(share.ID), share.RootPath)
+					if err := options.RequestProjectIngestion(scanCtx, core.ShareID(share.ID), share.RootPath); err != nil {
+						return result, err
+					}
 				}
 			}
 			return result, err

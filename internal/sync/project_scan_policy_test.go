@@ -15,6 +15,8 @@ func TestProjectScanPolicyKeepsPortableControlRecordsAndExplainsLocalExclusions(
 	root := t.TempDir()
 	for relativePath, content := range map[string]string{
 		"workspace/source.txt":                   "source",
+		"workspace/.env":                         "token=secret",
+		"workspace/.secrets/key":                 "secret",
 		".agent-project/manifest.json":           "manifest",
 		".agent-project/local/device-state.json": "local",
 		".git/config":                            "git",
@@ -44,13 +46,13 @@ func TestProjectScanPolicyKeepsPortableControlRecordsAndExplainsLocalExclusions(
 	if !entries[".agent-project/manifest.json"] || !entries["workspace/source.txt"] {
 		t.Fatalf("portable project records were not scanned: %#v", entries)
 	}
-	if entries[".agent-project/local/device-state.json"] || entries[".git/config"] {
+	if entries[".agent-project/local/device-state.json"] || entries[".git/config"] || entries["workspace/.env"] || entries["workspace/.secrets/key"] {
 		t.Fatalf("local state or git metadata was scanned: %#v", entries)
 	}
 	diagnostics := syncengine.ExplainIgnoredPaths(core.ShareID("share-1"), []string{
-		".agent-project/manifest.json", ".agent-project/local/device-state.json", ".git/config",
+		".agent-project/manifest.json", ".agent-project/local/device-state.json", ".git/config", "workspace/.env", "workspace/.secrets",
 	}, policy.EffectiveIgnorePatterns)
-	if len(diagnostics) != 2 || diagnostics[0].Pattern != ".agent-project/local/**" || diagnostics[1].Pattern != ".git/**" {
+	if len(diagnostics) != 4 || diagnostics[0].Pattern != ".agent-project/local/**" || diagnostics[1].Pattern != ".git/**" || diagnostics[2].Pattern != ".env" || diagnostics[3].Pattern != ".secrets" {
 		t.Fatalf("ignore diagnostics = %#v", diagnostics)
 	}
 }

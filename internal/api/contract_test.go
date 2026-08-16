@@ -25,6 +25,15 @@ var expectedContractRoutes = []contractRoute{
 	{method: "get", operationID: "listJobs", path: "/api/v1/jobs", paginated: true},
 	{method: "get", operationID: "getJob", path: "/api/v1/jobs/{job_id}"},
 	{method: "get", operationID: "listAuditEvents", path: "/api/v1/audit-events", paginated: true},
+	{method: "post", operationID: "preflightProjectMigration", path: "/api/v1/project-migrations/preflight"},
+	{method: "post", operationID: "applyProjectMigration", path: "/api/v1/project-migrations/apply"},
+	{method: "get", operationID: "listProjects", path: "/api/v1/projects", paginated: true},
+	{method: "get", operationID: "getProject", path: "/api/v1/projects/{project_id}"},
+	{method: "get", operationID: "listProjectHistory", path: "/api/v1/projects/{project_id}/history", paginated: true},
+	{method: "get", operationID: "listProjectArtifacts", path: "/api/v1/projects/{project_id}/artifacts", paginated: true},
+	{method: "get", operationID: "listProjectInsights", path: "/api/v1/projects/{project_id}/insights", paginated: true},
+	{method: "get", operationID: "listProjectRejections", path: "/api/v1/projects/{project_id}/rejections", paginated: true},
+	{method: "post", operationID: "rebuildProjectProjections", path: "/api/v1/projects/{project_id}/projections/rebuild"},
 	{method: "post", operationID: "startShareScan", path: "/api/v1/shares/{share_id}/scans"},
 	{method: "post", operationID: "actOnJob", path: "/api/v1/jobs/{job_id}/actions"},
 	{method: "post", operationID: "createPairingInvitation", path: "/api/v1/pairing/invitations"},
@@ -70,6 +79,31 @@ func TestLocalAdminAPIContract(t *testing.T) {
 	limitSchema := requiredMap(t, limit, "schema")
 	if limitSchema["maximum"] != float64(200) || limitSchema["default"] != float64(50) {
 		t.Fatalf("pagination limit must default to 50 and cap at 200: %#v", limitSchema)
+	}
+	for _, parameterName := range []string{"EventType", "WorkPackageID", "ExecutionID", "MediaType", "Scope", "MetricName"} {
+		parameter := requiredMap(t, parameters, parameterName)
+		schema := requiredMap(t, parameter, "schema")
+		if schema["maxLength"] != float64(256) {
+			t.Errorf("%s must be bounded to 256 bytes: %#v", parameterName, schema)
+		}
+	}
+	schemas := requiredMap(t, components, "schemas")
+	for schemaName, forbidden := range map[string][]string{
+		"Project":          {"root_path", "manifest_path", "manifest_record_hash"},
+		"ProjectHistory":   {"payload_json"},
+		"ProjectArtifact":  {"blob_path"},
+		"ProjectRejection": {"quarantine_path", "content", "payload_json"},
+	} {
+		schema := requiredMap(t, schemas, schemaName)
+		if schema["additionalProperties"] != false {
+			t.Errorf("%s must reject additional response fields", schemaName)
+		}
+		properties := requiredMap(t, schema, "properties")
+		for _, field := range forbidden {
+			if _, ok := properties[field]; ok {
+				t.Errorf("%s must not expose %s", schemaName, field)
+			}
+		}
 	}
 
 	paths := requiredMap(t, document, "paths")

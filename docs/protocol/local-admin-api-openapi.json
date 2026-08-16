@@ -91,6 +91,87 @@
         "responses": { "200": { "description": "Audit event page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuditEventPage" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
+    "/api/v1/project-migrations/preflight": {
+      "post": {
+        "operationId": "preflightProjectMigration",
+        "summary": "Read-only eligibility and confirmation check for an existing source share",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectMigrationRequest" } } } },
+        "responses": { "200": { "description": "Migration preflight", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectMigrationPreflight" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/project-migrations/apply": {
+      "post": {
+        "operationId": "applyProjectMigration",
+        "summary": "Apply an unchanged confirmed project migration preflight",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectMigrationApplyRequest" } } } },
+        "responses": { "200": { "description": "Migration applied or already applied", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectMigrationApplyResult" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "summary": "List registered Agent Projects without local root paths",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }],
+        "responses": { "200": { "description": "Project page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectPage" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/projects/{project_id}": {
+      "get": {
+        "operationId": "getProject",
+        "summary": "Read one registered Agent Project",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ProjectID" }],
+        "responses": { "200": { "description": "Project details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/projects/{project_id}/history": {
+      "get": {
+        "operationId": "listProjectHistory",
+        "summary": "List bounded allowlisted work history",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ProjectID" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }, { "$ref": "#/components/parameters/EventType" }, { "$ref": "#/components/parameters/WorkPackageID" }, { "$ref": "#/components/parameters/ExecutionID" }],
+        "responses": { "200": { "description": "History page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectHistoryPage" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/projects/{project_id}/artifacts": {
+      "get": {
+        "operationId": "listProjectArtifacts",
+        "summary": "List artifact metadata without blob paths or bytes",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ProjectID" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }, { "$ref": "#/components/parameters/WorkPackageID" }, { "$ref": "#/components/parameters/ExecutionID" }, { "$ref": "#/components/parameters/MediaType" }],
+        "responses": { "200": { "description": "Artifact page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectArtifactPage" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/projects/{project_id}/insights": {
+      "get": {
+        "operationId": "listProjectInsights",
+        "summary": "List versioned deterministic work insights",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ProjectID" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }, { "$ref": "#/components/parameters/Scope" }, { "$ref": "#/components/parameters/MetricName" }],
+        "responses": { "200": { "description": "Insight page with freshness status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectInsightPage" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/projects/{project_id}/rejections": {
+      "get": {
+        "operationId": "listProjectRejections",
+        "summary": "List sanitized project rejection evidence without quarantine locations or content",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ProjectID" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }],
+        "responses": { "200": { "description": "Rejection metadata page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectRejectionPage" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/projects/{project_id}/projections/rebuild": {
+      "post": {
+        "operationId": "rebuildProjectProjections",
+        "summary": "Supervise a project history and insight projection rebuild",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ProjectID" }],
+        "responses": { "200": { "description": "Projection rebuilt", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectRebuild" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
     "/api/v1/shares/{share_id}/scans": {
       "post": {
         "operationId": "startShareScan",
@@ -154,8 +235,15 @@
       "Cursor": { "name": "cursor", "in": "query", "schema": { "type": "string", "maxLength": 512 } },
       "DeviceID": { "name": "device_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 128 } },
       "JobID": { "name": "job_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 128 } },
-      "ShareID": { "name": "share_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 128 } }
-      ,"DiagnosticsLimit": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } }
+      "ShareID": { "name": "share_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 128 } },
+      "ProjectID": { "name": "project_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 256 } },
+      "EventType": { "name": "event_type", "in": "query", "schema": { "type": "string", "maxLength": 256 } },
+      "WorkPackageID": { "name": "work_package_id", "in": "query", "schema": { "type": "string", "maxLength": 256 } },
+      "ExecutionID": { "name": "execution_id", "in": "query", "schema": { "type": "string", "maxLength": 256 } },
+      "MediaType": { "name": "media_type", "in": "query", "schema": { "type": "string", "maxLength": 256 } },
+      "Scope": { "name": "scope", "in": "query", "schema": { "type": "string", "maxLength": 256 } },
+      "MetricName": { "name": "metric_name", "in": "query", "schema": { "type": "string", "maxLength": 256 } },
+      "DiagnosticsLimit": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } }
     },
     "responses": {
       "BadRequest": { "description": "Invalid request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
@@ -182,6 +270,23 @@
       "DevicePage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/Device" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
       "JobPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/Job" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
       "AuditEventPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/AuditEvent" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
+      "ProjectMigrationRequest": { "type": "object", "additionalProperties": false, "required": ["share_id", "project_id", "name"], "properties": { "share_id": { "type": "string", "minLength": 1, "maxLength": 128 }, "project_id": { "type": "string", "minLength": 1, "maxLength": 128 }, "name": { "type": "string", "minLength": 1, "maxLength": 256 } } },
+      "ProjectMigrationApplyRequest": { "type": "object", "additionalProperties": false, "required": ["share_id", "project_id", "name", "confirmation"], "properties": { "share_id": { "type": "string", "minLength": 1, "maxLength": 128 }, "project_id": { "type": "string", "minLength": 1, "maxLength": 128 }, "name": { "type": "string", "minLength": 1, "maxLength": 256 }, "confirmation": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } },
+      "ProjectMigrationIssue": { "type": "object", "additionalProperties": false, "required": ["relative_path", "reason"], "properties": { "relative_path": { "type": "string", "maxLength": 4096 }, "reason": { "type": "string", "maxLength": 512 } } },
+      "ProjectMigrationPreflight": { "type": "object", "additionalProperties": false, "required": ["status", "share_id", "project_id", "name", "root_identity", "issues", "excluded_paths", "required_ignore_patterns", "missing_configured_ignore_patterns", "configuration_change_required", "expected_portable_records", "confirmation"], "properties": { "status": { "type": "string", "enum": ["ready", "already_complete", "blocked"] }, "share_id": { "type": "string" }, "project_id": { "type": "string" }, "name": { "type": "string" }, "root_identity": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }, "issues": { "type": "array", "maxItems": 64, "items": { "$ref": "#/components/schemas/ProjectMigrationIssue" } }, "excluded_paths": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 4096 } }, "required_ignore_patterns": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 256 } }, "missing_configured_ignore_patterns": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 256 } }, "configuration_change_required": { "type": "boolean" }, "expected_portable_records": { "type": "array", "maxItems": 16, "items": { "type": "string", "maxLength": 4096 } }, "existing_project_id": { "type": "string" }, "confirmation": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } },
+      "ProjectMigrationApplyResult": { "type": "object", "additionalProperties": false, "required": ["status", "project_id", "share_id", "created_records", "projected_events", "projected_artifacts", "insight_count", "event_watermark", "audit_event_id", "scan_requested"], "properties": { "status": { "type": "string", "enum": ["applied", "already_applied"] }, "project_id": { "type": "string" }, "share_id": { "type": "string" }, "created_records": { "type": "integer", "minimum": 0 }, "projected_events": { "type": "integer", "minimum": 0 }, "projected_artifacts": { "type": "integer", "minimum": 0 }, "insight_count": { "type": "integer", "minimum": 0 }, "event_watermark": { "type": "string" }, "audit_event_id": { "type": "string" }, "scan_requested": { "type": "boolean" } } },
+      "ProjectProjectionState": { "type": "object", "additionalProperties": false, "required": ["history", "insights"], "properties": { "history": { "type": "string", "enum": ["available", "unavailable", "rebuilding"] }, "insights": { "type": "string", "enum": ["available", "unavailable", "rebuilding", "stale"] }, "checkpoint_at": { "type": "string", "format": "date-time" } } },
+      "Project": { "type": "object", "additionalProperties": false, "required": ["id", "share_id", "name", "authority_device_id", "registered_at", "projection"], "properties": { "id": { "type": "string" }, "share_id": { "type": "string" }, "name": { "type": "string" }, "authority_device_id": { "type": "string" }, "registered_at": { "type": "string", "format": "date-time" }, "projection": { "$ref": "#/components/schemas/ProjectProjectionState" } } },
+      "ProjectPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/Project" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
+      "ProjectHistory": { "type": "object", "additionalProperties": false, "required": ["event_id", "event_type", "occurred_at", "device_id", "status", "record_path", "record_hash"], "properties": { "event_id": { "type": "string" }, "event_type": { "type": "string" }, "occurred_at": { "type": "string", "format": "date-time" }, "work_package_id": { "type": "string" }, "execution_id": { "type": "string" }, "worker_id": { "type": "string" }, "device_id": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" }, "status": { "type": "string", "enum": ["accepted", "pending"] }, "record_path": { "type": "string" }, "record_hash": { "type": "string" } } },
+      "ProjectHistoryPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/ProjectHistory" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
+      "ProjectArtifact": { "type": "object", "additionalProperties": false, "required": ["artifact_id", "name", "media_type", "size", "content_hash", "created_at", "record_path"], "properties": { "artifact_id": { "type": "string" }, "name": { "type": "string" }, "media_type": { "type": "string" }, "size": { "type": "integer", "minimum": 0 }, "content_hash": { "type": "string" }, "work_package_id": { "type": "string" }, "execution_id": { "type": "string" }, "created_at": { "type": "string", "format": "date-time" }, "record_path": { "type": "string" } } },
+      "ProjectArtifactPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/ProjectArtifact" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
+      "ProjectInsight": { "type": "object", "additionalProperties": false, "required": ["scope", "metric_name", "definition_version", "source_event_watermark", "value", "sample_count", "completeness", "evidence", "calculated_at"], "properties": { "scope": { "type": "string" }, "metric_name": { "type": "string" }, "definition_version": { "type": "integer", "minimum": 1 }, "source_event_watermark": { "type": "string" }, "value": {}, "sample_count": { "type": "integer", "minimum": 0 }, "completeness": { "type": "string", "enum": ["complete", "partial", "insufficient"] }, "evidence": { "type": "string", "enum": ["strong", "weak", "none"] }, "calculated_at": { "type": "string", "format": "date-time" } } },
+      "ProjectInsightPage": { "type": "object", "required": ["items", "page", "status"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/ProjectInsight" } }, "page": { "$ref": "#/components/schemas/PageInfo" }, "status": { "type": "string", "enum": ["available", "unavailable", "rebuilding", "stale"] } } },
+      "ProjectRejection": { "type": "object", "additionalProperties": false, "required": ["record_path", "reason_code", "rejected_at"], "properties": { "record_path": { "type": "string", "maxLength": 4096 }, "observed_hash": { "type": "string" }, "reason_code": { "type": "string", "maxLength": 256 }, "rejected_at": { "type": "string", "format": "date-time" } } },
+      "ProjectRejectionPage": { "type": "object", "required": ["items", "page"], "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/ProjectRejection" } }, "page": { "$ref": "#/components/schemas/PageInfo" } } },
+      "ProjectRebuild": { "type": "object", "additionalProperties": false, "required": ["status", "event_watermark", "event_count", "artifact_count", "insight_count"], "properties": { "status": { "type": "string", "const": "rebuilt" }, "event_watermark": { "type": "string" }, "event_count": { "type": "integer", "minimum": 0 }, "artifact_count": { "type": "integer", "minimum": 0 }, "insight_count": { "type": "integer", "minimum": 0 } } },
       "AcceptedCommand": { "type": "object", "required": ["accepted", "job_id"], "properties": { "accepted": { "type": "boolean", "const": true }, "job_id": { "type": "string" } } },
       "ScanAccepted": { "type": "object", "required": ["accepted", "share_id"], "properties": { "accepted": { "type": "boolean", "const": true }, "share_id": { "type": "string" } } },
       "JobAction": { "type": "object", "required": ["action"], "additionalProperties": false, "properties": { "action": { "type": "string", "enum": ["pause", "resume", "retry"] } } },

@@ -23,6 +23,7 @@ type PageCursor struct {
 	Timestamp   time.Time
 	ID          string
 	SecondaryID string
+	Version     int `json:"Version,omitempty"`
 }
 
 type Page[T any] struct {
@@ -124,6 +125,9 @@ func NormalizePageRequest(request PageRequest) (PageRequest, error) {
 	}
 	if len(request.Cursor.ID) > maxAdminFilterBytes || len(request.Cursor.SecondaryID) > maxAdminFilterBytes {
 		return PageRequest{}, errors.New("page cursor is too long")
+	}
+	if request.Cursor.Version < 0 {
+		return PageRequest{}, errors.New("page cursor version cannot be negative")
 	}
 	return request, nil
 }

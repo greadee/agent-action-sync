@@ -56,6 +56,10 @@ func main() {
 		runDaemonStatus(os.Args[2:])
 	case "scan":
 		runScan(os.Args[2:])
+	case "project-migrate-preflight":
+		runProjectMigratePreflight(os.Args[2:])
+	case "project-migrate-apply":
+		runProjectMigrateApply(os.Args[2:])
 	case "job-pause":
 		runJobControl(os.Args[2:], syncengine.OneWayJobControlPause)
 	case "job-resume":
@@ -310,6 +314,53 @@ func runScan(args []string) {
 		exitf("scan share %s: %v", *shareID, err)
 	}
 	fmt.Printf("syncgate scan share=%s accepted=%t\n", accepted.ShareID, accepted.Accepted)
+}
+
+func runProjectMigratePreflight(args []string) {
+	flags := flag.NewFlagSet("project-migrate-preflight", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	shareID := flags.String("share", "", "configured source share ID")
+	projectID := flags.String("project", "", "new Agent Project ID")
+	name := flags.String("name", "", "Agent Project display name")
+	_ = flags.Parse(args)
+	input := migrationCLIInput(*shareID, *projectID, *name)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.PreflightProjectMigration(context.Background(), input)
+	if err != nil {
+		exitf("preflight project migration: %v", err)
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+		exitf("print project migration preflight: %v", err)
+	}
+}
+
+func runProjectMigrateApply(args []string) {
+	flags := flag.NewFlagSet("project-migrate-apply", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	shareID := flags.String("share", "", "configured source share ID")
+	projectID := flags.String("project", "", "Agent Project ID from preflight")
+	name := flags.String("name", "", "Agent Project display name from preflight")
+	confirmation := flags.String("confirmation", "", "exact confirmation digest returned by preflight")
+	_ = flags.Parse(args)
+	input := api.ProjectMigrationApplyInput{ProjectMigrationInput: migrationCLIInput(*shareID, *projectID, *name), Confirmation: strings.TrimSpace(*confirmation)}
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.ApplyProjectMigration(context.Background(), input)
+	if err != nil {
+		exitf("apply project migration: %v", err)
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+		exitf("print project migration result: %v", err)
+	}
+}
+
+func migrationCLIInput(shareID, projectID, name string) api.ProjectMigrationInput {
+	input := api.ProjectMigrationInput{ShareID: strings.TrimSpace(shareID), ProjectID: strings.TrimSpace(projectID), Name: strings.TrimSpace(name)}
+	if input.ShareID == "" || input.ProjectID == "" || input.Name == "" {
+		exitf("--share, --project, and --name are required")
+	}
+	return input
 }
 
 func runJobControl(args []string, control syncengine.OneWayJobControl) {

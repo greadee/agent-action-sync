@@ -114,6 +114,7 @@ type ProjectInsightProjection struct {
 }
 
 type ProjectInsightQuery struct {
+	Page       PageRequest
 	ProjectID  string
 	Scope      string
 	MetricName string
@@ -136,9 +137,16 @@ type ProjectProjectionRejection struct {
 	RejectedAt     time.Time
 }
 
+type ProjectRejectionQuery struct {
+	Page      PageRequest
+	ProjectID string
+}
+
 type ProjectRegistrationStore interface {
 	RegisterProject(ctx context.Context, registration ProjectRegistration) (ProjectRegistrationResult, error)
 	GetProject(ctx context.Context, projectID string) (ProjectRegistration, error)
+	GetProjectByShare(ctx context.Context, shareID core.ShareID) (ProjectRegistration, error)
+	ListProjects(ctx context.Context, page PageRequest) (Page[ProjectRegistration], error)
 }
 
 type ProjectEventStore interface {
@@ -160,11 +168,12 @@ type ProjectCheckpointStore interface {
 
 type ProjectRejectionStore interface {
 	RecordProjectRejection(ctx context.Context, rejection ProjectProjectionRejection) error
+	ListProjectRejections(ctx context.Context, query ProjectRejectionQuery) (Page[ProjectProjectionRejection], error)
 }
 
 type ProjectInsightStore interface {
 	GetProjectInsight(ctx context.Context, projectID, scope, metricName string, definitionVersion int) (ProjectInsightProjection, error)
-	ListProjectInsights(ctx context.Context, query ProjectInsightQuery) ([]ProjectInsightProjection, error)
+	ListProjectInsights(ctx context.Context, query ProjectInsightQuery) (Page[ProjectInsightProjection], error)
 }
 
 type ProjectInsightProjectionStore interface {

@@ -23,15 +23,22 @@ func (store projectInsightStore) GetProjectInsight(ctx context.Context, projectI
 	return insight, nil
 }
 
-func (store projectInsightStore) ListProjectInsights(ctx context.Context, query storage.ProjectInsightQuery) ([]storage.ProjectInsightProjection, error) {
+func (store projectInsightStore) ListProjectInsights(ctx context.Context, query storage.ProjectInsightQuery) (storage.Page[storage.ProjectInsightProjection], error) {
 	if err := requireProjectID(ctx, query.ProjectID); err != nil {
-		return nil, err
+		return storage.Page[storage.ProjectInsightProjection]{}, err
 	}
 	if err := storage.ValidateProjectQueryFilter(query.Scope); err != nil {
-		return nil, err
+		return storage.Page[storage.ProjectInsightProjection]{}, err
 	}
 	if err := storage.ValidateProjectQueryFilter(query.MetricName); err != nil {
-		return nil, err
+		return storage.Page[storage.ProjectInsightProjection]{}, err
+	}
+	page, err := storage.NormalizePageRequest(query.Page)
+	if err != nil {
+		return storage.Page[storage.ProjectInsightProjection]{}, err
+	}
+	if !page.Cursor.Timestamp.IsZero() || page.Cursor.Version < 0 || (page.Cursor.ID == "") != (page.Cursor.SecondaryID == "") || (page.Cursor.ID == "") != (page.Cursor.Version == 0) {
+		return storage.Page[storage.ProjectInsightProjection]{}, errors.New("project insight cursor requires metric, scope, and definition version")
 	}
 	statement := projectInsightSelect + ` WHERE project_id = ?`
 	arguments := []any{query.ProjectID}
@@ -43,24 +50,31 @@ func (store projectInsightStore) ListProjectInsights(ctx context.Context, query 
 		statement += ` AND metric_name = ?`
 		arguments = append(arguments, query.MetricName)
 	}
-	statement += ` ORDER BY scope, metric_name, definition_version`
+	if page.Cursor.ID != "" {
+		statement += ` AND (metric_name > ? OR (metric_name = ? AND scope > ?) OR (metric_name = ? AND scope = ? AND definition_version > ?))`
+		arguments = append(arguments, page.Cursor.ID, page.Cursor.ID, page.Cursor.SecondaryID, page.Cursor.ID, page.Cursor.SecondaryID, page.Cursor.Version)
+	}
+	statement += ` ORDER BY metric_name, scope, definition_version LIMIT ?`
+	arguments = append(arguments, page.Limit+1)
 	rows, err := store.sql.QueryContext(ctx, statement, arguments...)
 	if err != nil {
-		return nil, fmt.Errorf("list project insights: %w", err)
+		return storage.Page[storage.ProjectInsightProjection]{}, fmt.Errorf("list project insights: %w", err)
 	}
 	defer rows.Close()
 	insights := make([]storage.ProjectInsightProjection, 0)
 	for rows.Next() {
 		insight, scanErr := scanProjectInsight(rows)
 		if scanErr != nil {
-			return nil, fmt.Errorf("scan project insight: %w", scanErr)
+			return storage.Page[storage.ProjectInsightProjection]{}, fmt.Errorf("scan project insight: %w", scanErr)
 		}
 		insights = append(insights, insight)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list project insights: %w", err)
+		return storage.Page[storage.ProjectInsightProjection]{}, fmt.Errorf("list project insights: %w", err)
 	}
-	return insights, nil
+	return pageItems(insights, page.Limit, func(item storage.ProjectInsightProjection) storage.PageCursor {
+		return storage.PageCursor{ID: item.MetricName, SecondaryID: item.Scope, Version: item.DefinitionVersion}
+	}), nil
 }
 
 func (store projectInsightProjectionStore) ReplaceProjectInsights(ctx context.Context, projectID string, replace func(storage.ProjectInsightWriter) error) error {

@@ -73,6 +73,8 @@ Useful docs:
 - [Agent Project ingestion and recovery](docs/architecture/project-ingestion.md)
 - [Work-history recording service](docs/architecture/work-history-recording.md)
 - [Deterministic work insights](docs/architecture/work-insights.md)
+- [Agent Project administration API](docs/architecture/project-administration-api.md)
+- [Agent Project migration and recovery](docs/operations/agent-project-migration.md)
 - [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)

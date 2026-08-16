@@ -72,10 +72,11 @@ func TestDaemonRequestsProjectIngestionAfterCommittedScan(t *testing.T) {
 	writeTestFile(t, filepath.Join(shareRoot, "notes.txt"), "initial")
 	var requests atomic.Int32
 	daemon, err := Bootstrap(context.Background(), testConfigWithInterval(dataDir, shareRoot, 3600), Options{
-		RequestProjectIngestion: func(_ context.Context, shareID core.ShareID, rootPath string) {
+		RequestProjectIngestion: func(_ context.Context, shareID core.ShareID, rootPath string) error {
 			if shareID == "share-1" && rootPath == shareRoot {
 				requests.Add(1)
 			}
+			return nil
 		},
 	})
 	if err != nil {
