@@ -3,8 +3,8 @@
 ## Status and scope
 
 This document defines the on-disk JSON contract for Agent Project records with
-schema family `syncgate.agent-project`, major version `1`, and initial minor
-version `0`.
+schema family `syncgate.agent-project`, major version `1`, and current minor
+version `4`. Minor versions `0` through `3` records remain supported.
 
 These records are the portable project-history source of truth described by the
 [Phase 4 architecture decision](../adr/phase-4-agent-project-foundation.md).
@@ -29,6 +29,8 @@ Every record is one JSON object containing these fields:
 Supported `record_kind` values are:
 
 - `project_manifest`
+- `task_revision` (minor 1 or newer)
+- `dependency_graph_revision` (minor 1 or newer)
 - `work_package_definition`
 - `execution_manifest`
 - `work_event`
@@ -103,6 +105,10 @@ path key. For example, work-package IDs `WP-001` and `wp-001` both address
 still case-sensitive, so attempting to publish both is a same-path/different-
 content conflict on every supported filesystem. This prevents Windows and Unix
 replicas from producing different histories because of filesystem case rules.
+Task IDs additionally encode the required namespace separator as `%3a`, so
+`task:release` addresses `.agent-project/tasks/task%3arelease/`. The identifier
+grammar excludes `%`, making this collision-free while avoiding the Windows
+drive-separator character.
 
 Portable writers derive paths from typed records; callers do not supply final
 control paths. Writers publish a synced same-directory temporary file ending in
@@ -184,8 +190,69 @@ a different `project_id`.
 | `deliverables` | yes | One or more general-text items. |
 | `acceptance_criteria` | yes | One or more general-text items. |
 | `review_required` | yes | Boolean. |
+| `task_id` | minor 1 task member | Namespaced `task:` identifier. |
+| `task_revision` | minor 1 task member | Positive revision, at most 1,000,000. |
+| `graph_revision` | minor 1 task member | Positive revision, at most 1,000,000. |
+| `priority` | minor 1 task member | `low`, `normal`, `high`, or `critical`. |
+| `risk` | no | Sorted unique risk dimensions with `low`, `medium`, `high`, or `critical` level. |
+| `resources` | no | Sorted capability, tool, OS, and architecture constraints plus non-negative memory/disk minima. |
+| `quality_gates` | no | Sorted immutable gate ID, positive version, digest, and required flag references. |
+| `trade_reference` | minor 2 | Resolved local `trade:` ID, positive version, and SHA-256 definition digest. |
 | `created_at` | yes | UTC timestamp. |
 | `provenance` | yes | If it contains `work_package_id`, it must match this record. |
+
+Minor 0 work-package definitions omit all task-member fields. If any task
+member field is present under minor 1, the task ID, task revision, graph
+revision, and priority are all required. Dependencies remain canonical only in
+the immutable work-package definition; the graph record does not redeclare
+edges.
+
+`trade_reference` contains only the immutable local registry identity used when
+the work package was created. It does not embed provider configuration,
+instructions, tool policy, credentials, tokens, endpoints, or secrets.
+
+## Task revision
+
+`record_kind` is `task_revision` and schema minor is at least `1`.
+
+| Field | Required | Rule |
+|---|---:|---|
+| `task_id` | yes | Namespaced `task:` identifier. |
+| `task_revision` | yes | Positive immutable revision, at most 1,000,000. |
+| `predecessor` | revisions after 1 | Previous revision plus lowercase SHA-256 digest. Revision 1 has none. |
+| `objective` | yes | General text. |
+| `priority` | yes | `low`, `normal`, `high`, or `critical`. |
+| `risk` | no | Sorted unique risk dimensions. |
+| `resources` | no | Bounded resource constraints. |
+| `graph_revision` | yes | Exact dependency graph revision selected by this task revision. |
+| `quality_gates` | no | Sorted immutable gate references. |
+| `created_at` | yes | UTC timestamp. |
+| `provenance` | yes | Task-scoped only; no work-package or execution ID. |
+
+The portable path is
+`.agent-project/tasks/<task-path-key>/revisions/<task-revision>/task.json`.
+
+## Dependency graph revision
+
+`record_kind` is `dependency_graph_revision` and schema minor is at least `1`.
+
+| Field | Required | Rule |
+|---|---:|---|
+| `task_id` | yes | Parent task ID. |
+| `task_revision` | yes | Exact parent task revision. |
+| `graph_revision` | yes | Positive immutable revision, at most 1,000,000. |
+| `predecessor` | revisions after 1 | Previous graph revision plus digest. Revision 1 has none. |
+| `members` | yes | 1-256 entries sorted by work-package ID; each pins the definition record ID and digest. |
+| `dependency_set_digest` | yes | SHA-256 over the sorted canonical dependency declarations. |
+| `barriers` | no | Sorted unique member IDs that are explicit synchronization barriers. |
+| `created_at` | yes | UTC timestamp. |
+| `provenance` | yes | Task-scoped only. |
+
+The portable path is
+`.agent-project/tasks/<task-path-key>/revisions/<task-revision>/graphs/<graph-revision>.json`.
+Readers join members to exact work-package definition digests, then reject a
+missing member/dependency, self-edge, duplicate edge, cycle, cross-project
+reference, dependency digest mismatch, or task/graph revision mismatch.
 
 ## Execution manifest
 
@@ -197,11 +264,26 @@ a different `project_id`.
 | `work_package_id` | yes | Parent work-package identifier. |
 | `state` | yes | `pending`, `running`, `paused`, `failed`, or `completed`. |
 | `producer` | yes | Valid Producer. |
+| `trade_reference` | minor 2 | Resolved `trade:` ID, version, and digest when known. |
+| `worker_reference` | minor 2 | Resolved `worker:` ID, version, and digest when known. |
+| `contract_reference` | minor 3 | Resolved authority-local `contract:` ID, version, and digest when contract-backed. |
 | `created_at` | yes | UTC timestamp. |
 | `provenance` | yes | Work-package and execution IDs must exactly match this record. |
 
 State-transition legality is enforced by the later work-history service. This
 contract validates only the portable manifest state vocabulary.
+
+Registry and contract references are evidence of the exact local definitions
+and authority used for this execution. The local registry and full execution
+contract are not portable project truth; credentials, policy bodies, secret
+values, runtime sessions, and node configuration are never valid reference
+fields.
+
+An execution's `provenance.context_version` may contain the deterministic
+Project Context Compiler digest. Context bundles are not a new portable record
+kind. If explicitly approved for publication, a bundle uses the existing
+artifact manifest/blob path and media type
+`application/vnd.syncgate.context+json`.
 
 ## Work event
 
@@ -238,6 +320,7 @@ between audit, sync revision, and work history.
 | `HANDOFF_CREATED` | work package and execution | `handoff_record_id` identifier |
 | `REVIEW_RECORDED` | work package; execution optional | `outcome`; `reviewer_id`; optional `summary` |
 | `ARTIFACT_RECORDED` | work package; execution optional | `artifact_record_id`; `artifact_id` |
+| `TELEMETRY_RECORDED` | work package and execution | Minor 4 allowlisted `syncgate.telemetry-summary.v1` payload with exact contract, task/graph/work-package, registry, context, runtime, provider, model, and node bindings plus nullable bounded observations and content digests. |
 | `WORK_ACCEPTED` | work package; execution optional | `accepted_by`; optional `summary` |
 
 Work-package states are `planned`, `ready`, `in_progress`, `blocked`, `review`,
@@ -247,7 +330,11 @@ Test outcomes are `passed`, `failed`, and `skipped`. Review outcomes are
 `approved`, `rejected`, and `changes_requested`.
 
 Payloads intentionally have no arbitrary metadata, prompt, command, environment,
-terminal-output, or tool-transcript field.
+terminal-output, or tool-transcript field. `TELEMETRY_RECORDED` is descriptive
+evidence only: it cannot authorize execution, alter readiness, or satisfy an
+acceptance gate. Its evidence fields contain IDs, digests, source/kind labels,
+and nullable measurements—not raw prompt, tool, terminal, secret, workspace,
+or provider-session content.
 
 ## Handoff
 

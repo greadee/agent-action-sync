@@ -165,6 +165,16 @@ func validateRequiredRecordFields(kind RecordKind, object map[string]any) error 
 			return err
 		}
 		return requireJSONFields(authority, "authority", "device_id", "share_id")
+	case RecordTaskRevision:
+		if err := requireJSONFields(object, "task_revision", "task_id", "task_revision", "objective", "priority", "graph_revision", "created_at", "provenance"); err != nil {
+			return err
+		}
+		return requireProvenance()
+	case RecordDependencyGraph:
+		if err := requireJSONFields(object, "dependency_graph_revision", "task_id", "task_revision", "graph_revision", "members", "dependency_set_digest", "created_at", "provenance"); err != nil {
+			return err
+		}
+		return requireProvenance()
 	case RecordWorkPackage:
 		if err := requireJSONFields(object, "work_package_definition", "work_package_id", "objective", "trade", "scope", "deliverables", "acceptance_criteria", "review_required", "created_at", "provenance"); err != nil {
 			return err
@@ -247,6 +257,10 @@ func decodeTypedRecord(kind RecordKind, raw []byte) (any, error) {
 	switch kind {
 	case RecordProjectManifest:
 		destination = &ProjectManifest{}
+	case RecordTaskRevision:
+		destination = &TaskRevision{}
+	case RecordDependencyGraph:
+		destination = &DependencyGraphRevision{}
 	case RecordWorkPackage:
 		destination = &WorkPackageDefinition{}
 	case RecordExecution:
@@ -365,6 +379,32 @@ func validateCanonicalRecordTimes(record any, object map[string]any) error {
 			return err
 		}
 		return check("created_at", object["created_at"], expected)
+	case *TaskRevision:
+		expected, err := timeText(typed.CreatedAt)
+		if err != nil {
+			return err
+		}
+		if err := check("created_at", object["created_at"], expected); err != nil {
+			return err
+		}
+		provenanceExpected, err := timeText(typed.Provenance.CreatedAt)
+		if err != nil {
+			return err
+		}
+		return provenanceTime(provenanceExpected)
+	case *DependencyGraphRevision:
+		expected, err := timeText(typed.CreatedAt)
+		if err != nil {
+			return err
+		}
+		if err := check("created_at", object["created_at"], expected); err != nil {
+			return err
+		}
+		provenanceExpected, err := timeText(typed.Provenance.CreatedAt)
+		if err != nil {
+			return err
+		}
+		return provenanceTime(provenanceExpected)
 	case *WorkPackageDefinition:
 		expected, err := timeText(typed.CreatedAt)
 		if err != nil {

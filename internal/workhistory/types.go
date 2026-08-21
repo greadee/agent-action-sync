@@ -67,6 +67,38 @@ type CreateWorkPackageRequest struct {
 	Deliverables       []string
 	AcceptanceCriteria []string
 	ReviewRequired     bool
+	TradeReference     *project.RegistryReference
+}
+
+type TaskWorkPackageRequest struct {
+	WorkPackageID      string
+	Objective          string
+	Trade              string
+	Specialization     string
+	Scope              project.WorkScope
+	Dependencies       []string
+	Deliverables       []string
+	AcceptanceCriteria []string
+	ReviewRequired     bool
+	Priority           project.TaskPriority
+	Risk               []project.RiskDimension
+	Resources          *project.ResourceConstraints
+	QualityGates       []project.QualityGateReference
+	TradeReference     *project.RegistryReference
+}
+
+type CreateTaskRequest struct {
+	Metadata
+	TaskID        string
+	TaskRevision  int64
+	GraphRevision int64
+	Objective     string
+	Priority      project.TaskPriority
+	Risk          []project.RiskDimension
+	Resources     *project.ResourceConstraints
+	QualityGates  []project.QualityGateReference
+	Barriers      []string
+	WorkPackages  []TaskWorkPackageRequest
 }
 
 type TransitionWorkPackageRequest struct {
@@ -79,8 +111,11 @@ type TransitionWorkPackageRequest struct {
 
 type StartExecutionRequest struct {
 	Metadata
-	WorkPackageID string
-	ExecutionID   string
+	WorkPackageID     string
+	ExecutionID       string
+	TradeReference    *project.RegistryReference
+	WorkerReference   *project.RegistryReference
+	ContractReference *project.RegistryReference
 }
 
 type ExecutionRequest struct {
@@ -110,6 +145,13 @@ type RecordTestRequest struct {
 	Name                 string
 	Outcome              project.TestOutcome
 	DurationMilliseconds int64
+}
+
+// RecordTelemetryRequest accepts only the already allowlisted portable
+// telemetry summary. Detailed local intake evidence is never accepted here.
+type RecordTelemetryRequest struct {
+	ExecutionRequest
+	Summary project.TelemetrySummaryPayload
 }
 
 type RecordReviewRequest struct {

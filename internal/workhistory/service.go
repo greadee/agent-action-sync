@@ -213,6 +213,10 @@ func provenance(metadata Metadata, workPackageID, executionID string, sourceArti
 
 func recordIDOf(record any) string {
 	switch value := record.(type) {
+	case project.TaskRevision:
+		return value.RecordID
+	case project.DependencyGraphRevision:
+		return value.RecordID
 	case project.WorkPackageDefinition:
 		return value.RecordID
 	case project.ExecutionManifest:

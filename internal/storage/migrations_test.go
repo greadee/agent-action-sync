@@ -85,3 +85,82 @@ func TestAgentProjectProjectionMigrationIsAdditiveAndHasNoInsightSnapshots(t *te
 		t.Fatal("stage 5 migration must not add insight snapshot storage")
 	}
 }
+
+func TestTaskGraphReadinessMigrationAddsOnlyRebuildableProjectionTables(t *testing.T) {
+	sql := Migrations[8].SQL
+	for _, table := range []string{"project_tasks", "project_task_nodes"} {
+		if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS "+table) {
+			t.Fatalf("task graph migration is missing table %q", table)
+		}
+	}
+	for _, forbidden := range []string{"lease", "assignment", "runtime_session", "agent_event"} {
+		if strings.Contains(strings.ToLower(sql), forbidden) {
+			t.Fatalf("task graph projection migration contains local execution state %q", forbidden)
+		}
+	}
+}
+
+func TestRegistryMigrationKeepsCredentialsAndRuntimeSessionsOutOfDurableDefinitions(t *testing.T) {
+	sql := strings.ToLower(Migrations[9].SQL)
+	for _, table := range []string{"registry_trade_versions", "registry_worker_versions", "registry_project_trade_adaptations", "registry_audit_events"} {
+		if !strings.Contains(sql, "create table if not exists "+table) {
+			t.Fatalf("registry migration is missing %q", table)
+		}
+	}
+	for _, forbidden := range []string{"credential", "secret", "access_token", "runtime_session"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("registry migration contains forbidden durable field %q", forbidden)
+		}
+	}
+}
+
+func TestExecutionContractMigrationStoresVersionedAuthorityWithoutCredentialColumns(t *testing.T) {
+	sql := strings.ToLower(Migrations[10].SQL)
+	if !strings.Contains(sql, "create table if not exists execution_contract_versions") {
+		t.Fatal("execution contract migration is missing the version table")
+	}
+	for _, required := range []string{"primary key (contract_id, version)", "predecessor_digest", "contract_json", "unique (project_id, execution_id, version)"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("execution contract migration is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"credential", "access_token", "runtime_session", "provider_session"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("execution contract migration contains forbidden durable column %q", forbidden)
+		}
+	}
+}
+
+func TestResultIntakeMigrationStoresOnlyBoundedUntrustedEnvelopeState(t *testing.T) {
+	sql := strings.ToLower(Migrations[11].SQL)
+	if !strings.Contains(sql, "create table if not exists orchestration_result_intake") {
+		t.Fatal("result intake migration is missing the durable decision table")
+	}
+	for _, required := range []string{"result_id text primary key", "envelope_digest", "idempotency_key_digest", "unique (project_id, execution_id, idempotency_key_digest)", "assignment_digest", "decision", "reason_code", "envelope_json"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("result intake migration is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"credential", "access_token", "provider_session", "terminal_output", "raw_prompt", "secret_value"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("result intake migration contains forbidden field %q", forbidden)
+		}
+	}
+}
+
+func TestTelemetryMigrationStoresOnlyBoundedReferenceEvidence(t *testing.T) {
+	sql := strings.ToLower(Migrations[12].SQL)
+	if !strings.Contains(sql, "create table if not exists execution_telemetry") {
+		t.Fatal("telemetry migration is missing the durable telemetry table")
+	}
+	for _, required := range []string{"telemetry_id text primary key", "telemetry_digest", "idempotency_key_digest", "summary_json", "unique (project_id, execution_id, idempotency_key_digest)"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("telemetry migration is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"credential", "access_token", "provider_session", "terminal_output", "raw_prompt", "secret_value", "absolute_path"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("telemetry migration contains forbidden field %q", forbidden)
+		}
+	}
+}

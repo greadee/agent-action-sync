@@ -23,6 +23,10 @@ type projectArtifactStore struct{ sql projectSQL }
 type projectCheckpointStore struct{ sql projectSQL }
 type projectRejectionStore struct{ sql projectSQL }
 type projectInsightStore struct{ sql projectSQL }
+type registryStore struct{ db *sql.DB }
+type executionContractStore struct{ db *sql.DB }
+type resultIntakeStore struct{ db *sql.DB }
+type executionTelemetryStore struct{ db *sql.DB }
 
 type projectProjectionStore struct{ db *sql.DB }
 type projectInsightProjectionStore struct{ db *sql.DB }
@@ -57,6 +61,22 @@ func (store *Store) ProjectInsights() storage.ProjectInsightStore {
 
 func (store *Store) ProjectInsightProjections() storage.ProjectInsightProjectionStore {
 	return projectInsightProjectionStore{db: store.db}
+}
+
+func (store *Store) Registry() storage.RegistryStore {
+	return registryStore{db: store.db}
+}
+
+func (store *Store) ExecutionContracts() storage.ExecutionContractStore {
+	return executionContractStore{db: store.db}
+}
+
+func (store *Store) ResultIntake() storage.ResultIntakeStore {
+	return resultIntakeStore{db: store.db}
+}
+
+func (store *Store) ExecutionTelemetry() storage.ExecutionTelemetryStore {
+	return executionTelemetryStore{db: store.db}
 }
 
 func (store projectRegistrationStore) RegisterProject(ctx context.Context, registration storage.ProjectRegistration) (storage.ProjectRegistrationResult, error) {
@@ -616,7 +636,7 @@ func (store projectProjectionStore) transact(ctx context.Context, projectID stri
 		// Insights are derived from event rows, so every canonical-history rebuild
 		// explicitly invalidates them instead of silently reinterpreting a stale
 		// snapshot under a new event set or definition.
-		for _, table := range []string{"project_insights", "project_projection_checkpoints", "project_projection_rejections", "project_artifacts", "project_events"} {
+		for _, table := range []string{"project_insights", "project_task_nodes", "project_tasks", "project_projection_checkpoints", "project_projection_rejections", "project_artifacts", "project_events"} {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id = ?`, projectID); err != nil {
 				return fmt.Errorf("clear %s: %w", table, err)
 			}
@@ -650,6 +670,21 @@ func (writer projectProjectionWriter) ListProjectEvents(ctx context.Context, que
 }
 func (writer projectProjectionWriter) SaveProjectArtifact(ctx context.Context, artifact storage.ProjectArtifactProjection) (storage.ProjectArtifactProjectionResult, error) {
 	return (projectArtifactStore{sql: writer.sql}).SaveProjectArtifact(ctx, artifact)
+}
+func (writer projectProjectionWriter) SaveProjectTask(ctx context.Context, task storage.ProjectTaskProjection) (storage.ProjectTaskProjectionResult, error) {
+	return (projectTaskStore{sql: writer.sql}).SaveProjectTask(ctx, task)
+}
+func (writer projectProjectionWriter) GetProjectTask(ctx context.Context, projectID, taskID string, taskRevision int64) (storage.ProjectTaskProjection, error) {
+	return (projectTaskStore{sql: writer.sql}).GetProjectTask(ctx, projectID, taskID, taskRevision)
+}
+func (writer projectProjectionWriter) ListProjectTasks(ctx context.Context, query storage.ProjectTaskQuery) (storage.Page[storage.ProjectTaskProjection], error) {
+	return (projectTaskStore{sql: writer.sql}).ListProjectTasks(ctx, query)
+}
+func (writer projectProjectionWriter) SaveProjectTaskNode(ctx context.Context, node storage.ProjectTaskNodeProjection) (storage.ProjectTaskProjectionResult, error) {
+	return (projectTaskNodeStore{sql: writer.sql}).SaveProjectTaskNode(ctx, node)
+}
+func (writer projectProjectionWriter) ListProjectTaskNodes(ctx context.Context, query storage.ProjectTaskNodeQuery) (storage.Page[storage.ProjectTaskNodeProjection], error) {
+	return (projectTaskNodeStore{sql: writer.sql}).ListProjectTaskNodes(ctx, query)
 }
 func (writer projectProjectionWriter) GetProjectArtifact(ctx context.Context, projectID, artifactID string) (storage.ProjectArtifactProjection, error) {
 	return (projectArtifactStore{sql: writer.sql}).GetProjectArtifact(ctx, projectID, artifactID)

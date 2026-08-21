@@ -72,13 +72,5 @@ func applyEvent(state *historyState, event storage.ProjectEventProjection) {
 }
 
 func allowedWorkTransition(from, to project.WorkPackageState) bool {
-	allowed := map[project.WorkPackageState]map[project.WorkPackageState]bool{
-		project.WorkPackagePlanned:    {project.WorkPackageReady: true, project.WorkPackageCanceled: true},
-		project.WorkPackageReady:      {project.WorkPackageInProgress: true, project.WorkPackageCanceled: true},
-		project.WorkPackageInProgress: {project.WorkPackageBlocked: true, project.WorkPackageReview: true, project.WorkPackageFailed: true, project.WorkPackageCanceled: true},
-		project.WorkPackageBlocked:    {project.WorkPackageInProgress: true, project.WorkPackageFailed: true, project.WorkPackageCanceled: true},
-		project.WorkPackageReview:     {project.WorkPackageInProgress: true, project.WorkPackageFailed: true},
-		project.WorkPackageFailed:     {project.WorkPackageReady: true, project.WorkPackageCanceled: true},
-	}
-	return allowed[from][to]
+	return project.ValidWorkPackageTransition(from, to)
 }

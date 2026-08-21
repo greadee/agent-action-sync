@@ -18,12 +18,14 @@ import (
 
 var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
 
-func (record ProjectManifest) Validate() error       { return validateRecord(record, true) }
-func (record WorkPackageDefinition) Validate() error { return validateRecord(record, true) }
-func (record ExecutionManifest) Validate() error     { return validateRecord(record, true) }
-func (record WorkEvent) Validate() error             { return validateRecord(record, true) }
-func (record Handoff) Validate() error               { return validateRecord(record, true) }
-func (record ArtifactManifest) Validate() error      { return validateRecord(record, true) }
+func (record ProjectManifest) Validate() error         { return validateRecord(record, true) }
+func (record TaskRevision) Validate() error            { return validateRecord(record, true) }
+func (record DependencyGraphRevision) Validate() error { return validateRecord(record, true) }
+func (record WorkPackageDefinition) Validate() error   { return validateRecord(record, true) }
+func (record ExecutionManifest) Validate() error       { return validateRecord(record, true) }
+func (record WorkEvent) Validate() error               { return validateRecord(record, true) }
+func (record Handoff) Validate() error                 { return validateRecord(record, true) }
+func (record ArtifactManifest) Validate() error        { return validateRecord(record, true) }
 
 func validateRecord(record any, requireIntegrity bool) error {
 	switch value := record.(type) {
@@ -34,6 +36,20 @@ func validateRecord(record any, requireIntegrity bool) error {
 			return errors.New("project manifest is nil")
 		}
 		return validateProjectManifest(*value, requireIntegrity)
+	case TaskRevision:
+		return validateTaskRevision(value, requireIntegrity)
+	case *TaskRevision:
+		if value == nil {
+			return errors.New("task revision is nil")
+		}
+		return validateTaskRevision(*value, requireIntegrity)
+	case DependencyGraphRevision:
+		return validateDependencyGraphRevision(value, requireIntegrity)
+	case *DependencyGraphRevision:
+		if value == nil {
+			return errors.New("dependency graph revision is nil")
+		}
+		return validateDependencyGraphRevision(*value, requireIntegrity)
 	case WorkPackageDefinition:
 		return validateWorkPackage(value, requireIntegrity)
 	case *WorkPackageDefinition:
@@ -87,6 +103,119 @@ func validateProjectManifest(record ProjectManifest, requireIntegrity bool) erro
 	return validateUTCTime("created_at", record.CreatedAt)
 }
 
+func validateTaskRevision(record TaskRevision, requireIntegrity bool) error {
+	if err := validateHeader(record.RecordHeader, RecordTaskRevision, requireIntegrity); err != nil {
+		return err
+	}
+	if record.Schema.Minor < 1 {
+		return errors.New("task revision requires schema minor version 1 or newer")
+	}
+	if err := validateNamespacedIdentifier("task_id", record.TaskID, "task:"); err != nil {
+		return err
+	}
+	if err := validateRevision("task_revision", record.Revision, record.Predecessor); err != nil {
+		return err
+	}
+	if err := validateText("objective", record.Objective, MaxTextBytes, true); err != nil {
+		return err
+	}
+	if !validTaskPriority(record.Priority) {
+		return fmt.Errorf("unsupported task priority %q", record.Priority)
+	}
+	if err := validateRiskDimensions("risk", record.Risk); err != nil {
+		return err
+	}
+	if record.Resources != nil {
+		if err := validateResourceConstraints("resources", *record.Resources); err != nil {
+			return err
+		}
+	}
+	if record.GraphRevision < 1 || record.GraphRevision > MaxAggregateRevision {
+		return fmt.Errorf("graph_revision must be between 1 and %d", MaxAggregateRevision)
+	}
+	if err := validateQualityGates("quality_gates", record.QualityGates); err != nil {
+		return err
+	}
+	if err := validateUTCTime("created_at", record.CreatedAt); err != nil {
+		return err
+	}
+	if err := validateProvenance(record.Provenance); err != nil {
+		return err
+	}
+	if record.Provenance.WorkPackageID != "" || record.Provenance.ExecutionID != "" {
+		return errors.New("task provenance cannot have work package or execution scope")
+	}
+	return nil
+}
+
+func validateDependencyGraphRevision(record DependencyGraphRevision, requireIntegrity bool) error {
+	if err := validateHeader(record.RecordHeader, RecordDependencyGraph, requireIntegrity); err != nil {
+		return err
+	}
+	if record.Schema.Minor < 1 {
+		return errors.New("dependency graph revision requires schema minor version 1 or newer")
+	}
+	if err := validateNamespacedIdentifier("task_id", record.TaskID, "task:"); err != nil {
+		return err
+	}
+	if record.TaskRevision < 1 || record.TaskRevision > MaxAggregateRevision {
+		return fmt.Errorf("task_revision must be between 1 and %d", MaxAggregateRevision)
+	}
+	if err := validateRevision("graph_revision", record.Revision, record.Predecessor); err != nil {
+		return err
+	}
+	if len(record.Members) == 0 || len(record.Members) > MaxListItems {
+		return fmt.Errorf("members requires between 1 and %d items", MaxListItems)
+	}
+	previous := ""
+	seen := make(map[string]struct{}, len(record.Members))
+	for index, member := range record.Members {
+		if err := validateIdentifier(fmt.Sprintf("members[%d].work_package_id", index), member.WorkPackageID, true); err != nil {
+			return err
+		}
+		if err := validateIdentifier(fmt.Sprintf("members[%d].definition_record_id", index), member.DefinitionRecordID, true); err != nil {
+			return err
+		}
+		if !validSHA256(member.DefinitionDigest) {
+			return fmt.Errorf("members[%d].definition_digest must be a lowercase SHA-256 digest", index)
+		}
+		if _, exists := seen[member.WorkPackageID]; exists {
+			return fmt.Errorf("members contains duplicate work package %q", member.WorkPackageID)
+		}
+		if previous != "" && member.WorkPackageID <= previous {
+			return errors.New("members must be sorted by work_package_id")
+		}
+		seen[member.WorkPackageID] = struct{}{}
+		previous = member.WorkPackageID
+	}
+	if !validSHA256(record.DependencySetDigest) {
+		return errors.New("dependency_set_digest must be a lowercase SHA-256 digest")
+	}
+	if err := validateIdentifierList("barriers", record.Barriers); err != nil {
+		return err
+	}
+	previous = ""
+	for _, barrier := range record.Barriers {
+		if _, exists := seen[barrier]; !exists {
+			return fmt.Errorf("barrier %q is not a graph member", barrier)
+		}
+		if previous != "" && barrier <= previous {
+			return errors.New("barriers must be sorted")
+		}
+		previous = barrier
+	}
+	if err := validateUTCTime("created_at", record.CreatedAt); err != nil {
+		return err
+	}
+	if err := validateProvenance(record.Provenance); err != nil {
+		return err
+	}
+	if record.Provenance.WorkPackageID != "" || record.Provenance.ExecutionID != "" {
+		return errors.New("dependency graph provenance cannot have work package or execution scope")
+	}
+	return nil
+}
+
 func validateWorkPackage(record WorkPackageDefinition, requireIntegrity bool) error {
 	if err := validateHeader(record.RecordHeader, RecordWorkPackage, requireIntegrity); err != nil {
 		return err
@@ -126,6 +255,17 @@ func validateWorkPackage(record WorkPackageDefinition, requireIntegrity bool) er
 	if err := validateTextList("acceptance_criteria", record.AcceptanceCriteria, true); err != nil {
 		return err
 	}
+	if err := validateWorkPackageTaskFields(record); err != nil {
+		return err
+	}
+	if record.TradeReference != nil {
+		if record.Schema.Minor < 2 {
+			return errors.New("trade reference requires schema minor version 2 or newer")
+		}
+		if err := validateRegistryReference("trade_reference", *record.TradeReference, "trade:"); err != nil {
+			return err
+		}
+	}
 	if err := validateUTCTime("created_at", record.CreatedAt); err != nil {
 		return err
 	}
@@ -162,6 +302,26 @@ func validateExecution(record ExecutionManifest, requireIntegrity bool) error {
 	}
 	if record.Producer != record.Provenance.Producer {
 		return errors.New("execution producer does not match provenance producer")
+	}
+	for _, item := range []struct {
+		name       string
+		reference  *RegistryReference
+		prefix     string
+		minorSince int
+	}{
+		{name: "trade_reference", reference: record.TradeReference, prefix: "trade:", minorSince: 2},
+		{name: "worker_reference", reference: record.WorkerReference, prefix: "worker:", minorSince: 2},
+		{name: "contract_reference", reference: record.ContractReference, prefix: "contract:", minorSince: 3},
+	} {
+		if item.reference == nil {
+			continue
+		}
+		if record.Schema.Minor < item.minorSince {
+			return fmt.Errorf("%s requires schema minor version %d or newer", item.name, item.minorSince)
+		}
+		if err := validateRegistryReference(item.name, *item.reference, item.prefix); err != nil {
+			return err
+		}
 	}
 	if record.Provenance.WorkPackageID != record.WorkPackageID || record.Provenance.ExecutionID != record.ExecutionID {
 		return errors.New("execution provenance scope does not match record")
@@ -302,8 +462,8 @@ func validateHeader(header RecordHeader, kind RecordKind, requireIntegrity bool)
 	if header.Schema.Minor < 0 {
 		return errors.New("schema minor version cannot be negative")
 	}
-	if !requireIntegrity && header.Schema.Minor != SchemaMinor {
-		return fmt.Errorf("writer supports schema minor version %d, got %d", SchemaMinor, header.Schema.Minor)
+	if !requireIntegrity && header.Schema.Minor > SchemaMinor {
+		return fmt.Errorf("writer supports schema minor versions through %d, got %d", SchemaMinor, header.Schema.Minor)
 	}
 	if header.RecordKind != kind {
 		return fmt.Errorf("record_kind %q does not match %q", header.RecordKind, kind)
@@ -320,6 +480,152 @@ func validateHeader(header RecordHeader, kind RecordKind, requireIntegrity bool)
 		}
 	} else if header.Integrity.Algorithm != "" && header.Integrity.Algorithm != HashAlgorithmSHA256 {
 		return fmt.Errorf("unsupported record integrity algorithm %q", header.Integrity.Algorithm)
+	}
+	return nil
+}
+
+func validateWorkPackageTaskFields(record WorkPackageDefinition) error {
+	hasTaskFields := record.TaskID != "" || record.TaskRevision != 0 || record.GraphRevision != 0 || record.Priority != "" ||
+		len(record.Risk) > 0 || record.Resources != nil || len(record.QualityGates) > 0
+	if !hasTaskFields {
+		return nil
+	}
+	if record.Schema.Minor < 1 {
+		return errors.New("task-bound work package requires schema minor version 1 or newer")
+	}
+	if err := validateNamespacedIdentifier("task_id", record.TaskID, "task:"); err != nil {
+		return err
+	}
+	if record.TaskRevision < 1 || record.TaskRevision > MaxAggregateRevision || record.GraphRevision < 1 || record.GraphRevision > MaxAggregateRevision {
+		return fmt.Errorf("task_revision and graph_revision must be between 1 and %d", MaxAggregateRevision)
+	}
+	if !validTaskPriority(record.Priority) {
+		return fmt.Errorf("unsupported task priority %q", record.Priority)
+	}
+	if err := validateRiskDimensions("risk", record.Risk); err != nil {
+		return err
+	}
+	if record.Resources != nil {
+		if err := validateResourceConstraints("resources", *record.Resources); err != nil {
+			return err
+		}
+	}
+	return validateQualityGates("quality_gates", record.QualityGates)
+}
+
+func validateRevision(name string, revision int64, predecessor *RevisionReference) error {
+	if revision < 1 || revision > MaxAggregateRevision {
+		return fmt.Errorf("%s must be between 1 and %d", name, MaxAggregateRevision)
+	}
+	if revision == 1 {
+		if predecessor != nil {
+			return fmt.Errorf("%s 1 cannot have a predecessor", name)
+		}
+		return nil
+	}
+	if predecessor == nil || predecessor.Revision != revision-1 || !validSHA256(predecessor.Digest) {
+		return fmt.Errorf("%s requires the immediately preceding revision and digest", name)
+	}
+	return nil
+}
+
+func validateRegistryReference(name string, reference RegistryReference, prefix string) error {
+	if err := validateNamespacedIdentifier(name+".id", reference.ID, prefix); err != nil {
+		return err
+	}
+	if reference.Version < 1 || reference.Version > MaxAggregateRevision {
+		return fmt.Errorf("%s.version must be between 1 and %d", name, MaxAggregateRevision)
+	}
+	if !validSHA256(reference.Digest) {
+		return fmt.Errorf("%s.digest must be a lowercase SHA-256 digest", name)
+	}
+	return nil
+}
+
+func validateNamespacedIdentifier(name, value, prefix string) error {
+	if err := validateIdentifier(name, value, true); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(value, prefix) || len(value) == len(prefix) {
+		return fmt.Errorf("%s must use namespace %q", name, prefix)
+	}
+	return nil
+}
+
+func validTaskPriority(value TaskPriority) bool {
+	return value == TaskPriorityLow || value == TaskPriorityNormal || value == TaskPriorityHigh || value == TaskPriorityCritical
+}
+
+func validRiskLevel(value RiskLevel) bool {
+	return value == RiskLow || value == RiskMedium || value == RiskHigh || value == RiskCritical
+}
+
+func validateRiskDimensions(name string, values []RiskDimension) error {
+	if len(values) > MaxListItems {
+		return fmt.Errorf("%s has more than %d items", name, MaxListItems)
+	}
+	previous := ""
+	for index, value := range values {
+		if err := validateIdentifier(fmt.Sprintf("%s[%d].name", name, index), value.Name, true); err != nil {
+			return err
+		}
+		if !validRiskLevel(value.Level) {
+			return fmt.Errorf("%s[%d] has unsupported level %q", name, index, value.Level)
+		}
+		if previous != "" && value.Name <= previous {
+			return fmt.Errorf("%s must be sorted with unique names", name)
+		}
+		previous = value.Name
+	}
+	return nil
+}
+
+func validateResourceConstraints(name string, value ResourceConstraints) error {
+	for suffix, values := range map[string][]string{
+		"required_capabilities": value.RequiredCapabilities,
+		"required_tools":        value.RequiredTools,
+		"allowed_os":            value.AllowedOS,
+		"allowed_architectures": value.AllowedArchitectures,
+	} {
+		if err := validateSortedIdentifierList(name+"."+suffix, values); err != nil {
+			return err
+		}
+	}
+	if value.MinimumMemoryMB < 0 || value.MinimumDiskMB < 0 {
+		return fmt.Errorf("%s memory and disk minimums cannot be negative", name)
+	}
+	return nil
+}
+
+func validateQualityGates(name string, values []QualityGateReference) error {
+	if len(values) > MaxListItems {
+		return fmt.Errorf("%s has more than %d items", name, MaxListItems)
+	}
+	previous := ""
+	for index, value := range values {
+		if err := validateNamespacedIdentifier(fmt.Sprintf("%s[%d].gate_id", name, index), value.GateID, "gate:"); err != nil {
+			return err
+		}
+		if value.Version < 1 || !validSHA256(value.Digest) {
+			return fmt.Errorf("%s[%d] requires a positive version and SHA-256 digest", name, index)
+		}
+		key := fmt.Sprintf("%s:%020d", value.GateID, value.Version)
+		if previous != "" && key <= previous {
+			return fmt.Errorf("%s must be sorted with unique identity versions", name)
+		}
+		previous = key
+	}
+	return nil
+}
+
+func validateSortedIdentifierList(name string, values []string) error {
+	if err := validateIdentifierList(name, values); err != nil {
+		return err
+	}
+	for index := 1; index < len(values); index++ {
+		if values[index] <= values[index-1] {
+			return fmt.Errorf("%s must be sorted", name)
+		}
 	}
 	return nil
 }
@@ -382,7 +688,7 @@ func validateEventPayload(event WorkEvent) error {
 	requireWorkPackage := event.EventType != EventProjectRegistered
 	requireExecution := event.EventType == EventExecutionStarted || event.EventType == EventExecutionPaused ||
 		event.EventType == EventExecutionFailed || event.EventType == EventExecutionCompleted ||
-		event.EventType == EventTestRecorded || event.EventType == EventHandoffCreated
+		event.EventType == EventTestRecorded || event.EventType == EventHandoffCreated || event.EventType == EventTelemetryRecorded
 	if requireWorkPackage && event.WorkPackageID == "" {
 		return fmt.Errorf("event type %s requires work_package_id", event.EventType)
 	}
@@ -499,8 +805,70 @@ func validateEventPayload(event WorkEvent) error {
 			return err
 		}
 		return validateText("payload.summary", payload.Summary, MaxTextBytes, false)
+	case EventTelemetryRecorded:
+		var payload TelemetrySummaryPayload
+		if err := decodeClosedPayload(event.Payload, &payload); err != nil {
+			return err
+		}
+		return validateTelemetrySummaryPayload(payload, event.WorkPackageID, event.ExecutionID)
 	default:
 		return fmt.Errorf("unsupported event type %q", event.EventType)
+	}
+}
+
+func validateTelemetrySummaryPayload(payload TelemetrySummaryPayload, workPackageID, executionID string) error {
+	if payload.Schema != "syncgate.telemetry-summary.v1" || !validTelemetryIdentifier(payload.TelemetryID, "telemetry:") ||
+		!validSHA256Digest(payload.TelemetryDigest) || !validTelemetryIdentifier(payload.Contract.ID, "contract:") || payload.Contract.Version < 1 || !validSHA256Digest(payload.Contract.Digest) ||
+		!validSHA256Digest(payload.ProjectRevision) || !validTelemetryIdentifier(payload.TaskID, "task:") || payload.TaskRevision < 1 || !validTelemetryIdentifier(payload.TaskRecordID, "") ||
+		!validSHA256Digest(payload.TaskDigest) || payload.WorkPackageID != workPackageID || !validTelemetryIdentifier(payload.WorkPackageRecordID, "") || !validSHA256Digest(payload.WorkPackageDigest) ||
+		executionID == "" || !validTelemetryIdentifier(payload.GraphRecordID, "") || payload.GraphRevision < 1 || !validSHA256Digest(payload.GraphDigest) || !validSHA256Digest(payload.ContextDigest) ||
+		!validTelemetryRegistry(payload.Trade, "trade:") || !validTelemetryRegistry(payload.Worker, "worker:") ||
+		!validTelemetryBinding(payload.Instruction, "instruction:") || !validTelemetryBinding(payload.Runtime, "runtime:") || !validTelemetryBinding(payload.Provider, "provider:") ||
+		!validTelemetryBinding(payload.Model, "model:") || !validTelemetryBinding(payload.Node, "node:") ||
+		(payload.FinalOutcome != "succeeded" && payload.FinalOutcome != "failed" && payload.FinalOutcome != "canceled" && payload.FinalOutcome != "partial") ||
+		len(payload.Observations) > 32 || len(payload.Evidence) > 64 {
+		return errors.New("invalid telemetry summary payload")
+	}
+	for _, value := range payload.Observations {
+		if !validTelemetryObservation(value) {
+			return errors.New("invalid telemetry observation")
+		}
+	}
+	for _, value := range payload.Evidence {
+		if !validTelemetryIdentifier(value.ID, "evidence:") || !validSHA256Digest(value.Digest) || !validTelemetryEvidenceKind(value.Kind) || !validTelemetrySource(value.Source) {
+			return errors.New("invalid telemetry evidence reference")
+		}
+	}
+	return nil
+}
+
+func validTelemetryRegistry(value RegistryReference, prefix string) bool {
+	return validTelemetryIdentifier(value.ID, prefix) && value.Version > 0 && validSHA256Digest(value.Digest)
+}
+func validTelemetryBinding(value TelemetryBindingReference, prefix string) bool {
+	return validTelemetryIdentifier(value.ID, prefix) && value.Version > 0 && validSHA256Digest(value.Digest)
+}
+func validSHA256Digest(value string) bool {
+	return len(value) == 64 && strings.Trim(value, "0123456789abcdef") == ""
+}
+func validTelemetryIdentifier(value, prefix string) bool {
+	return strings.HasPrefix(value, prefix) && validateIdentifier("telemetry identifier", value, true) == nil
+}
+func validTelemetrySource(value string) bool {
+	return value == "provider_reported" || value == "locally_measured" || value == "worker_claimed" || value == "reviewer_verified"
+}
+func validTelemetryEvidenceKind(value string) bool {
+	return value == "artifact" || value == "test" || value == "review" || value == "runtime" || value == "result"
+}
+func validTelemetryObservation(value TelemetryObservation) bool {
+	if !validTelemetrySource(value.Source) || (value.Value != nil && *value.Value < 0) {
+		return false
+	}
+	switch value.Name {
+	case "duration_milliseconds", "input_tokens", "output_tokens", "provider_cost_micros", "tool_calls", "files_inspected", "files_changed", "tests_run", "tests_failed", "retries", "runtime_errors", "tool_errors", "review_findings", "rework_cycles", "conflicts", "interventions", "rollbacks", "context_bytes":
+		return true
+	default:
+		return false
 	}
 }
 
