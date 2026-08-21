@@ -31,6 +31,12 @@ substitute for the individual decision records.
 | [Orchestration setup administration API](../architecture/orchestration-setup-administration-api.md) | Authenticated bounded setup inventory, preflight, and authority-service routes without runtime start/allocation | Implemented in Slice 9 |
 | [Setup compatibility, security, and release gate](../operations/orchestration-setup-recovery.md) | Recovery, feature-disable procedure, compatibility outcome, fuzz/race checks, and machine-checkable release gate | Implemented in Slice 10 |
 
+## Phase 1 pilot decisions
+
+| Decision area | Required outcome | Status |
+| --- | --- | --- |
+| [Supervised single-node pilot state machine](phase-6-supervised-single-node-pilot.md) | Authority-local assignment states, fencing, failure taxonomy, recovery, and operator confirmation points | Accepted in Phase 1 Slice 0; implementation deferred to Slice 1 |
+
 Multi-writer project history, automatic conflict merging, learned routing,
 embeddings, generated retrospectives, predictions, raw transcript capture, and
 production remote execution are not implicit setup decisions. Each remains
