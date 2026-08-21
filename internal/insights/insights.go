@@ -32,6 +32,7 @@ var Definitions = []Definition{
 	{"creation_to_acceptance_duration", DefinitionVersion}, {"test_outcomes", DefinitionVersion},
 	{"retry_and_rework", DefinitionVersion}, {"work_by_producer", DefinitionVersion},
 	{"artifact_and_handoff_counts", DefinitionVersion}, {"projection_freshness", DefinitionVersion},
+	{"telemetry_outcomes", DefinitionVersion}, {"telemetry_resource_observations", DefinitionVersion},
 }
 
 type Calculator struct {
@@ -112,6 +113,9 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 	executions := map[string]*executionState{}
 	testsPassed, testsFailed, testsSkipped := int64(0), int64(0), int64(0)
 	artifacts, handoffs := int64(0), int64(0)
+	telemetryOutcomes := map[string]int64{"succeeded": 0, "failed": 0, "canceled": 0, "partial": 0}
+	telemetryTotal := int64(0)
+	telemetryKnown := map[string][]int64{"duration_milliseconds": {}, "input_tokens": {}, "output_tokens": {}, "provider_cost_micros": {}, "tool_calls": {}}
 	groups := map[string]map[string]int64{"worker": {}, "model": {}, "provider": {}, "device": {}}
 	for _, event := range accepted {
 		addGroup(groups["worker"], event.ProducerWorkerID)
@@ -168,6 +172,19 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 			artifacts++
 		case project.EventHandoffCreated:
 			handoffs++
+		case project.EventTelemetryRecorded:
+			var payload project.TelemetrySummaryPayload
+			if json.Unmarshal(event.PayloadJSON, &payload) == nil {
+				telemetryTotal++
+				telemetryOutcomes[payload.FinalOutcome]++
+				for _, observation := range payload.Observations {
+					if observation.Value != nil {
+						if _, supported := telemetryKnown[observation.Name]; supported {
+							telemetryKnown[observation.Name] = append(telemetryKnown[observation.Name], *observation.Value)
+						}
+					}
+				}
+			}
 		}
 	}
 	watermark := eventWatermark(accepted)
@@ -252,6 +269,21 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 	if err := appendValue("artifact_and_handoff_counts", map[string]int64{"artifacts": artifacts, "handoffs": handoffs}, artifacts+handoffs, false); err != nil {
 		return nil, err
 	}
+	if err := appendValue("telemetry_outcomes", map[string]any{"outcomes": telemetryOutcomes, "minimum_sample_warning": telemetryTotal < 3}, telemetryTotal, telemetryTotal < 3); err != nil {
+		return nil, err
+	}
+	resources := map[string]any{}
+	partialTelemetry := telemetryTotal < 3
+	for name, values := range telemetryKnown {
+		resources[name] = nullableAggregate(values, telemetryTotal)
+		if int64(len(values)) != telemetryTotal || len(values) < 3 {
+			partialTelemetry = true
+		}
+	}
+	resources["minimum_sample_warning"] = telemetryTotal < 3
+	if err := appendValue("telemetry_resource_observations", resources, telemetryTotal, partialTelemetry); err != nil {
+		return nil, err
+	}
 	latest := time.Time{}
 	for _, event := range accepted {
 		if event.OccurredAt.After(latest) {
@@ -284,6 +316,16 @@ func durationValue(values []int64) map[string]any {
 		sum += value
 	}
 	return map[string]any{"known": true, "count": len(values), "total_milliseconds": sum, "average_milliseconds": sum / int64(len(values))}
+}
+func nullableAggregate(values []int64, total int64) map[string]any {
+	if len(values) == 0 {
+		return map[string]any{"known": false, "known_count": 0, "unknown_count": total}
+	}
+	var sum int64
+	for _, value := range values {
+		sum += value
+	}
+	return map[string]any{"known": true, "known_count": len(values), "unknown_count": total - int64(len(values)), "total": sum, "average": sum / int64(len(values))}
 }
 func quality(accepted, pending int) (string, string) {
 	if accepted == 0 {

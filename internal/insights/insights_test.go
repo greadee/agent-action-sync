@@ -88,6 +88,32 @@ func TestDefinitionsAreVersionedAndEmptySamplesAreExplicit(t *testing.T) {
 	}
 }
 
+func TestTelemetryInsightsKeepMissingMeasurementsUnknown(t *testing.T) {
+	value := int64(42)
+	when := time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC)
+	results, err := calculate("project-insight", []storage.ProjectEventProjection{
+		event("telemetry-one", project.EventTelemetryRecorded, when, "wp-one", "exec-one", project.TelemetrySummaryPayload{FinalOutcome: "succeeded", Observations: []project.TelemetryObservation{{Name: "input_tokens", Value: &value, Source: "provider_reported"}, {Name: "provider_cost_micros", Source: "provider_reported"}}}),
+	}, when)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resources map[string]any
+	for _, result := range results {
+		if result.MetricName == "telemetry_resource_observations" {
+			if err := json.Unmarshal(result.ValueJSON, &resources); err != nil {
+				t.Fatal(err)
+			}
+			if result.Completeness != "partial" {
+				t.Fatalf("quality=%s", result.Completeness)
+			}
+		}
+	}
+	cost, ok := resources["provider_cost_micros"].(map[string]any)
+	if !ok || cost["known"] != false || cost["unknown_count"] != float64(1) {
+		t.Fatalf("missing cost was treated as a value: %#v", resources["provider_cost_micros"])
+	}
+}
+
 func event(id string, kind project.EventType, when time.Time, workPackageID, executionID string, payload any) storage.ProjectEventProjection {
 	raw, _ := json.Marshal(payload)
 	return storage.ProjectEventProjection{ProjectID: "project-insight", EventID: id, RecordHash: hash(id), EventType: string(kind), OccurredAt: when, WorkPackageID: workPackageID, ExecutionID: executionID, ProducerWorkerID: "worker-one", ProducerDeviceID: "device-one", ProducerProvider: "provider-one", ProducerModel: "model-one", Status: "accepted", RecordPath: ".agent-project/history/events/2026/08/14/" + id + ".json", PayloadJSON: raw}
