@@ -18,6 +18,10 @@ type ProjectQueryStore interface {
 	ProjectInsights() storage.ProjectInsightStore
 	ProjectCheckpoints() storage.ProjectCheckpointStore
 	ProjectRejections() storage.ProjectRejectionStore
+	ProjectTasks() storage.ProjectTaskStore
+	ProjectTaskNodes() storage.ProjectTaskNodeStore
+	Registry() storage.RegistryStore
+	ExecutionTelemetry() storage.ExecutionTelemetryStore
 }
 
 type ProjectRebuildResult struct {
@@ -219,6 +223,7 @@ const (
 	projectCursorByID projectCursorKind = iota
 	projectCursorByTime
 	projectCursorByMetric
+	projectCursorByTask
 )
 
 func validateProjectAPIPage(page storage.PageRequest, kind projectCursorKind) error {
@@ -236,6 +241,10 @@ func validateProjectAPIPage(page storage.PageRequest, kind projectCursorKind) er
 		}
 	case projectCursorByMetric:
 		if !page.Cursor.Timestamp.IsZero() || page.Cursor.Version < 0 || (page.Cursor.ID == "") != (page.Cursor.SecondaryID == "") || (page.Cursor.ID == "") != (page.Cursor.Version == 0) {
+			return errBadRequest
+		}
+	case projectCursorByTask:
+		if !page.Cursor.Timestamp.IsZero() || page.Cursor.SecondaryID != "" || (page.Cursor.ID == "") != (page.Cursor.Version == 0) || page.Cursor.Version < 0 {
 			return errBadRequest
 		}
 	}
