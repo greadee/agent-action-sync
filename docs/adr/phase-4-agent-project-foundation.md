@@ -240,8 +240,13 @@ application coordinator after a successful local write, scan, or apply.
 
 Stages 8 through 10 subsequently delivered deterministic insights, the local
 administration API, safe existing-share migration, and the two-daemon release
-gate while preserving this decision's ownership boundaries. The following
-remain deferred and are not implemented or authorized:
+gate while preserving this decision's ownership boundaries. The Phase 5
+orchestration-domain decision subsequently classifies future task
+intent, registries, execution contracts, leases, result intake, and provenance.
+It preserves this ADR's single-authority and portable-history rules and does
+not itself enable execution.
+
+The following remain deferred and are not implemented or authorized:
 
 - Multi-writer or two-way project history and automatic conflict resolution.
 - Agent execution, remote commands, task scheduling, or work assignment.
