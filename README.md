@@ -99,6 +99,7 @@ Useful docs:
 - [Advanced-feature seams and evidence gates](docs/architecture/advanced-feature-seams.md)
 - [Orchestration setup administration API](docs/architecture/orchestration-setup-administration-api.md)
 - [Orchestration setup recovery and release gate](docs/operations/orchestration-setup-recovery.md)
+- [Orchestration control, fencing, and recovery](docs/architecture/orchestration-control-recovery.md)
 - [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)

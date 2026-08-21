@@ -35,7 +35,7 @@ substitute for the individual decision records.
 
 | Decision area | Required outcome | Status |
 | --- | --- | --- |
-| [Supervised single-node pilot state machine](phase-6-supervised-single-node-pilot.md) | Authority-local assignment states, fencing, failure taxonomy, recovery, and operator confirmation points | Accepted in Phase 1 Slice 0; implementation deferred to Slice 1 |
+| [Supervised single-node pilot state machine](phase-6-supervised-single-node-pilot.md) | Authority-local assignment states, fencing, failure taxonomy, recovery, and operator confirmation points | Accepted in Phase 1 Slice 0; [durable reducer, leases, and recovery](../architecture/orchestration-control-recovery.md) implemented in Slice 1 |
 
 Multi-writer project history, automatic conflict merging, learned routing,
 embeddings, generated retrospectives, predictions, raw transcript capture, and

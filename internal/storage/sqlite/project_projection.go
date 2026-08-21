@@ -27,6 +27,7 @@ type registryStore struct{ db *sql.DB }
 type executionContractStore struct{ db *sql.DB }
 type resultIntakeStore struct{ db *sql.DB }
 type executionTelemetryStore struct{ db *sql.DB }
+type orchestrationControlStore struct{ db *sql.DB }
 
 type projectProjectionStore struct{ db *sql.DB }
 type projectInsightProjectionStore struct{ db *sql.DB }
@@ -77,6 +78,10 @@ func (store *Store) ResultIntake() storage.ResultIntakeStore {
 
 func (store *Store) ExecutionTelemetry() storage.ExecutionTelemetryStore {
 	return executionTelemetryStore{db: store.db}
+}
+
+func (store *Store) OrchestrationControl() storage.OrchestrationControlStore {
+	return orchestrationControlStore{db: store.db}
 }
 
 func (store projectRegistrationStore) RegisterProject(ctx context.Context, registration storage.ProjectRegistration) (storage.ProjectRegistrationResult, error) {

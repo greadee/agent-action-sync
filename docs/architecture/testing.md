@@ -137,3 +137,16 @@ digest, and reopened SQLite result intake preserves only the exact replay
 decision. The gate documents a CGO-disabled race result as a skip; it must be
 completed on Linux CI or a C-enabled host. No release-gate test starts a real
 runtime, allocates a production workspace, or enables remote execution.
+
+## Orchestration control and recovery gate
+
+Phase 1 Slice 1 adds pure reducer tests and SQLite integration coverage for
+single-winner concurrent claims, fencing-token/generation mismatch, expired
+lease rejection, transaction rollback after a late audit failure, duplicate
+operation replay, one-way gate resolution, immutable operator decisions,
+timeout and retry, cancellation/timeout races, close-and-reopen recovery, and
+canonical projection isolation. The restart matrix must explicitly return
+`resume`, `reconcile`, or `needs_operator`; it must not start or replay runtime
+work. Run the full suite, vet, formatting, and architecture-boundary checks at
+the slice checkpoint. The race detector remains a required CI/C-enabled-host
+check when the local environment has `CGO_ENABLED=0`.

@@ -164,3 +164,28 @@ func TestTelemetryMigrationStoresOnlyBoundedReferenceEvidence(t *testing.T) {
 		}
 	}
 }
+
+func TestOrchestrationControlMigrationSeparatesFencedLocalStateFromCanonicalHistory(t *testing.T) {
+	sql := strings.ToLower(Migrations[13].SQL)
+	for _, table := range []string{
+		"orchestration_assignments", "orchestration_attempts", "orchestration_leases", "orchestration_resource_bindings",
+		"orchestration_gate_status", "orchestration_operator_decisions", "orchestration_operations", "orchestration_audit_events",
+	} {
+		if !strings.Contains(sql, "create table if not exists "+table) {
+			t.Fatalf("orchestration control migration is missing %q", table)
+		}
+	}
+	for _, required := range []string{
+		"orchestration_active_attempt_idx", "orchestration_active_lease_idx", "where state in ('planned','leased','preparing','running','paused','collecting','awaiting_gates')",
+		"fencing_digest", "lease_generation", "runtime_resume_key_digest", "recovery_disposition", "unique (project_id, work_package_id, idempotency_digest)",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("orchestration control migration is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"raw_prompt", "terminal_output", "credential", "access_token", "provider_session", "absolute_path"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("orchestration control migration contains forbidden durable field %q", forbidden)
+		}
+	}
+}

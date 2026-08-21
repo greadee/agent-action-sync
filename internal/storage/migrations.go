@@ -580,6 +580,140 @@ CREATE INDEX IF NOT EXISTS execution_telemetry_contract_idx
     ON execution_telemetry(contract_id, contract_version, telemetry_id);
 `),
 	},
+	{
+		Version: 14,
+		Name:    "durable orchestration control",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS orchestration_assignments (
+    assignment_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL,
+    task_revision INTEGER NOT NULL CHECK (task_revision > 0),
+    graph_revision INTEGER NOT NULL CHECK (graph_revision > 0),
+    work_package_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    contract_id TEXT NOT NULL,
+    contract_version INTEGER NOT NULL CHECK (contract_version > 0),
+    contract_digest TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('planned','leased','preparing','running','paused','collecting','awaiting_gates','accepted','failed','canceled','expired')),
+    current_attempt_id TEXT NOT NULL,
+    current_attempt_number INTEGER NOT NULL CHECK (current_attempt_number > 0),
+    idempotency_digest TEXT NOT NULL,
+    recovery_disposition TEXT NOT NULL CHECK (recovery_disposition IN ('none','resume','reconcile','needs_operator')),
+    failure_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (project_id, work_package_id)
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL,
+    work_package_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+    supersedes_attempt_id TEXT REFERENCES orchestration_attempts(attempt_id),
+    state TEXT NOT NULL CHECK (state IN ('planned','leased','preparing','running','paused','collecting','awaiting_gates','accepted','failed','canceled','expired')),
+    lease_generation INTEGER NOT NULL DEFAULT 0 CHECK (lease_generation >= 0),
+    runtime_session_id TEXT,
+    workspace_id TEXT,
+    idempotency_digest TEXT NOT NULL,
+    recovery_disposition TEXT NOT NULL CHECK (recovery_disposition IN ('none','resume','reconcile','needs_operator')),
+    failure_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (assignment_id, attempt_number),
+    UNIQUE (project_id, work_package_id, attempt_number),
+    UNIQUE (project_id, work_package_id, idempotency_digest)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS orchestration_active_attempt_idx
+    ON orchestration_attempts(project_id, work_package_id)
+    WHERE state IN ('planned','leased','preparing','running','paused','collecting','awaiting_gates');
+
+CREATE TABLE IF NOT EXISTS orchestration_leases (
+    lease_id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    generation INTEGER NOT NULL CHECK (generation > 0),
+    owner_node_id TEXT NOT NULL,
+    owner_runtime_id TEXT NOT NULL,
+    fencing_digest TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('active','released','expired')),
+    acquired_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    released_at TEXT,
+    UNIQUE (attempt_id, generation)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS orchestration_active_lease_idx
+    ON orchestration_leases(attempt_id) WHERE state = 'active';
+
+CREATE TABLE IF NOT EXISTS orchestration_resource_bindings (
+    attempt_id TEXT PRIMARY KEY REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    lease_generation INTEGER NOT NULL CHECK (lease_generation > 0),
+    runtime_session_id TEXT NOT NULL,
+    runtime_resume_key_digest TEXT NOT NULL,
+    runtime_state TEXT NOT NULL CHECK (runtime_state IN ('preparing','running','paused','stopped','unknown')),
+    workspace_id TEXT NOT NULL,
+    workspace_generation INTEGER NOT NULL CHECK (workspace_generation > 0),
+    workspace_state TEXT NOT NULL CHECK (workspace_state IN ('allocated','releasing','released','unknown')),
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_gate_status (
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    gate_id TEXT NOT NULL,
+    gate_version INTEGER NOT NULL CHECK (gate_version > 0),
+    gate_digest TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending','satisfied','failed','waived')),
+    evidence_id TEXT,
+    reason_code TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (attempt_id, gate_id, gate_version)
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_operator_decisions (
+    decision_id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    decision TEXT NOT NULL CHECK (decision IN ('cancel','retry','accept','gate_waive','reconcile')),
+    reason_code TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    idempotency_digest TEXT NOT NULL,
+    decided_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_operations (
+    operation_id TEXT PRIMARY KEY,
+    operation_digest TEXT NOT NULL,
+    assignment_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL,
+    resulting_state TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_audit_events (
+    audit_id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    from_state TEXT,
+    to_state TEXT NOT NULL,
+    reason_code TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    lease_generation INTEGER NOT NULL CHECK (lease_generation >= 0),
+    occurred_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS orchestration_assignment_state_idx
+    ON orchestration_assignments(project_id, state, updated_at, assignment_id);
+CREATE INDEX IF NOT EXISTS orchestration_audit_assignment_idx
+    ON orchestration_audit_events(assignment_id, occurred_at, audit_id);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

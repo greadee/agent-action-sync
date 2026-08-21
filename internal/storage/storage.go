@@ -38,6 +38,7 @@ type Store interface {
 	ExecutionContracts() ExecutionContractStore
 	ResultIntake() ResultIntakeStore
 	ExecutionTelemetry() ExecutionTelemetryStore
+	OrchestrationControl() OrchestrationControlStore
 	Close() error
 }
 

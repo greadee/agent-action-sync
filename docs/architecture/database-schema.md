@@ -305,3 +305,12 @@ CREATE TABLE project_projection_rejections (
   references only; it has no raw prompt, tool, terminal, secret, workspace,
   or provider-session column. Telemetry cannot authorize execution or satisfy
   a work acceptance gate.
+- Migration 14 adds the authority-local orchestration control tables for
+  assignments, monotonic attempts, fenced leases, opaque runtime/workspace
+  bindings, gate status, operator decisions, idempotent operations, and audit
+  events. Partial unique indexes enforce one active attempt per project/work
+  package and one active lease per attempt. These rows survive canonical
+  projection rebuilds but never create portable history. They store comparison
+  digests and logical IDs, not bearer tokens, credentials, raw prompts,
+  terminal output, provider sessions, or absolute workspace paths. See
+  [Orchestration control, fencing, and recovery](orchestration-control-recovery.md).
