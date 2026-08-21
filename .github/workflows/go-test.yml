@@ -45,3 +45,13 @@ jobs:
 
       - name: Run tests
         run: go test ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run portable record and API contract tests
+        run: go test ./internal/project ./internal/api -run "Contract|GoldenPortableRecords|LocalAdminAPIContract" -count=1
+
+      - name: Run focused race detector
+        if: runner.os == 'Linux'
+        run: go test -race ./internal/sync ./internal/transfer ./internal/filesystem

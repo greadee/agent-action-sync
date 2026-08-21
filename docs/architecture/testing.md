@@ -45,7 +45,12 @@ CI installs Go from `go.mod`, checks `gofmt` for `cmd` and `internal`, and runs:
 
 ```powershell
 go test ./...
+go vet ./...
+go test ./internal/project ./internal/api -run "Contract|GoldenPortableRecords|LocalAdminAPIContract" -count=1
 ```
+
+The Linux job also runs the focused race command documented below. The Windows
+job supplies the second supported-platform test and vet result.
 
 This keeps the test suite runnable even when a local workstation does not yet have Go installed.
 
@@ -80,6 +85,55 @@ targets, interrupted apply recovery, corrupt and unsupported records, deletion
 circuit breakers, migration retries, API draining, and mandatory exclusion of
 `.git`, `.env*`, `.secrets/**`, `.agent-project/local/**`, and partial files.
 Run the canonical `tools\test.ps1` suite and the focused race command above
-before release. A platform without a C compiler cannot execute Go's race
-detector and must rely on CI or another supported development host for that
+before release. A platform with `CGO_ENABLED=0` or without a C compiler cannot
+execute Go's race detector. That local limitation is not a passing result; use
+the Linux CI race step or another supported C-enabled development host for that
 part of the gate.
+
+## Context compiler release gate
+
+`internal/contextcompiler` pins a golden context digest and compares complete
+bundle bytes across reversed source enumeration and a cache replay. Focused
+tests cover work-package scope failure, trade filtering, secret and sensitive
+omissions, deterministic credential/absolute-path redaction, private keys,
+binary files, oversized and missing sources, symlinks where the host permits
+their creation, token-budget omissions, local-only caching, and propagation of
+the bundle digest into the authority artifact request's `context_version`.
+
+## Execution contract release gate
+
+`internal/executioncontract` tests byte-equivalent contract reproduction,
+least-privilege path overlap, forbidden-child precedence, traversal and scope
+escape, missing-layer and unknown-capability denial, exact secret allowlists,
+attempted privilege escalation, budget minima, task/work-package risk gates,
+worker-success gate bypass, deterministic cancellation/exhaustion decisions,
+and immutable predecessor-bound amendments. SQLite tests cover idempotent
+replay, same-version conflict, competing execution contract IDs, and stable
+version pagination. The full suite and architecture-boundary check must pass;
+production runtime adapters remain out of scope for this gate.
+
+## Runtime, node, workspace, and result-intake release gate
+
+Slice 6 focused suites cover normalized runtime transitions, action and prepare
+idempotency, resumability binding, capability and runtime/node drift,
+cancellation, deterministic completion, node definition hashing, stale health,
+capacity/tool/runtime intersection, lease ceilings and fencing, workspace root
+separation, dirty state, branch safety, collision, disk limits, symlinks where
+the host permits them, opaque responses, cleanup ownership, `.git` exclusion,
+strict envelope decoding, privacy-field rejection, exact authority/provenance
+bindings, forged results, replay/conflict behavior, and upload-only receipts
+that never grant canonical authority. The whole suite, vet, formatting, and
+import-boundary checks must pass. No test in this gate starts a real runtime or
+creates a Git worktree.
+
+## Orchestration setup release gate
+
+Run `tools\check_orchestration_setup_release.ps1` before declaring the setup
+sprint ready. It executes the full suite, vet, architecture boundaries, and
+short fuzz campaigns for portable record decoding, task-graph readiness,
+result envelopes, and scope matching. Recovery coverage proves canceled
+context compilation leaves no cache state, a reopened compiler reproduces its
+digest, and reopened SQLite result intake preserves only the exact replay
+decision. The gate documents a CGO-disabled race result as a skip; it must be
+completed on Linux CI or a C-enabled host. No release-gate test starts a real
+runtime, allocates a production workspace, or enables remote execution.
