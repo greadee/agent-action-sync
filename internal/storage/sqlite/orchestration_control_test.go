@@ -38,6 +38,10 @@ func newControlFixture(t *testing.T) *controlFixture {
 }
 
 func (fixture *controlFixture) plan(key string) storage.OrchestrationSnapshot {
+	return fixture.planWithReason(key, "")
+}
+
+func (fixture *controlFixture) planWithReason(key, assignmentReason string) storage.OrchestrationSnapshot {
 	fixture.t.Helper()
 	result, err := fixture.service.Plan(context.Background(), orchestration.PlanRequest{
 		AssignmentID: "assignment-" + key, AttemptID: "attempt-" + key + "-1", ProjectID: fixture.project,
@@ -45,12 +49,21 @@ func (fixture *controlFixture) plan(key string) storage.OrchestrationSnapshot {
 		ExecutionID: "execution-" + key, ContractID: "contract-" + key, ContractVersion: 1,
 		ContractDigest: controlDigest("contract-" + key), WorkerID: "worker-1", NodeID: "node-1",
 		IdempotencyDigest: controlDigest("plan-idempotency-" + key), OperationID: "operation-plan-" + key,
-		OperationDigest: controlDigest("operation-plan-" + key), AuditID: "audit-plan-" + key, ActorID: "scheduler",
+		OperationDigest: controlDigest("operation-plan-" + key), AuditID: "audit-plan-" + key, ActorID: "scheduler", AssignmentReason: assignmentReason,
 	})
 	if err != nil {
 		fixture.t.Fatalf("Plan(%s): %v", key, err)
 	}
 	return result.Snapshot
+}
+
+func TestOrchestrationPlanAuditsExplicitOperatorOverride(t *testing.T) {
+	fixture := newControlFixture(t)
+	fixture.planWithReason("override", "operator_override")
+	events, err := fixture.store.OrchestrationControl().ListOrchestrationAudit(context.Background(), "assignment-override")
+	if err != nil || len(events) != 1 || events[0].Action != "assign" || events[0].ReasonCode != "operator_override" {
+		t.Fatalf("override assignment audit = %#v, err=%v", events, err)
+	}
 }
 
 func (fixture *controlFixture) claimRequest(key, claimant string) orchestration.ClaimRequest {

@@ -150,3 +150,14 @@ canonical projection isolation. The restart matrix must explicitly return
 work. Run the full suite, vet, formatting, and architecture-boundary checks at
 the slice checkpoint. The race detector remains a required CI/C-enabled-host
 check when the local environment has `CGO_ENABLED=0`.
+
+## Deterministic dispatch-selection gate
+
+Phase 1 Slice 2 tests the ordered fact-only selector with reversed candidate
+input, exact authority/trade checks, tag mismatch, unavailable runtime,
+unhealthy node, denied permission, missing preflight gate evidence, risk,
+budget, concurrency, stable preference, and operator-override cases. The
+selection request intentionally has no telemetry input. SQLite tests also prove
+that a subsequent new assignment records `operator_override` as its audit
+reason. No selection test invokes a runtime, reserves a compute node, or
+allocates a workspace.

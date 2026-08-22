@@ -49,6 +49,7 @@ type PlanRequest struct {
 	OperationDigest   string
 	AuditID           string
 	ActorID           string
+	AssignmentReason  string
 }
 
 type ClaimRequest struct {
@@ -187,6 +188,10 @@ func (service ControlService) Plan(ctx context.Context, request PlanRequest) (st
 	if err := validatePlan(request); err != nil {
 		return storage.OrchestrationWriteResult{}, err
 	}
+	reason := request.AssignmentReason
+	if reason == "" {
+		reason = "planned"
+	}
 	assignment := storage.OrchestrationAssignment{
 		AssignmentID: request.AssignmentID, ProjectID: request.ProjectID, TaskID: request.TaskID, TaskRevision: request.TaskRevision,
 		GraphRevision: request.GraphRevision, WorkPackageID: request.WorkPackageID, ExecutionID: request.ExecutionID,
@@ -201,7 +206,7 @@ func (service ControlService) Plan(ctx context.Context, request PlanRequest) (st
 	}
 	return service.Store.PlanAssignment(ctx, storage.OrchestrationPlanRequest{
 		Assignment: assignment, Attempt: attempt, OperationID: request.OperationID, OperationDigest: request.OperationDigest,
-		Audit: audit(request.AuditID, request.AssignmentID, request.AttemptID, "assign", "", storage.AssignmentPlanned, "planned", request.ActorID, 0, now),
+		Audit: audit(request.AuditID, request.AssignmentID, request.AttemptID, "assign", "", storage.AssignmentPlanned, reason, request.ActorID, 0, now),
 	})
 }
 
@@ -416,7 +421,7 @@ func (service ControlService) leaseDuration() (time.Duration, error) {
 func validatePlan(request PlanRequest) error {
 	if request.TaskRevision < 1 || request.GraphRevision < 1 || request.ContractVersion < 1 ||
 		!validIDs(request.AssignmentID, request.AttemptID, request.ProjectID, request.TaskID, request.WorkPackageID, request.ExecutionID, request.ContractID, request.WorkerID, request.NodeID, request.OperationID, request.AuditID, request.ActorID) ||
-		!validDigests(request.ContractDigest, request.IdempotencyDigest, request.OperationDigest) {
+		!validDigests(request.ContractDigest, request.IdempotencyDigest, request.OperationDigest) || (request.AssignmentReason != "" && !validID(request.AssignmentReason)) {
 		return ErrInvalidControl
 	}
 	return nil
