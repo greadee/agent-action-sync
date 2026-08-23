@@ -1,7 +1,8 @@
 # Supervised Codex Runtime Adapter
 
 - Status: implemented for Phase 1 Slice 5
-- Release boundary: opt-in library component; not yet composed into the daemon
+- Release boundary: opt-in library component; scheduler-capable daemon seam
+  exists, but shipped CLI/config composition remains disabled
 
 ## Boundary
 
@@ -10,9 +11,10 @@
 per runtime session. Construction requires `Enabled: true`, exact versioned
 runtime/provider/model/node bindings, absolute authority-local paths, a bounded
 concurrency limit, and a resolver that revalidates the opaque workspace against
-the exact attempt, lease generation, and fencing digest. The daemon does not
-construct this adapter yet, so deterministic fakes remain the only composed
-runtime path until the scheduler and explicit local configuration land.
+the exact attempt, lease generation, and fencing digest. The daemon has an
+explicit scheduler lifecycle seam, but the shipped command does not construct
+this adapter; deterministic fakes remain the default validation path until
+explicit local configuration lands.
 
 The invocation uses the documented [`codex exec` non-interactive
 surface](https://learn.chatgpt.com/docs/non-interactive-mode) with JSONL events,

@@ -50,6 +50,13 @@ type Options struct {
 	AdminCredentialRandom   io.Reader
 	ListenLocalAPI          func(network, address string) (net.Listener, error)
 	RequestProjectIngestion func(context.Context, core.ShareID, string) error
+	OrchestrationScheduler  OrchestrationScheduler
+	OrchestrationDrain      time.Duration
+}
+
+type OrchestrationScheduler interface {
+	Start(context.Context) error
+	Shutdown(context.Context) error
 }
 
 type Daemon struct {
@@ -77,6 +84,8 @@ type Daemon struct {
 	startedAt               time.Time
 	localAPI                *localAPIState
 	requestProjectIngestion func(context.Context, core.ShareID, string) error
+	orchestrationScheduler  OrchestrationScheduler
+	orchestrationDrain      time.Duration
 }
 
 type shareRuntime struct {
@@ -112,6 +121,9 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 	}
 	if options.RecentScanLimit <= 0 {
 		options.RecentScanLimit = 32
+	}
+	if options.OrchestrationDrain <= 0 {
+		options.OrchestrationDrain = 30 * time.Second
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
@@ -207,6 +219,8 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 		jobRetryBase:            options.JobRetryBase,
 		jobMaxBackoff:           options.JobMaxBackoff,
 		requestProjectIngestion: options.RequestProjectIngestion,
+		orchestrationScheduler:  options.OrchestrationScheduler,
+		orchestrationDrain:      options.OrchestrationDrain,
 		startedAt:               options.Now().UTC(),
 	}, nil
 }
@@ -316,20 +330,31 @@ func (daemon *Daemon) Close() error {
 		daemon.mu.Unlock()
 
 		apiErr := daemon.shutdownLocalAPI()
+		var orchestrationErr error
+		if daemon.orchestrationScheduler != nil {
+			drainCtx, drainCancel := context.WithTimeout(context.Background(), daemon.orchestrationDrain)
+			orchestrationErr = daemon.orchestrationScheduler.Shutdown(drainCtx)
+			drainCancel()
+		}
 		if cancel != nil {
 			cancel()
 		}
 		daemon.runtimeWG.Wait()
 		if daemon.Store != nil {
-			daemon.closeErr = errors.Join(apiErr, daemon.Store.Close())
+			daemon.closeErr = errors.Join(apiErr, orchestrationErr, daemon.Store.Close())
 		} else {
-			daemon.closeErr = apiErr
+			daemon.closeErr = errors.Join(apiErr, orchestrationErr)
 		}
 	})
 	return daemon.closeErr
 }
 
 func (daemon *Daemon) startRuntimes(ctx context.Context) error {
+	if daemon.orchestrationScheduler != nil {
+		if err := daemon.orchestrationScheduler.Start(ctx); err != nil {
+			return fmt.Errorf("start orchestration scheduler: %w", err)
+		}
+	}
 	for shareID, runtime := range daemon.runtimes {
 		outcomes, err := runtime.runtime.Run(ctx)
 		if err != nil {

@@ -27,8 +27,11 @@ The initial agent is split into these domains:
 - `internal/projector`: deterministic ingestion from canonical project records into rebuildable storage projections.
 - `internal/workhistory`: typed, idempotent authority-side creation of canonical work records.
 - `internal/insights`: versioned descriptive calculations over accepted projected history.
-- `internal/orchestration`, `internal/registry`, `internal/contextcompiler`, and `internal/executioncontract`: deterministic setup-only task readiness, registry, context, and least-privilege contract logic.
+- `internal/orchestration`, `internal/registry`, `internal/contextcompiler`, and `internal/executioncontract`: deterministic task readiness, registry, context, least-privilege contract, and authority-local control logic.
 - `internal/runtimecontract`, `internal/codexruntime`, `internal/computenode`, `internal/workspace`, and `internal/resultintake`: provider-neutral interfaces, an opt-in supervised Codex CLI adapter, and untrusted-result validation; the shipped daemon keeps execution and workspace allocation disabled.
+- `internal/scheduler`: opt-in daemon-owned DAG dispatch, bounded parallelism,
+  lease/workspace/runtime composition, and recovery inspection; it stops at
+  untrusted result collection and cannot publish canonical project history.
 - `internal/api`: authenticated loopback administration contracts and handlers.
 - `internal/daemon`: application composition, lifecycle, local API ownership, share runtimes, and shutdown ordering.
 - `cmd/syncgate`: foreground daemon and local operator commands.
@@ -44,6 +47,10 @@ flowchart TD
     CLI["Local CLI / API client"] --> Daemon["Daemon / application composition"]
     Daemon --> API["Loopback administration API"]
     Daemon --> Projector["Projector / work history / insights"]
+    Daemon --> Scheduler["bounded DAG scheduler"]
+    Scheduler --> Project["portable project contracts"]
+    Scheduler --> Storage
+    Scheduler --> Runtime["runtime / node / workspace interfaces"]
     Projector --> Project["Portable project contracts"]
     Projector --> Storage
     Daemon --> Agent["Transfer and sync application services"]

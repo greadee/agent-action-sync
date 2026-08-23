@@ -121,5 +121,6 @@ not run intake or grant project-history publication rights.
 - `project` and `sync` do not import or invoke these packages.
 - The supervised Codex adapter passes its isolated capability, credential,
   cancellation, workspace-containment, restart, privacy, and result-conformance
-  tests, but it may not be composed until explicit local enablement and the
-  Phase 1 scheduler lifecycle are implemented.
+  tests. The Phase 1 scheduler lifecycle now provides an explicit daemon seam,
+  but shipped CLI/config composition remains disabled until the local
+  enablement and operator controls land.

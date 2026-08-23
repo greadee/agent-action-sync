@@ -17,7 +17,7 @@ func TestExecutionPackagesDoNotBridgeSyncOrPortableAuthority(t *testing.T) {
 		t.Fatal("cannot resolve architecture test path")
 	}
 	internalRoot := filepath.Dir(filepath.Dir(currentFile))
-	executionPackages := []string{"runtimecontract", "codexruntime", "computenode", "workspace", "resultintake"}
+	executionPackages := []string{"runtimecontract", "codexruntime", "computenode", "workspace", "resultintake", "scheduler"}
 	for _, name := range executionPackages {
 		imports := packageImports(t, filepath.Join(internalRoot, name))
 		for _, forbidden := range []string{"syncgate/internal/sync", "syncgate/internal/transport", "syncgate/internal/transport/tcp"} {

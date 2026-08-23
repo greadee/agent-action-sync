@@ -661,6 +661,73 @@ func waitForDaemon(t *testing.T, done <-chan error) error {
 	}
 }
 
+func TestDaemonDrainsOrchestrationBeforeStorageClose(t *testing.T) {
+	events := &orderedEvents{}
+	scheduler := &orderedOrchestrationScheduler{events: events}
+	store := &orderedCloseStore{events: events}
+	daemon := &Daemon{Store: store, orchestrationScheduler: scheduler, orchestrationDrain: time.Second}
+	if err := scheduler.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := daemon.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := events.values(); !equalStrings(got, []string{"scheduler_start", "scheduler_shutdown", "store_close"}) {
+		t.Fatalf("shutdown order = %v", got)
+	}
+}
+
+type orderedEvents struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (events *orderedEvents) add(value string) {
+	events.mu.Lock()
+	defer events.mu.Unlock()
+	events.events = append(events.events, value)
+}
+
+func (events *orderedEvents) values() []string {
+	events.mu.Lock()
+	defer events.mu.Unlock()
+	return append([]string(nil), events.events...)
+}
+
+type orderedOrchestrationScheduler struct{ events *orderedEvents }
+
+func (scheduler *orderedOrchestrationScheduler) Start(context.Context) error {
+	scheduler.events.add("scheduler_start")
+	return nil
+}
+
+func (scheduler *orderedOrchestrationScheduler) Shutdown(context.Context) error {
+	scheduler.events.add("scheduler_shutdown")
+	return nil
+}
+
+type orderedCloseStore struct {
+	storage.Store
+	events *orderedEvents
+}
+
+func (store *orderedCloseStore) Close() error {
+	store.events.add("store_close")
+	return nil
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func waitForDiagnostic(t *testing.T, daemon *Daemon, match func(syncengine.ScanDiagnostic) bool) syncengine.ScanDiagnostic {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)

@@ -192,4 +192,19 @@ Fixtures cover success, duplicate completion, malformed and forged output,
 refusal, rate limit, timeout, disconnect, budget exhaustion, cancellation, and
 restart uncertainty. Tests inspect durable state, arguments, and environment to
 prove prompts, context, credentials, provider sessions, and local paths are not
-retained. The adapter remains absent from daemon composition.
+retained. The shipped command still does not compose the adapter.
+
+## DAG scheduler and bounded-execution gate
+
+Phase 1 Slice 6 composes only deterministic fakes. Tests prove two independent
+DAG nodes run concurrently while a dependent node waits through runtime
+success and `collecting`; only canonical approved review and acceptance events
+unlock it. Coverage fixes priority/stable-ID order, lower-priority progress,
+the two-worker and provider-lease ceilings, current node observations, lease
+renewal, concurrent duplicate-cycle serialization, runtime-unavailable and
+budget block codes, pause/resume, idempotent cancellation, restart inspection
+without uncertain replay, compute-lease release, and workspace preservation.
+Daemon coverage proves orchestration shutdown completes before storage close.
+Architecture checks prevent the scheduler from importing canonical history,
+result intake, projection, sync, or transport packages. Run the focused suite
+with the race detector on CI or a C-enabled host.

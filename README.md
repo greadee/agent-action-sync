@@ -33,7 +33,7 @@ The current implementation provides:
 - Persistent synchronization jobs, retries, watcher reconciliation, scheduler safety, and per-share diagnostics.
 - A foreground daemon with production Windows credential storage, explicit pairing and revocation, and paired mutual-TLS transport.
 - An authenticated, loopback-only administration API with bounded inventory, job control, pairing, project migration, history, artifact, insight, rejection, and rebuild operations.
-- Single-authority Agent Project manifests, immutable task DAG/work-package and execution history, deterministic readiness and context compilation, local trade/worker registry, immutable execution contracts, provider-neutral runtime/node/workspace contracts with deterministic fakes, authority-owned untrusted result intake, handoffs, artifacts, SQLite projection/rebuild, and descriptive insights.
+- Single-authority Agent Project manifests, immutable task DAG/work-package and execution history, deterministic readiness and context compilation, local trade/worker registry, immutable execution contracts, provider-neutral runtime/node/workspace contracts, an opt-in bounded DAG scheduler with deterministic fakes, authority-owned untrusted result intake, handoffs, artifacts, SQLite projection/rebuild, and descriptive insights.
 - Integration, fuzz, and package-level tests for the transfer and synchronization paths.
 
 ## MVP Boundary
@@ -51,7 +51,7 @@ The current MVP boundary is local, owner-controlled transfer and one-way synchro
 - Receiver-authoritative writes with temporary files, verification, and atomic commit.
 - Explicit one-way change permissions and guarded deletions.
 
-Later phases add orchestration setup and supervised execution, LAN discovery,
+Later phases add the remaining supervised-execution controls, LAN discovery,
 browser portal access, coordinator/relay services, direct remote connectivity,
 and separately designed multi-writer synchronization. File sync does not start
 agent runtimes or provide arbitrary remote shell access.
@@ -104,6 +104,7 @@ Useful docs:
 - [Context, contract, and attempt binding](docs/architecture/context-contract-attempt-binding.md)
 - [Safe Git worktree provisioning](docs/architecture/safe-git-worktree-provisioning.md)
 - [Supervised Codex runtime adapter](docs/architecture/supervised-codex-runtime-adapter.md)
+- [DAG scheduler and bounded execution](docs/architecture/dag-scheduler-bounded-execution.md)
 - [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)
