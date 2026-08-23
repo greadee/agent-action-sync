@@ -50,6 +50,7 @@ type PlanRequest struct {
 	AuditID           string
 	ActorID           string
 	AssignmentReason  string
+	Binding           storage.OrchestrationAttemptBinding
 }
 
 type ClaimRequest struct {
@@ -205,7 +206,7 @@ func (service ControlService) Plan(ctx context.Context, request PlanRequest) (st
 		RecoveryDisposition: storage.RecoveryNone, CreatedAt: now, UpdatedAt: now,
 	}
 	return service.Store.PlanAssignment(ctx, storage.OrchestrationPlanRequest{
-		Assignment: assignment, Attempt: attempt, OperationID: request.OperationID, OperationDigest: request.OperationDigest,
+		Assignment: assignment, Attempt: attempt, Binding: request.Binding, OperationID: request.OperationID, OperationDigest: request.OperationDigest,
 		Audit: audit(request.AuditID, request.AssignmentID, request.AttemptID, "assign", "", storage.AssignmentPlanned, reason, request.ActorID, 0, now),
 	})
 }
@@ -421,10 +422,16 @@ func (service ControlService) leaseDuration() (time.Duration, error) {
 func validatePlan(request PlanRequest) error {
 	if request.TaskRevision < 1 || request.GraphRevision < 1 || request.ContractVersion < 1 ||
 		!validIDs(request.AssignmentID, request.AttemptID, request.ProjectID, request.TaskID, request.WorkPackageID, request.ExecutionID, request.ContractID, request.WorkerID, request.NodeID, request.OperationID, request.AuditID, request.ActorID) ||
-		!validDigests(request.ContractDigest, request.IdempotencyDigest, request.OperationDigest) || (request.AssignmentReason != "" && !validID(request.AssignmentReason)) {
+		!validDigests(request.ContractDigest, request.IdempotencyDigest, request.OperationDigest) || (request.AssignmentReason != "" && !validID(request.AssignmentReason)) ||
+		!validAttemptBinding(request.Binding, request.AttemptID, request.ContractID, request.ContractVersion, request.ContractDigest) {
 		return ErrInvalidControl
 	}
 	return nil
+}
+
+func validAttemptBinding(binding storage.OrchestrationAttemptBinding, attemptID, contractID string, contractVersion int64, contractDigest string) bool {
+	return binding.AttemptID == attemptID && binding.ContractID == contractID && binding.ContractVersion == contractVersion && binding.ContractDigest == contractDigest &&
+		validDigest(binding.ContextDigest) && validID(binding.ContextCompilerVersion) && validDigest(binding.BindingDigest) && len(binding.BindingJSON) > 0 && len(binding.BindingJSON) <= storage.MaxProjectProjectionPayloadBytes && !binding.CreatedAt.IsZero()
 }
 
 func audit(id, assignmentID, attemptID, action string, from, to storage.AssignmentState, reason, actor string, generation int64, at time.Time) storage.OrchestrationAuditEvent {

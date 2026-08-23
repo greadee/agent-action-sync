@@ -189,3 +189,20 @@ func TestOrchestrationControlMigrationSeparatesFencedLocalStateFromCanonicalHist
 		}
 	}
 }
+
+func TestOrchestrationAttemptBindingMigrationStoresOnlyBoundedAuthorityMetadata(t *testing.T) {
+	sql := strings.ToLower(Migrations[14].SQL)
+	if !strings.Contains(sql, "create table if not exists orchestration_attempt_bindings") {
+		t.Fatal("attempt binding migration is missing the binding table")
+	}
+	for _, required := range []string{"attempt_id text primary key", "contract_id", "contract_version", "contract_digest", "context_digest", "context_compiler_version", "binding_digest", "binding_json"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("attempt binding migration is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"credential", "access_token", "provider_session", "terminal_output", "raw_prompt", "secret_value", "absolute_path"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("attempt binding migration contains forbidden field %q", forbidden)
+		}
+	}
+}

@@ -50,6 +50,7 @@ func (fixture *controlFixture) planWithReason(key, assignmentReason string) stor
 		ContractDigest: controlDigest("contract-" + key), WorkerID: "worker-1", NodeID: "node-1",
 		IdempotencyDigest: controlDigest("plan-idempotency-" + key), OperationID: "operation-plan-" + key,
 		OperationDigest: controlDigest("operation-plan-" + key), AuditID: "audit-plan-" + key, ActorID: "scheduler", AssignmentReason: assignmentReason,
+		Binding: testAttemptBinding("attempt-"+key+"-1", "contract-"+key, 1, controlDigest("contract-"+key), fixture.now),
 	})
 	if err != nil {
 		fixture.t.Fatalf("Plan(%s): %v", key, err)
@@ -291,6 +292,7 @@ func TestOrchestrationRestartClassifiesRecoveryWithoutReplayingRuntimeWork(t *te
 			ContractID: "contract-" + key, ContractVersion: 1, ContractDigest: controlDigest("contract-" + key),
 			WorkerID: "worker-1", NodeID: "node-1", IdempotencyDigest: controlDigest("plan-" + key),
 			OperationID: "operation-plan-" + key, OperationDigest: controlDigest("operation-plan-" + key), AuditID: "audit-plan-" + key, ActorID: "scheduler",
+			Binding: testAttemptBinding("attempt-"+key+"-1", "contract-"+key, 1, controlDigest("contract-"+key), now),
 		})
 		if err != nil {
 			t.Fatalf("plan %s: %v", key, err)
@@ -458,4 +460,8 @@ func TestOrchestrationTimeoutRetryAndCanonicalProjectionIsolation(t *testing.T) 
 func controlDigest(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func testAttemptBinding(attemptID, contractID string, version int64, contractDigest string, createdAt time.Time) storage.OrchestrationAttemptBinding {
+	return storage.OrchestrationAttemptBinding{AttemptID: attemptID, ContractID: contractID, ContractVersion: version, ContractDigest: contractDigest, ContextDigest: controlDigest("context-" + attemptID), ContextCompilerVersion: "context-compiler:v1", BindingDigest: controlDigest("binding-" + attemptID), BindingJSON: []byte(`{"schema":"syncgate.attempt-binding.v1"}`), CreatedAt: createdAt}
 }

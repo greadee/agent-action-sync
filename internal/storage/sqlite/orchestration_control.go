@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -47,6 +48,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		return storage.OrchestrationWriteResult{AlreadyPresent: true, Snapshot: existing}, nil
 	}
 	if err := insertOrchestrationAttempt(ctx, tx, request.Attempt); err != nil {
+		return result, err
+	}
+	if err := insertOrchestrationAttemptBinding(ctx, tx, request.Binding); err != nil {
 		return result, err
 	}
 	if err := recordOrchestrationOperation(ctx, tx, request.OperationID, request.OperationDigest, a.AssignmentID, request.Attempt.AttemptID, a.State, a.CreatedAt); err != nil {
@@ -484,6 +488,15 @@ failure_code, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 	return nil
 }
 
+func insertOrchestrationAttemptBinding(ctx context.Context, tx *sql.Tx, binding storage.OrchestrationAttemptBinding) error {
+	if !validOrchestrationAttemptBinding(binding) {
+		return fmt.Errorf("%w: invalid orchestration attempt binding", storage.ErrConflict)
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO orchestration_attempt_bindings(attempt_id, contract_id, contract_version, contract_digest, context_digest, context_compiler_version, binding_digest, binding_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		binding.AttemptID, binding.ContractID, binding.ContractVersion, binding.ContractDigest, binding.ContextDigest, binding.ContextCompilerVersion, binding.BindingDigest, binding.BindingJSON, formatTime(binding.CreatedAt))
+	return err
+}
+
 func updateAttemptState(ctx context.Context, tx *sql.Tx, assignmentID, attemptID string, expected, target storage.AssignmentState, generation int64, failure string, recovery storage.RecoveryDisposition, updatedAt time.Time) error {
 	result, err := tx.ExecContext(ctx, `UPDATE orchestration_attempts SET state = ?, lease_generation = ?, failure_code = ?, recovery_disposition = ?, updated_at = ? WHERE attempt_id = ? AND assignment_id = ? AND state = ?`,
 		target, generation, nullableString(failure), recovery, formatTime(updatedAt), attemptID, assignmentID, expected)
@@ -604,6 +617,16 @@ func orchestrationSnapshot(ctx context.Context, query orchestrationQuerier, assi
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return snapshot, err
 	}
+	var binding storage.OrchestrationAttemptBinding
+	var bindingCreated string
+	err = query.QueryRowContext(ctx, `SELECT attempt_id, contract_id, contract_version, contract_digest, context_digest, context_compiler_version, binding_digest, binding_json, created_at FROM orchestration_attempt_bindings WHERE attempt_id = ?`, snapshot.Attempt.AttemptID).Scan(
+		&binding.AttemptID, &binding.ContractID, &binding.ContractVersion, &binding.ContractDigest, &binding.ContextDigest, &binding.ContextCompilerVersion, &binding.BindingDigest, &binding.BindingJSON, &bindingCreated)
+	if err == nil {
+		binding.CreatedAt = parseStoredTime(bindingCreated)
+		snapshot.Binding = &binding
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return snapshot, err
+	}
 	var resources storage.OrchestrationResourceBinding
 	var updated string
 	err = query.QueryRowContext(ctx, `SELECT attempt_id, lease_generation, runtime_session_id, runtime_resume_key_digest, runtime_state, workspace_id, workspace_generation, workspace_state, updated_at FROM orchestration_resource_bindings WHERE attempt_id = ?`, snapshot.Attempt.AttemptID).Scan(
@@ -692,4 +715,8 @@ func recoveryDisposition(state storage.AssignmentState, hasResources bool) stora
 func recoveryAuditID(action, assignmentID, attemptID string, at time.Time) string {
 	sum := sha256.Sum256([]byte(action + "\x00" + assignmentID + "\x00" + attemptID + "\x00" + at.UTC().Format(time.RFC3339Nano)))
 	return "audit:" + action + ":" + hex.EncodeToString(sum[:16])
+}
+
+func validOrchestrationAttemptBinding(binding storage.OrchestrationAttemptBinding) bool {
+	return binding.AttemptID != "" && binding.ContractID != "" && binding.ContractVersion > 0 && validProjectionHash(binding.ContractDigest) && validProjectionHash(binding.ContextDigest) && binding.ContextCompilerVersion != "" && validProjectionHash(binding.BindingDigest) && len(binding.BindingJSON) > 0 && len(binding.BindingJSON) <= storage.MaxProjectProjectionPayloadBytes && json.Valid(binding.BindingJSON) && binding.CreatedAt.IsZero() == false
 }

@@ -161,3 +161,12 @@ selection request intentionally has no telemetry input. SQLite tests also prove
 that a subsequent new assignment records `operator_override` as its audit
 reason. No selection test invokes a runtime, reserves a compute node, or
 allocates a workspace.
+
+## Context-contract attempt-binding gate
+
+Phase 1 Slice 3 tests deterministic context compilation and contract creation
+before a planned assignment is persisted, digest-only binding recovery after a
+SQLite reopen, same-input replay, and rejection of changed source, policy,
+worker, or instruction inputs under the existing immutable authority. The
+tests prove secret source contents are absent from both the compiled bundle and
+the persisted binding. No test claims a lease or starts a runtime.

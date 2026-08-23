@@ -314,3 +314,10 @@ CREATE TABLE project_projection_rejections (
   digests and logical IDs, not bearer tokens, credentials, raw prompts,
   terminal output, provider sessions, or absolute workspace paths. See
   [Orchestration control, fencing, and recovery](orchestration-control-recovery.md).
+- Migration 15 adds `orchestration_attempt_bindings`, keyed one-to-one by
+  attempt, to preserve the immutable execution-contract and compiled-context
+  authority that was present before preparation. Its bounded binding envelope
+  records only digests, logical references, effective policy, and compiler
+  notices; it has no source contents, raw prompt, secret, credential,
+  terminal-output, provider-session, or absolute-path column. See
+  [Context, contract, and attempt binding](context-contract-attempt-binding.md).

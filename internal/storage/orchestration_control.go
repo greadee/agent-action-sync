@@ -116,6 +116,22 @@ type OrchestrationResourceBinding struct {
 	UpdatedAt           time.Time
 }
 
+// OrchestrationAttemptBinding records the immutable contract and compiled
+// context provenance that authorized this attempt. BindingJSON is a bounded
+// canonical metadata envelope containing IDs, digests, policies, and notices;
+// it never contains the context body, credentials, or local paths.
+type OrchestrationAttemptBinding struct {
+	AttemptID              string
+	ContractID             string
+	ContractVersion        int64
+	ContractDigest         string
+	ContextDigest          string
+	ContextCompilerVersion string
+	BindingDigest          string
+	BindingJSON            []byte
+	CreatedAt              time.Time
+}
+
 type OrchestrationGateStatus struct {
 	AssignmentID string
 	AttemptID    string
@@ -157,6 +173,7 @@ type OrchestrationSnapshot struct {
 	Attempt    OrchestrationAttempt
 	Lease      *OrchestrationLease
 	Resources  *OrchestrationResourceBinding
+	Binding    *OrchestrationAttemptBinding
 	Gates      []OrchestrationGateStatus
 	Decisions  []OrchestrationOperatorDecision
 }
@@ -169,6 +186,7 @@ type OrchestrationWriteResult struct {
 type OrchestrationPlanRequest struct {
 	Assignment      OrchestrationAssignment
 	Attempt         OrchestrationAttempt
+	Binding         OrchestrationAttemptBinding
 	OperationID     string
 	OperationDigest string
 	Audit           OrchestrationAuditEvent

@@ -714,6 +714,25 @@ CREATE INDEX IF NOT EXISTS orchestration_audit_assignment_idx
     ON orchestration_audit_events(assignment_id, occurred_at, audit_id);
 `),
 	},
+	{
+		Version: 15,
+		Name:    "orchestration attempt contract bindings",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS orchestration_attempt_bindings (
+    attempt_id TEXT PRIMARY KEY REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    contract_id TEXT NOT NULL,
+    contract_version INTEGER NOT NULL CHECK (contract_version > 0),
+    contract_digest TEXT NOT NULL,
+    context_digest TEXT NOT NULL,
+    context_compiler_version TEXT NOT NULL,
+    binding_digest TEXT NOT NULL UNIQUE,
+    binding_json BLOB NOT NULL CHECK (length(binding_json) > 0 AND length(binding_json) <= 1048576),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS orchestration_attempt_binding_contract_idx
+    ON orchestration_attempt_bindings(contract_id, contract_version, attempt_id);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

@@ -37,6 +37,7 @@ substitute for the individual decision records.
 | --- | --- | --- |
 | [Supervised single-node pilot state machine](phase-6-supervised-single-node-pilot.md) | Authority-local assignment states, fencing, failure taxonomy, recovery, and operator confirmation points | Accepted in Phase 1 Slice 0; [durable reducer, leases, and recovery](../architecture/orchestration-control-recovery.md) implemented in Slice 1 |
 | [Deterministic dispatch selection](../architecture/deterministic-dispatch-selection.md) | Ordered worker/node eligibility, stable preferences, closed explanations, and explicit override audit material | Implemented in Phase 1 Slice 2 |
+| [Context, contract, and attempt binding](../architecture/context-contract-attempt-binding.md) | Immutable compiled context and execution authority bound to a planned attempt before a lease or runtime action | Implemented in Phase 1 Slice 3 |
 
 Multi-writer project history, automatic conflict merging, learned routing,
 embeddings, generated retrospectives, predictions, raw transcript capture, and
