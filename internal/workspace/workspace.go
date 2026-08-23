@@ -1,6 +1,4 @@
-// Package workspace defines safe, opaque workspace allocation contracts. It
-// performs read-only local preflight and provides a deterministic fake; it does
-// not create Git worktrees or enable production execution.
+// Package workspace defines safe, opaque workspace allocation contracts.
 package workspace
 
 import (
@@ -29,22 +27,28 @@ var (
 	ErrDiskLimit        = errors.New("workspace disk limit unavailable")
 	ErrOwnership        = errors.New("workspace cleanup ownership mismatch")
 	ErrWorkspaceMissing = errors.New("workspace not found")
+	ErrBaseCommit       = errors.New("workspace base commit is not allowed")
+	ErrCleanupRequired  = errors.New("workspace requires operator cleanup")
+	ErrChangeLimit      = errors.New("workspace change manifest exceeds limits")
 )
 
 type State string
 
 const (
-	StateAllocated State = "allocated"
-	StateReleased  State = "released"
+	StateAllocated   State = "allocated"
+	StateQuarantined State = "quarantined"
+	StateReleased    State = "released"
 )
 
 type PreflightRequest struct {
 	WorkspaceID          string
 	OwnerID              string
+	AttemptID            string
 	ProjectSyncRoot      string
 	RepositoryRoot       string
 	WorktreeBase         string
 	BranchName           string
+	BaseCommit           string
 	BranchExists         bool
 	RepositoryDirty      bool
 	RequiredDiskBytes    int64
@@ -60,11 +64,13 @@ type PreflightReport struct {
 }
 
 type Workspace struct {
-	WorkspaceID string
-	OwnerID     string
-	BranchName  string
-	Generation  int64
-	State       State
+	WorkspaceID string `json:"workspace_id"`
+	OwnerID     string `json:"owner_id"`
+	BranchName  string `json:"branch_name"`
+	Generation  int64  `json:"generation"`
+	State       State  `json:"state"`
+	BaseCommit  string `json:"base_commit,omitempty"`
+	HeadCommit  string `json:"head_commit,omitempty"`
 }
 
 type CleanupClaim struct {
@@ -107,6 +113,14 @@ func Preflight(request PreflightRequest) (PreflightReport, error) {
 	}
 	if !inside(repositoryRoot, projectRoot) || inside(worktreeBase, projectRoot) || inside(projectRoot, worktreeBase) || inside(worktreeBase, repositoryRoot) || inside(repositoryRoot, worktreeBase) {
 		return PreflightReport{}, ErrUnsafeRoot
+	}
+	for current := filepath.Dir(repositoryRoot); inside(current, projectRoot); current = filepath.Dir(current) {
+		if _, err := os.Lstat(filepath.Join(current, ".git")); err == nil {
+			return PreflightReport{}, ErrUnsafeRoot
+		}
+		if current == projectRoot || filepath.Dir(current) == current {
+			break
+		}
 	}
 	gitMetadata := filepath.Join(repositoryRoot, ".git")
 	gitInfo, err := os.Lstat(gitMetadata)
@@ -196,7 +210,7 @@ func (fake *DeterministicFake) Allocate(ctx context.Context, request PreflightRe
 	if existing, ok := fake.workspaces[request.WorkspaceID]; ok && existing.State != StateReleased {
 		return Workspace{}, ErrCollision
 	}
-	workspace := Workspace{WorkspaceID: request.WorkspaceID, OwnerID: request.OwnerID, BranchName: request.BranchName, Generation: 1, State: StateAllocated}
+	workspace := Workspace{WorkspaceID: request.WorkspaceID, OwnerID: request.OwnerID, BranchName: request.BranchName, Generation: 1, State: StateAllocated, BaseCommit: request.BaseCommit, HeadCommit: request.BaseCommit}
 	fake.workspaces[workspace.WorkspaceID] = workspace
 	fake.replays[request.IdempotencyKeyDigest] = allocationReplay{fingerprint: fingerprint, workspace: workspace}
 	return workspace, nil
@@ -286,7 +300,7 @@ func workspaceDirectoryKey(workspaceID string) string {
 }
 
 func allocationFingerprint(request PreflightRequest) string {
-	values := []string{request.WorkspaceID, request.OwnerID, filepath.Clean(request.ProjectSyncRoot), filepath.Clean(request.RepositoryRoot), filepath.Clean(request.WorktreeBase), request.BranchName, strconv.FormatBool(request.BranchExists), fmtInt(request.RequiredDiskBytes), fmtInt(request.AvailableDiskBytes)}
+	values := []string{request.WorkspaceID, request.OwnerID, request.AttemptID, filepath.Clean(request.ProjectSyncRoot), filepath.Clean(request.RepositoryRoot), filepath.Clean(request.WorktreeBase), request.BranchName, request.BaseCommit, fmtInt(request.RequiredDiskBytes), fmtInt(request.AvailableDiskBytes)}
 	return hash([]byte(strings.Join(values, "\x00")))
 }
 

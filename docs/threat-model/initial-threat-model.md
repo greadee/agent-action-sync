@@ -114,6 +114,9 @@
   resume, cancel, or accept agent execution.
 - Runtime, workspace, node, credential, lease, and absolute-path fields remain
   local even when their stable identity/version digests appear in provenance.
+- Git worktrees are created only outside synchronized content from allowlisted
+  base commits. Dirty or missing worktrees are quarantined for the operator;
+  cleanup is owner/generation fenced and never recursively forced.
 
 ## Orchestration setup release controls
 
@@ -142,8 +145,9 @@ control records; only deterministic derived state may be rebuilt.
   for malware, classify secrets, sandbox active content, or provide encryption
   at rest.
 - No production runtime adapter, remote command endpoint, distributed compute
-  node, or automatic worktree/merge path is enabled by the orchestration domain
-  decision. Deterministic fakes and contracts do not establish sandbox safety.
+  node, or automatic merge path is enabled. The local Git worktree adapter can
+  create an explicitly authorized isolated branch/worktree, but does not run
+  worker code or establish sandbox safety.
 - Authority-local orchestration registries, contracts, leases, and intake state
   are not reconstructible solely from portable project history. Their backup,
   migration, and corruption recovery require separate local operations.

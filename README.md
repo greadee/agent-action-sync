@@ -102,6 +102,7 @@ Useful docs:
 - [Orchestration control, fencing, and recovery](docs/architecture/orchestration-control-recovery.md)
 - [Deterministic dispatch selection](docs/architecture/deterministic-dispatch-selection.md)
 - [Context, contract, and attempt binding](docs/architecture/context-contract-attempt-binding.md)
+- [Safe Git worktree provisioning](docs/architecture/safe-git-worktree-provisioning.md)
 - [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)

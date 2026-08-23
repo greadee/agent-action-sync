@@ -2,11 +2,10 @@
 
 ## Status and release boundary
 
-Slice 6 defines provider-neutral contracts and deterministic fakes. It does not
-enable a production runtime adapter, provider session, shell process, remote
-node, Git worktree creation, automatic merge, or canonical result publication.
-The new packages exist so later scheduler work can be tested without granting
-execution authority to sync, transport, providers, or workers.
+Setup Slice 6 defined provider-neutral contracts and deterministic fakes.
+Phase 1 Slice 4 now adds an explicitly composed local Git worktree manager, but
+does not enable a production runtime adapter, provider session, shell process,
+remote node, automatic merge, or canonical result publication.
 
 ## Runtime lifecycle
 
@@ -62,8 +61,10 @@ allocation fake. Preflight rejects:
 The preflight result and workspace object contain only the opaque workspace ID,
 owner, branch, generation, state, and stable check codes. Absolute repository
 and worktree paths remain authority-local inputs and are never returned.
-Cleanup requires the exact assignment owner and generation. The fake does not
-create a directory or run Git; a production allocator remains disabled.
+Cleanup requires the exact assignment owner and generation. The deterministic
+fake remains available. The Phase 1 Git manager provisions only an external,
+pinned-base worktree and quarantines dirty or missing state; see
+[Safe Git worktree provisioning](safe-git-worktree-provisioning.md).
 
 Result-path validation applies the execution contract write scope again and
 always rejects `.git` and traversal paths. Portable project scanning continues
@@ -113,6 +114,6 @@ not run intake or grant project-history publication rights.
   contracts and storage interfaces where necessary.
 - They do not import `sync` or transport implementations.
 - `project` and `sync` do not import or invoke these packages.
-- No production adapter may be composed until its capability, credential,
+- No production runtime adapter may be composed until its capability, credential,
   cancellation, workspace-containment, orphan-process, privacy, and result
   conformance gates pass separately.

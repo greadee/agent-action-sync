@@ -170,3 +170,14 @@ SQLite reopen, same-input replay, and rejection of changed source, policy,
 worker, or instruction inputs under the existing immutable authority. The
 tests prove secret source contents are absent from both the compiled bundle and
 the persisted binding. No test claims a lease or starts a runtime.
+
+## Safe Git worktree provisioning gate
+
+Phase 1 Slice 4 uses disposable real Git repositories to prove pinned-base
+allocation, deterministic branch ownership, idempotent allocation, primary
+worktree preservation, restart inspection, committed change manifests,
+contract write-scope enforcement, branch collision, dirty-repository denial,
+pre-provision cancellation, dirty-worktree quarantine, clean explicit release,
+and stale-registry quarantine. Existing preflight tests cover nested roots,
+target collisions, unsafe branch names, low disk, and symlink roots. The adapter has no merge,
+reset, clean, force-delete, or primary checkout operation.
