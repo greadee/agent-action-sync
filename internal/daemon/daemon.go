@@ -34,24 +34,25 @@ var ErrClosed = errors.New("daemon is closed")
 var ErrAutomaticPeerWorkDisabled = errors.New("automatic peer job execution is disabled until trusted transport is configured")
 
 type Options struct {
-	OpenStore               func(string) (storage.Store, error)
-	IdentityStore           identity.PrivateKeyStore
-	NewIdentity             func() (identity.DeviceIdentity, error)
-	CheckShareRoot          func(string) error
-	WatcherFactory          syncengine.WatcherFactory
-	Now                     func() time.Time
-	TombstoneRetention      time.Duration
-	RecentScanLimit         int
-	JobExecutor             syncengine.OneWayJobExecutor
-	JobPollInterval         time.Duration
-	JobRetryBase            time.Duration
-	JobMaxBackoff           time.Duration
-	AdminCredentialStore    api.AdminCredentialStore
-	AdminCredentialRandom   io.Reader
-	ListenLocalAPI          func(network, address string) (net.Listener, error)
-	RequestProjectIngestion func(context.Context, core.ShareID, string) error
-	OrchestrationScheduler  OrchestrationScheduler
-	OrchestrationDrain      time.Duration
+	OpenStore                   func(string) (storage.Store, error)
+	IdentityStore               identity.PrivateKeyStore
+	NewIdentity                 func() (identity.DeviceIdentity, error)
+	CheckShareRoot              func(string) error
+	WatcherFactory              syncengine.WatcherFactory
+	Now                         func() time.Time
+	TombstoneRetention          time.Duration
+	RecentScanLimit             int
+	JobExecutor                 syncengine.OneWayJobExecutor
+	JobPollInterval             time.Duration
+	JobRetryBase                time.Duration
+	JobMaxBackoff               time.Duration
+	AdminCredentialStore        api.AdminCredentialStore
+	AdminCredentialRandom       io.Reader
+	ListenLocalAPI              func(network, address string) (net.Listener, error)
+	RequestProjectIngestion     func(context.Context, core.ShareID, string) error
+	OrchestrationScheduler      OrchestrationScheduler
+	OrchestrationDrain          time.Duration
+	OrchestrationAdministration api.OrchestrationAdministration
 }
 
 type OrchestrationScheduler interface {

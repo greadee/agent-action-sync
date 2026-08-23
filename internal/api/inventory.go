@@ -149,6 +149,15 @@ func NewAdminV1Handler(service AdministrationService) http.Handler {
 			handleInventoryAudit(writer, request, service)
 			return
 		}
+		if request.URL.Path == "/api/v1/orchestration/nodes" || strings.HasPrefix(request.URL.Path, "/api/v1/projects/") && (strings.Contains(request.URL.Path, "/assignments") || strings.Contains(request.URL.Path, "/dispatch/") || strings.Contains(request.URL.Path, "/scheduler/") || strings.HasSuffix(request.URL.Path, "/approve")) {
+			setup, ok := service.(*LocalAdministrationService)
+			if !ok {
+				writeError(writer, request, errUnavailable)
+			} else {
+				NewOrchestrationHandler(setup.orchestration).ServeHTTP(writer, request)
+			}
+			return
+		}
 		if request.URL.Path == "/api/v1/orchestration/trades" || request.URL.Path == "/api/v1/orchestration/workers" || request.URL.Path == "/api/v1/orchestration/capabilities" || strings.HasPrefix(request.URL.Path, "/api/v1/projects/") && (strings.Contains(request.URL.Path, "/tasks") || strings.Contains(request.URL.Path, "/context/") || strings.Contains(request.URL.Path, "/runtime/") || strings.Contains(request.URL.Path, "/execution-contracts/") || strings.HasSuffix(request.URL.Path, "/telemetry")) {
 			setup, ok := service.(*LocalAdministrationService)
 			if !ok {

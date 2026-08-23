@@ -46,3 +46,32 @@ The CLI exposes bounded read commands: `orchestration-tasks`,
 the typed authority-service requests: `orchestration-task-create`,
 `orchestration-task-validate`, `orchestration-context-preflight`,
 `orchestration-runtime-preflight`, and `orchestration-contract-preview`.
+
+## Operator control facade
+
+Slice 8 adds a separate daemon-owned `OrchestrationAdministration` facade. It
+keeps scheduler and assignment controls out of the HTTP and CLI layers, so the
+later supervised composition can attach durable control-store operations without
+granting either client process access to runtime sessions or workspaces.
+
+- `GET /api/v1/orchestration/nodes` and project-scoped assignment reads return
+  opaque identifiers, states, bounded attempts and gates, observed-budget
+  counters, and sanitized result summaries only.
+- Task approval, dispatch preview, scheduler start/disable, assignment controls
+  (`pause`, `resume`, `cancel`, `retry`, `reassign`), and integration decisions
+  require idempotency keys. An implementation returns its prior result for a
+  repeated operation and exposes stable conflicts rather than retrying blindly.
+- Scheduler disable is an explicit scheduling state change: it must not delete
+  worktrees, runtime history, operator decisions, or audit evidence.
+- The shipped daemon installs an unavailable facade until supervised composition
+  supplies the durable implementation. Routes therefore return `503` rather
+  than pretending that orchestration is active.
+
+Neither inputs nor outputs permit prompts, compiled context, credentials,
+absolute paths, process IDs, provider sessions, raw logs, artifact bytes, or
+quarantined material. CLI commands use the same typed client surface:
+`orchestration-task-approve`, `orchestration-dispatch-preview`,
+`orchestration-scheduler-start`, `orchestration-scheduler-disable`,
+`orchestration-nodes`, `orchestration-assignments`,
+`orchestration-assignment`, `orchestration-assignment-control`, and
+`orchestration-integration-decision`.

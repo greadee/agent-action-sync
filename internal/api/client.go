@@ -243,6 +243,74 @@ func (client *Client) ListSetupTelemetry(ctx context.Context, projectID, executi
 	return result, err
 }
 
+func (client *Client) ApproveTaskGraph(ctx context.Context, input TaskGraphApprovalInput) (TaskGraphApprovalResult, error) {
+	if err := input.Validate(); err != nil {
+		return TaskGraphApprovalResult{}, errors.New("task graph approval input is invalid")
+	}
+	var result TaskGraphApprovalResult
+	err := client.do(ctx, http.MethodPost, setupProjectPath(input.ProjectID, "tasks/"+url.PathEscape(input.TaskID)+"/approve"), input, &result)
+	return result, err
+}
+func (client *Client) PreviewDispatch(ctx context.Context, input DispatchPreviewInput) (DispatchPreviewResult, error) {
+	if err := input.Validate(); err != nil {
+		return DispatchPreviewResult{}, errors.New("dispatch preview input is invalid")
+	}
+	var result DispatchPreviewResult
+	err := client.do(ctx, http.MethodPost, setupProjectPath(input.ProjectID, "dispatch/preview"), input, &result)
+	return result, err
+}
+func (client *Client) StartOrchestrationScheduler(ctx context.Context, input SchedulerControlInput) (SchedulerStatus, error) {
+	return client.controlOrchestrationScheduler(ctx, "start", input)
+}
+func (client *Client) DisableOrchestrationScheduler(ctx context.Context, input SchedulerControlInput) (SchedulerStatus, error) {
+	return client.controlOrchestrationScheduler(ctx, "disable", input)
+}
+func (client *Client) controlOrchestrationScheduler(ctx context.Context, action string, input SchedulerControlInput) (SchedulerStatus, error) {
+	if err := input.Validate(); err != nil {
+		return SchedulerStatus{}, errors.New("scheduler control input is invalid")
+	}
+	var result SchedulerStatus
+	err := client.do(ctx, http.MethodPost, setupProjectPath(input.ProjectID, "scheduler/"+action), input, &result)
+	return result, err
+}
+func (client *Client) ListOrchestrationNodes(ctx context.Context, limit int) (NodePage, error) {
+	var result NodePage
+	err := client.do(ctx, http.MethodGet, collectionPath("/api/v1/orchestration/nodes", limit), nil, &result)
+	return result, err
+}
+func (client *Client) ListAssignments(ctx context.Context, projectID string, limit int) (AssignmentPage, error) {
+	if !validSetupID(projectID) {
+		return AssignmentPage{}, errors.New("project ID is invalid")
+	}
+	var result AssignmentPage
+	err := client.do(ctx, http.MethodGet, collectionPath(setupProjectPath(projectID, "assignments"), limit), nil, &result)
+	return result, err
+}
+func (client *Client) GetAssignment(ctx context.Context, projectID, assignmentID string) (AssignmentDetail, error) {
+	if !validSetupID(projectID) || !namespacedSetup(assignmentID, "assignment:") {
+		return AssignmentDetail{}, errors.New("assignment query is invalid")
+	}
+	var result AssignmentDetail
+	err := client.do(ctx, http.MethodGet, setupProjectPath(projectID, "assignments/"+url.PathEscape(assignmentID)), nil, &result)
+	return result, err
+}
+func (client *Client) ControlAssignment(ctx context.Context, input AssignmentControlInput) (AssignmentDetail, error) {
+	if err := input.Validate(); err != nil {
+		return AssignmentDetail{}, errors.New("assignment control input is invalid")
+	}
+	var result AssignmentDetail
+	err := client.do(ctx, http.MethodPost, setupProjectPath(input.ProjectID, "assignments/"+url.PathEscape(input.AssignmentID)+"/controls"), input, &result)
+	return result, err
+}
+func (client *Client) DecideIntegration(ctx context.Context, input IntegrationDecisionInput) (AssignmentDetail, error) {
+	if err := input.Validate(); err != nil {
+		return AssignmentDetail{}, errors.New("integration decision input is invalid")
+	}
+	var result AssignmentDetail
+	err := client.do(ctx, http.MethodPost, setupProjectPath(input.ProjectID, "assignments/"+url.PathEscape(input.AssignmentID)+"/integration"), input, &result)
+	return result, err
+}
+
 func setupProjectPath(projectID, suffix string) string {
 	return "/api/v1/projects/" + url.PathEscape(projectID) + "/" + suffix
 }

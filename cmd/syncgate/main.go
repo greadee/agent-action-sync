@@ -82,6 +82,24 @@ func main() {
 		runOrchestrationRuntimePreflight(os.Args[2:])
 	case "orchestration-contract-preview":
 		runOrchestrationContractPreview(os.Args[2:])
+	case "orchestration-task-approve":
+		runOrchestrationTaskApprove(os.Args[2:])
+	case "orchestration-dispatch-preview":
+		runOrchestrationDispatchPreview(os.Args[2:])
+	case "orchestration-scheduler-start":
+		runOrchestrationScheduler(os.Args[2:], true)
+	case "orchestration-scheduler-disable":
+		runOrchestrationScheduler(os.Args[2:], false)
+	case "orchestration-nodes":
+		runOrchestrationNodes(os.Args[2:])
+	case "orchestration-assignments":
+		runOrchestrationAssignments(os.Args[2:])
+	case "orchestration-assignment":
+		runOrchestrationAssignment(os.Args[2:])
+	case "orchestration-assignment-control":
+		runOrchestrationAssignmentControl(os.Args[2:])
+	case "orchestration-integration-decision":
+		runOrchestrationIntegrationDecision(os.Args[2:])
 	case "job-pause":
 		runJobControl(os.Args[2:], syncengine.OneWayJobControlPause)
 	case "job-resume":
@@ -575,6 +593,147 @@ func runOrchestrationContractPreview(args []string) {
 	result, err := client.PreviewExecutionContract(context.Background(), input)
 	if err != nil {
 		exitf("preview execution contract: %v", err)
+	}
+	printJSON(result)
+}
+
+func runOrchestrationTaskApprove(args []string) {
+	flags := flag.NewFlagSet("orchestration-task-approve", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	projectID := flags.String("project", "", "Agent Project ID")
+	taskID := flags.String("task", "", "task ID")
+	taskRevision := flags.Int64("task-revision", 0, "task revision")
+	graphRevision := flags.Int64("graph-revision", 0, "graph revision")
+	digest := flags.String("approval-digest", "", "approved task graph digest")
+	key := flags.String("idempotency-key", "", "caller idempotency key")
+	_ = flags.Parse(args)
+	input := api.TaskGraphApprovalInput{ProjectID: strings.TrimSpace(*projectID), TaskID: strings.TrimSpace(*taskID), TaskRevision: *taskRevision, GraphRevision: *graphRevision, ApprovalDigest: strings.TrimSpace(*digest), IdempotencyKey: strings.TrimSpace(*key)}
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.ApproveTaskGraph(context.Background(), input)
+	if err != nil {
+		exitf("approve task graph: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationDispatchPreview(args []string) {
+	flags := flag.NewFlagSet("orchestration-dispatch-preview", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	projectID := flags.String("project", "", "Agent Project ID")
+	taskID := flags.String("task", "", "task ID")
+	taskRevision := flags.Int64("task-revision", 0, "task revision")
+	graphRevision := flags.Int64("graph-revision", 0, "graph revision")
+	key := flags.String("idempotency-key", "", "caller idempotency key")
+	_ = flags.Parse(args)
+	input := api.DispatchPreviewInput{ProjectID: strings.TrimSpace(*projectID), TaskID: strings.TrimSpace(*taskID), TaskRevision: *taskRevision, GraphRevision: *graphRevision, IdempotencyKey: strings.TrimSpace(*key)}
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.PreviewDispatch(context.Background(), input)
+	if err != nil {
+		exitf("preview dispatch: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationScheduler(args []string, start bool) {
+	name := "orchestration-scheduler-disable"
+	if start {
+		name = "orchestration-scheduler-start"
+	}
+	flags := flag.NewFlagSet(name, flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	projectID := flags.String("project", "", "Agent Project ID")
+	key := flags.String("idempotency-key", "", "caller idempotency key")
+	_ = flags.Parse(args)
+	input := api.SchedulerControlInput{ProjectID: strings.TrimSpace(*projectID), IdempotencyKey: strings.TrimSpace(*key)}
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	var result api.SchedulerStatus
+	var err error
+	if start {
+		result, err = client.StartOrchestrationScheduler(context.Background(), input)
+	} else {
+		result, err = client.DisableOrchestrationScheduler(context.Background(), input)
+	}
+	if err != nil {
+		exitf("control scheduler: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationNodes(args []string) {
+	flags := flag.NewFlagSet("orchestration-nodes", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	limit := flags.Int("limit", 50, "maximum nodes to print")
+	_ = flags.Parse(args)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.ListOrchestrationNodes(context.Background(), *limit)
+	if err != nil {
+		exitf("list orchestration nodes: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationAssignments(args []string) {
+	flags := flag.NewFlagSet("orchestration-assignments", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	projectID := flags.String("project", "", "Agent Project ID")
+	limit := flags.Int("limit", 50, "maximum assignments to print")
+	_ = flags.Parse(args)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.ListAssignments(context.Background(), strings.TrimSpace(*projectID), *limit)
+	if err != nil {
+		exitf("list assignments: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationAssignment(args []string) {
+	flags := flag.NewFlagSet("orchestration-assignment", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	projectID := flags.String("project", "", "Agent Project ID")
+	assignmentID := flags.String("assignment", "", "assignment ID")
+	_ = flags.Parse(args)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.GetAssignment(context.Background(), strings.TrimSpace(*projectID), strings.TrimSpace(*assignmentID))
+	if err != nil {
+		exitf("get assignment: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationAssignmentControl(args []string) {
+	flags := flag.NewFlagSet("orchestration-assignment-control", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	projectID := flags.String("project", "", "Agent Project ID")
+	assignmentID := flags.String("assignment", "", "assignment ID")
+	action := flags.String("action", "", "pause, resume, cancel, retry, or reassign")
+	key := flags.String("idempotency-key", "", "caller idempotency key")
+	_ = flags.Parse(args)
+	input := api.AssignmentControlInput{ProjectID: strings.TrimSpace(*projectID), AssignmentID: strings.TrimSpace(*assignmentID), Action: strings.TrimSpace(*action), IdempotencyKey: strings.TrimSpace(*key)}
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.ControlAssignment(context.Background(), input)
+	if err != nil {
+		exitf("control assignment: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationIntegrationDecision(args []string) {
+	flags := flag.NewFlagSet("orchestration-integration-decision", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	projectID := flags.String("project", "", "Agent Project ID")
+	assignmentID := flags.String("assignment", "", "assignment ID")
+	attemptID := flags.String("attempt", "", "attempt ID")
+	decision := flags.String("decision", "", "approve or reject")
+	digest := flags.String("summary-digest", "", "sanitized summary digest")
+	reason := flags.String("reason-code", "", "opaque reason code")
+	key := flags.String("idempotency-key", "", "caller idempotency key")
+	_ = flags.Parse(args)
+	input := api.IntegrationDecisionInput{ProjectID: strings.TrimSpace(*projectID), AssignmentID: strings.TrimSpace(*assignmentID), AttemptID: strings.TrimSpace(*attemptID), Decision: strings.TrimSpace(*decision), SummaryDigest: strings.TrimSpace(*digest), ReasonCode: strings.TrimSpace(*reason), IdempotencyKey: strings.TrimSpace(*key)}
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.DecideIntegration(context.Background(), input)
+	if err != nil {
+		exitf("decide integration: %v", err)
 	}
 	printJSON(result)
 }

@@ -98,6 +98,7 @@ Useful docs:
 - [Telemetry, provenance, and memory inputs](docs/architecture/telemetry-provenance-memory-inputs.md)
 - [Advanced-feature seams and evidence gates](docs/architecture/advanced-feature-seams.md)
 - [Orchestration setup administration API](docs/architecture/orchestration-setup-administration-api.md)
+- [Orchestration operator control facade](docs/architecture/orchestration-setup-administration-api.md#operator-control-facade)
 - [Orchestration setup recovery and release gate](docs/operations/orchestration-setup-recovery.md)
 - [Orchestration control, fencing, and recovery](docs/architecture/orchestration-control-recovery.md)
 - [Deterministic dispatch selection](docs/architecture/deterministic-dispatch-selection.md)

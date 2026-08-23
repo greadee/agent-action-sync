@@ -108,16 +108,21 @@ func (daemon *Daemon) ConfigureLocalAPI(options Options) error {
 		Insights:     &insights.Calculator{Store: daemon.Store, Now: daemon.currentTime},
 		RequestScan:  daemon.RequestScan,
 	}
+	orchestration := options.OrchestrationAdministration
+	if orchestration == nil {
+		orchestration = disabledOrchestrationFacade{}
+	}
 	service, err := api.NewAdministrationService(api.AdministrationServiceOptions{
-		Queries:      queries,
-		Ready:        daemon.localAPIReady,
-		Runtime:      daemon.localAPIRuntimeSnapshot,
-		Diagnostics:  daemon.Diagnostics,
-		Scan:         daemon.RequestScan,
-		Control:      api.ControlWithJobStore(daemon.Store.OneWayJobs(), daemon.currentTime),
-		Pairing:      pairingCoordinator,
-		ProjectStore: daemon.Store,
-		Setup:        disabledSetupFacade{},
+		Queries:       queries,
+		Ready:         daemon.localAPIReady,
+		Runtime:       daemon.localAPIRuntimeSnapshot,
+		Diagnostics:   daemon.Diagnostics,
+		Scan:          daemon.RequestScan,
+		Control:       api.ControlWithJobStore(daemon.Store.OneWayJobs(), daemon.currentTime),
+		Pairing:       pairingCoordinator,
+		ProjectStore:  daemon.Store,
+		Setup:         disabledSetupFacade{},
+		Orchestration: orchestration,
 		ProjectMigrationPreflight: func(ctx context.Context, input api.ProjectMigrationInput) (api.ProjectMigrationPreflight, error) {
 			request, err := daemon.projectMigrationRequest(input)
 			if err != nil {
@@ -194,6 +199,41 @@ func (daemon *Daemon) ConfigureLocalAPI(options Options) error {
 // granting the local API any runtime, worktree, or graph-publication power.
 // Later slices may replace individual methods with authority-owned services.
 type disabledSetupFacade struct{}
+
+// disabledOrchestrationFacade keeps Slice 8 routes explicit until the
+// supervised daemon composition owns their durable command and read models.
+type disabledOrchestrationFacade struct{}
+
+func unavailableOrchestration() error {
+	return &api.APIError{Status: 503, Code: "unavailable", Message: "orchestration administration is unavailable"}
+}
+func (disabledOrchestrationFacade) ApproveTaskGraph(context.Context, api.TaskGraphApprovalInput) (api.TaskGraphApprovalResult, error) {
+	return api.TaskGraphApprovalResult{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) PreviewDispatch(context.Context, api.DispatchPreviewInput) (api.DispatchPreviewResult, error) {
+	return api.DispatchPreviewResult{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) StartScheduler(context.Context, api.SchedulerControlInput) (api.SchedulerStatus, error) {
+	return api.SchedulerStatus{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) DisableScheduler(context.Context, api.SchedulerControlInput) (api.SchedulerStatus, error) {
+	return api.SchedulerStatus{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) ListNodes(context.Context, storage.PageRequest) (api.NodePage, error) {
+	return api.NodePage{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) ListAssignments(context.Context, string, storage.PageRequest) (api.AssignmentPage, error) {
+	return api.AssignmentPage{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) GetAssignment(context.Context, string, string) (api.AssignmentDetail, error) {
+	return api.AssignmentDetail{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) ControlAssignment(context.Context, api.AssignmentControlInput) (api.AssignmentDetail, error) {
+	return api.AssignmentDetail{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) DecideIntegration(context.Context, api.IntegrationDecisionInput) (api.AssignmentDetail, error) {
+	return api.AssignmentDetail{}, unavailableOrchestration()
+}
 
 func (disabledSetupFacade) CreateTaskGraph(context.Context, api.TaskGraphCreateInput) (api.TaskGraphCreateResult, error) {
 	return api.TaskGraphCreateResult{}, &api.APIError{Status: 503, Code: "unavailable", Message: "task graph publication is unavailable"}
