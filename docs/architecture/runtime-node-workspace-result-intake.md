@@ -4,9 +4,12 @@
 
 Setup Slice 6 defined provider-neutral contracts and deterministic fakes.
 Phase 1 Slice 4 added an explicitly composed local Git worktree manager. Phase
-1 Slice 5 adds an opt-in supervised Codex CLI adapter, but the daemon does not
-compose or enable it yet. Remote nodes, automatic merge, and canonical result
-publication remain disabled.
+1 Slice 5 adds an opt-in supervised Codex CLI adapter. Phase 1 Slice 7 adds
+bounded binary-aware manifests, non-mutating stale/conflict preview, and the
+authority-owned [`integrationgate`](result-review-integration-gate.md) that
+consumes these interfaces without granting acceptance authority to a runtime.
+The shipped daemon still does not compose or enable the adapter. Remote nodes
+and automatic merge remain disabled.
 
 ## Runtime lifecycle
 

@@ -33,7 +33,7 @@ The current implementation provides:
 - Persistent synchronization jobs, retries, watcher reconciliation, scheduler safety, and per-share diagnostics.
 - A foreground daemon with production Windows credential storage, explicit pairing and revocation, and paired mutual-TLS transport.
 - An authenticated, loopback-only administration API with bounded inventory, job control, pairing, project migration, history, artifact, insight, rejection, and rebuild operations.
-- Single-authority Agent Project manifests, immutable task DAG/work-package and execution history, deterministic readiness and context compilation, local trade/worker registry, immutable execution contracts, provider-neutral runtime/node/workspace contracts, an opt-in bounded DAG scheduler with deterministic fakes, authority-owned untrusted result intake, handoffs, artifacts, SQLite projection/rebuild, and descriptive insights.
+- Single-authority Agent Project manifests, immutable task DAG/work-package and execution history, deterministic readiness and context compilation, local trade/worker registry, immutable execution contracts, provider-neutral runtime/node/workspace contracts, an opt-in bounded DAG scheduler with deterministic fakes, authority-owned result/test/review/human-integration gates, handoffs, artifacts, SQLite projection/rebuild, and descriptive insights.
 - Integration, fuzz, and package-level tests for the transfer and synchronization paths.
 
 ## MVP Boundary
@@ -105,6 +105,7 @@ Useful docs:
 - [Safe Git worktree provisioning](docs/architecture/safe-git-worktree-provisioning.md)
 - [Supervised Codex runtime adapter](docs/architecture/supervised-codex-runtime-adapter.md)
 - [DAG scheduler and bounded execution](docs/architecture/dag-scheduler-bounded-execution.md)
+- [Result, review, and human integration gate](docs/architecture/result-review-integration-gate.md)
 - [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)

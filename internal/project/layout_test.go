@@ -27,6 +27,7 @@ func TestLayoutBuildsCanonicalPortablePaths(t *testing.T) {
 	}{
 		{name: "work package case folded", got: func() (string, error) { return WorkPackageDefinitionRelativePath("WP-Alpha") }, want: ".agent-project/work-packages/wp-alpha/definition.json"},
 		{name: "execution manifest", got: func() (string, error) { return ExecutionManifestRelativePath("EX-001") }, want: ".agent-project/executions/ex-001/manifest.json"},
+		{name: "namespaced execution manifest", got: func() (string, error) { return ExecutionManifestRelativePath("execution:one") }, want: ".agent-project/executions/execution%3aone/manifest.json"},
 		{name: "handoff", got: func() (string, error) { return HandoffRelativePath("EX-001") }, want: ".agent-project/executions/ex-001/handoff.json"},
 		{name: "result", got: func() (string, error) { return ExecutionResultRelativePath("EX-001", "reports/test.json") }, want: ".agent-project/executions/ex-001/results/reports/test.json"},
 		{name: "event date", got: func() (string, error) {

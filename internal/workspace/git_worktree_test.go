@@ -52,6 +52,13 @@ func TestGitWorktreeProvisioningRestartManifestAndCleanup(t *testing.T) {
 	if err != nil || len(manifest.Files) != 1 || manifest.Files[0].RelativePath != "src/main.go" || manifest.BaseCommit != primaryHead || manifest.HeadCommit == primaryHead || manifest.Digest == "" {
 		t.Fatalf("manifest=%+v err=%v", manifest, err)
 	}
+	preview, err := restarted.PreviewIntegration(context.Background(), request.WorkspaceID, primaryHead)
+	if err != nil || preview.StaleBase || preview.HasConflicts || preview.HeadCommit != manifest.HeadCommit || preview.CurrentCommit != primaryHead || preview.Digest == "" {
+		t.Fatalf("preview=%+v err=%v", preview, err)
+	}
+	if got := gitTest(t, fixture.repository, "rev-parse", "HEAD"); got != primaryHead {
+		t.Fatalf("preview mutated primary head: %s", got)
+	}
 	if err := restarted.Release(context.Background(), CleanupClaim{WorkspaceID: request.WorkspaceID, OwnerID: request.OwnerID, Generation: allocated.Generation}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +72,75 @@ func TestGitWorktreeProvisioningRestartManifestAndCleanup(t *testing.T) {
 	collision := fixture.request(t, "attempt:one", "workspace:two", "assignment:two")
 	if _, err := restarted.Allocate(context.Background(), collision); !errors.Is(err, ErrCollision) {
 		t.Fatalf("branch collision error=%v", err)
+	}
+}
+
+func TestGitWorktreeManifestMarksBinaryAndPreviewDetectsStaleBase(t *testing.T) {
+	fixture := newGitFixture(t)
+	manager, _ := NewGitWorktreeManager(fixture.config)
+	request := fixture.request(t, "attempt:binary", "workspace:binary", "assignment:binary")
+	if _, err := manager.Allocate(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	worktree := manager.target(request.WorkspaceID)
+	if err := os.WriteFile(filepath.Join(worktree, "src", "payload.bin"), []byte{'a', 0, 'b'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	contract := executioncontract.Contract{Permissions: executioncontract.EffectivePermissions{Capabilities: []executioncontract.Capability{executioncontract.CapabilityWrite}, WritePaths: []string{"src"}}}
+	manifest, err := manager.InspectChanges(context.Background(), request.WorkspaceID, contract)
+	if err != nil || len(manifest.Files) != 1 || !manifest.Files[0].Binary {
+		t.Fatalf("binary manifest=%+v err=%v", manifest, err)
+	}
+	writeGitFile(t, fixture.repository, "src/primary.go", "package main\n")
+	gitTest(t, fixture.repository, "add", "src/primary.go")
+	gitTest(t, fixture.repository, "commit", "-m", "advance primary")
+	preview, err := manager.PreviewIntegration(context.Background(), request.WorkspaceID, request.BaseCommit)
+	if err != nil || !preview.StaleBase {
+		t.Fatalf("stale preview=%+v err=%v", preview, err)
+	}
+}
+
+func TestGitWorktreeManifestRejectsSymlinkAndOversizedFile(t *testing.T) {
+	fixture := newGitFixture(t)
+	manager, _ := NewGitWorktreeManager(fixture.config)
+	request := fixture.request(t, "attempt:unsafe-output", "workspace:unsafe-output", "assignment:unsafe-output")
+	if _, err := manager.Allocate(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	worktree := manager.target(request.WorkspaceID)
+	contract := executioncontract.Contract{Permissions: executioncontract.EffectivePermissions{Capabilities: []executioncontract.Capability{executioncontract.CapabilityWrite}, WritePaths: []string{"src"}}}
+	target := filepath.Join(worktree, "src", "target.txt")
+	if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(worktree, "src", "link.txt")
+	if err := os.Symlink(target, link); err == nil {
+		if _, err := manager.InspectChanges(context.Background(), request.WorkspaceID, contract); !errors.Is(err, executioncontract.ErrPrivilegeEscalation) {
+			t.Fatalf("symlink output error=%v", err)
+		}
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		t.Logf("symlink creation unavailable: %v", err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	largePath := filepath.Join(worktree, "src", "large.bin")
+	large, err := os.Create(largePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := large.Truncate(MaxChangedFileBytes + 1); err != nil {
+		_ = large.Close()
+		t.Fatal(err)
+	}
+	if err := large.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.InspectChanges(context.Background(), request.WorkspaceID, contract); !errors.Is(err, ErrChangeLimit) {
+		t.Fatalf("oversized output error=%v", err)
 	}
 }
 

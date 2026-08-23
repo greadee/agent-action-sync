@@ -261,7 +261,9 @@ func RecordRelativePath(record any) (string, error) {
 }
 
 func pathKey(identifier string) string {
-	return strings.ToLower(identifier)
+	// Namespaced IDs are portable record identities, but ':' is not a valid
+	// Windows path character. Keep the identity losslessly encoded on disk.
+	return strings.ReplaceAll(strings.ToLower(identifier), ":", "%3a")
 }
 
 func taskPathKey(taskID string) string {

@@ -77,6 +77,11 @@ type TestRecordedPayload struct {
 	Name                 string      `json:"name"`
 	Outcome              TestOutcome `json:"outcome"`
 	DurationMilliseconds int64       `json:"duration_milliseconds,omitempty"`
+	CommandID            string      `json:"command_id,omitempty"`
+	CommandDigest        string      `json:"command_digest,omitempty"`
+	ExitCode             *int64      `json:"exit_code,omitempty"`
+	EvidenceID           string      `json:"evidence_id,omitempty"`
+	EvidenceDigest       string      `json:"evidence_digest,omitempty"`
 }
 
 type HandoffCreatedPayload struct {

@@ -768,6 +768,24 @@ func validateEventPayload(event WorkEvent) error {
 		if payload.DurationMilliseconds < 0 {
 			return errors.New("test duration cannot be negative")
 		}
+		evidenceFields := payload.CommandID != "" || payload.CommandDigest != "" || payload.ExitCode != nil || payload.EvidenceID != "" || payload.EvidenceDigest != ""
+		if evidenceFields {
+			if err := validateIdentifier("payload.command_id", payload.CommandID, true); err != nil {
+				return err
+			}
+			if !validSHA256(payload.CommandDigest) {
+				return errors.New("test evidence requires a valid command digest")
+			}
+			if payload.ExitCode == nil || *payload.ExitCode < 0 {
+				return errors.New("test evidence requires a non-negative exit code")
+			}
+			if err := validateIdentifier("payload.evidence_id", payload.EvidenceID, true); err != nil {
+				return err
+			}
+			if !validSHA256(payload.EvidenceDigest) {
+				return errors.New("test evidence requires a valid evidence digest")
+			}
+		}
 		return nil
 	case EventHandoffCreated:
 		var payload HandoffCreatedPayload

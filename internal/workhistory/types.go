@@ -145,6 +145,11 @@ type RecordTestRequest struct {
 	Name                 string
 	Outcome              project.TestOutcome
 	DurationMilliseconds int64
+	CommandID            string
+	CommandDigest        string
+	ExitCode             *int64
+	EvidenceID           string
+	EvidenceDigest       string
 }
 
 // RecordTelemetryRequest accepts only the already allowlisted portable
@@ -190,6 +195,18 @@ type RegisterArtifactRequest struct {
 	SourceRelativePath string
 	EmbedBlob          bool
 	SourceArtifactIDs  []string
+}
+
+type RegisterArtifactReferenceRequest struct {
+	Metadata
+	ArtifactID        string
+	WorkPackageID     string
+	ExecutionID       string
+	Name              string
+	MediaType         string
+	Size              int64
+	ContentHash       string
+	SourceArtifactIDs []string
 }
 
 type AcceptWorkRequest struct {

@@ -41,6 +41,7 @@ substitute for the individual decision records.
 | [Safe Git worktree provisioning](../architecture/safe-git-worktree-provisioning.md) | Pinned-base per-attempt branches, external worktrees, scoped manifests, restart ownership, and recoverable cleanup | Implemented in Phase 1 Slice 4 |
 | [Supervised Codex runtime adapter](../architecture/supervised-codex-runtime-adapter.md) | Opt-in process supervision, enforceable sandbox policy, normalized progress/usage, cancellation, restart uncertainty, and fenced structured results | Implemented in Phase 1 Slice 5; daemon composition remains disabled |
 | [DAG scheduler and bounded execution](../architecture/dag-scheduler-bounded-execution.md) | Daemon lifecycle composition, accepted-dependency dispatch, two-worker ceiling, lease renewal, pause/cancel, restart reconciliation, and shutdown drain | Implemented in Phase 1 Slice 6; shipped CLI/config enablement remains disabled |
+| [Result, review, and human integration gate](../architecture/result-review-integration-gate.md) | Fenced result collection, verified manifests/references, exact local tests, required review, sanitized approval summary, and explicit no-merge human decision | Implemented in Phase 1 Slice 7; operator API composition remains Slice 8 |
 
 Multi-writer project history, automatic conflict merging, learned routing,
 embeddings, generated retrospectives, predictions, raw transcript capture, and

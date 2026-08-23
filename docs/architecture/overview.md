@@ -32,6 +32,9 @@ The initial agent is split into these domains:
 - `internal/scheduler`: opt-in daemon-owned DAG dispatch, bounded parallelism,
   lease/workspace/runtime composition, and recovery inspection; it stops at
   untrusted result collection and cannot publish canonical project history.
+- `internal/integrationgate`: authority-owned result/reference verification,
+  exact local tests, review evidence, non-mutating integration preview, and
+  explicit human acceptance through `workhistory`; it never merges changes.
 - `internal/api`: authenticated loopback administration contracts and handlers.
 - `internal/daemon`: application composition, lifecycle, local API ownership, share runtimes, and shutdown ordering.
 - `cmd/syncgate`: foreground daemon and local operator commands.
@@ -48,9 +51,12 @@ flowchart TD
     Daemon --> API["Loopback administration API"]
     Daemon --> Projector["Projector / work history / insights"]
     Daemon --> Scheduler["bounded DAG scheduler"]
+    Daemon --> Gate["result / review / human gate"]
     Scheduler --> Project["portable project contracts"]
     Scheduler --> Storage
     Scheduler --> Runtime["runtime / node / workspace interfaces"]
+    Gate --> Runtime
+    Gate --> Projector
     Projector --> Project["Portable project contracts"]
     Projector --> Storage
     Daemon --> Agent["Transfer and sync application services"]

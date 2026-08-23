@@ -124,6 +124,7 @@ type Contract struct {
 	Deadline            time.Time                 `json:"deadline"`
 	Deliverables        []string                  `json:"deliverables"`
 	AcceptanceCriteria  []string                  `json:"acceptance_criteria"`
+	ReviewRequired      bool                      `json:"review_required"`
 	RequiredGates       []GateRequirement         `json:"required_gates"`
 	CreatedAt           time.Time                 `json:"created_at"`
 	CreatedBy           string                    `json:"created_by"`
@@ -190,7 +191,7 @@ func Build(request BuildRequest) (Contract, []byte, error) {
 		Instruction: request.Instruction, ContextDigest: request.ContextDigest, Runtime: request.Runtime, Provider: request.Provider,
 		Model: request.Model, Node: request.Node, Permissions: permissions, Budget: budget, NotBefore: request.NotBefore,
 		Deadline: request.Deadline, Deliverables: append([]string(nil), request.WorkPackage.Deliverables...),
-		AcceptanceCriteria: append([]string(nil), request.WorkPackage.AcceptanceCriteria...), RequiredGates: gates,
+		AcceptanceCriteria: append([]string(nil), request.WorkPackage.AcceptanceCriteria...), ReviewRequired: request.WorkPackage.ReviewRequired, RequiredGates: gates,
 		CreatedAt: request.CreatedAt, CreatedBy: request.CreatedBy,
 	}
 	unsigned, err := json.Marshal(contract)

@@ -272,7 +272,11 @@ func (service *Service) RecordTest(ctx context.Context, request RecordTestReques
 		if !nonblank(request.WorkPackageID, request.ExecutionID, request.Name) || request.DurationMilliseconds < 0 {
 			return operationSpec{}, ErrInvalidRequest
 		}
-		recorded, err := event(manifest, request.Metadata, "record-test", project.EventTestRecorded, request.WorkPackageID, request.ExecutionID, project.TestRecordedPayload{Name: redactText(request.Name), Outcome: request.Outcome, DurationMilliseconds: request.DurationMilliseconds})
+		recorded, err := event(manifest, request.Metadata, "record-test", project.EventTestRecorded, request.WorkPackageID, request.ExecutionID, project.TestRecordedPayload{
+			Name: redactText(request.Name), Outcome: request.Outcome, DurationMilliseconds: request.DurationMilliseconds,
+			CommandID: request.CommandID, CommandDigest: request.CommandDigest, ExitCode: request.ExitCode,
+			EvidenceID: request.EvidenceID, EvidenceDigest: request.EvidenceDigest,
+		})
 		return operationSpec{records: []any{recorded}, validateState: func(state historyState) error {
 			return requireExecution(state.executions[request.ExecutionID], state.executions[request.ExecutionID] != "", project.ExecutionRunning)
 		}}, err

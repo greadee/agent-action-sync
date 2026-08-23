@@ -18,6 +18,7 @@ import (
 
 func TestBuildIsReproducibleAndIntersectsPolicy(t *testing.T) {
 	request := contractFixture()
+	request.WorkPackage.ReviewRequired = true
 	request.PolicyLayers[3].WritePaths = []string{"src/pkg", "src/pkg"}
 	first, raw, err := Build(request)
 	if err != nil {
@@ -36,6 +37,9 @@ func TestBuildIsReproducibleAndIntersectsPolicy(t *testing.T) {
 	}
 	if !reflect.DeepEqual(first.Permissions.WritePaths, []string{"src/pkg"}) {
 		t.Fatalf("write intersection=%v", first.Permissions.WritePaths)
+	}
+	if !first.ReviewRequired {
+		t.Fatal("review requirement was not bound into the immutable contract")
 	}
 
 	unsigned := first

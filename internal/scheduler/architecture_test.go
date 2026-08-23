@@ -21,12 +21,13 @@ func TestSchedulerCannotWriteCanonicalHistoryOrCrossTransportBoundary(t *testing
 		t.Fatal(err)
 	}
 	forbidden := map[string]bool{
-		"syncgate/internal/projector":     true,
-		"syncgate/internal/resultintake":  true,
-		"syncgate/internal/workhistory":   true,
-		"syncgate/internal/sync":          true,
-		"syncgate/internal/transport":     true,
-		"syncgate/internal/transport/tcp": true,
+		"syncgate/internal/projector":       true,
+		"syncgate/internal/resultintake":    true,
+		"syncgate/internal/workhistory":     true,
+		"syncgate/internal/integrationgate": true,
+		"syncgate/internal/sync":            true,
+		"syncgate/internal/transport":       true,
+		"syncgate/internal/transport/tcp":   true,
 	}
 	set := token.NewFileSet()
 	for _, file := range files {

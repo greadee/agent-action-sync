@@ -345,6 +345,16 @@ func (service ControlService) Reconcile(ctx context.Context, actorID string) ([]
 	return service.Store.ReconcileAssignments(ctx, now, actorID)
 }
 
+func (service ControlService) GetAssignment(ctx context.Context, assignmentID string) (storage.OrchestrationSnapshot, error) {
+	if _, err := service.ready(ctx); err != nil || !validID(assignmentID) {
+		if err != nil {
+			return storage.OrchestrationSnapshot{}, err
+		}
+		return storage.OrchestrationSnapshot{}, ErrInvalidControl
+	}
+	return service.Store.GetAssignment(ctx, assignmentID)
+}
+
 func (service ControlService) RecordGateStatus(ctx context.Context, request GateStatusRequest) (storage.RegistryWriteResult, error) {
 	now, err := service.ready(ctx)
 	if err != nil {

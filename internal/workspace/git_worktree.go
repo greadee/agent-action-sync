@@ -25,6 +25,7 @@ const gitRegistrySchema = "syncgate.git-worktree.v1"
 const (
 	MaxChangedFiles     = 4096
 	MaxChangedFileBytes = 64 << 20
+	MaxChangedBytes     = 256 << 20
 )
 
 type GitManagerConfig struct {
@@ -45,6 +46,7 @@ type ChangedFile struct {
 	Status       string `json:"status"`
 	Digest       string `json:"digest,omitempty"`
 	Size         int64  `json:"size"`
+	Binary       bool   `json:"binary,omitempty"`
 }
 
 type ChangeManifest struct {
@@ -53,6 +55,17 @@ type ChangeManifest struct {
 	HeadCommit  string        `json:"head_commit"`
 	Files       []ChangedFile `json:"files"`
 	Digest      string        `json:"digest"`
+}
+
+// IntegrationPreview is a non-mutating comparison with the repository's
+// current primary checkout. It never performs a merge or changes either tree.
+type IntegrationPreview struct {
+	BaseCommit    string `json:"base_commit"`
+	CurrentCommit string `json:"current_commit"`
+	HeadCommit    string `json:"head_commit"`
+	StaleBase     bool   `json:"stale_base"`
+	HasConflicts  bool   `json:"has_conflicts"`
+	Digest        string `json:"digest"`
 }
 
 type gitRegistryRecord struct {
@@ -246,6 +259,7 @@ func (manager *GitWorktreeManager) InspectChanges(ctx context.Context, workspace
 		return ChangeManifest{}, ErrChangeLimit
 	}
 	files := make([]ChangedFile, 0, len(entries))
+	var totalBytes int64
 	for _, entry := range entries {
 		if err := ValidateCollectedPath(contract, entry.path); err != nil {
 			return ChangeManifest{}, err
@@ -264,7 +278,11 @@ func (manager *GitWorktreeManager) InspectChanges(ctx context.Context, workspace
 			if readErr != nil {
 				return ChangeManifest{}, readErr
 			}
-			file.Digest, file.Size = hash(raw), int64(len(raw))
+			file.Digest, file.Size, file.Binary = hash(raw), int64(len(raw)), bytes.IndexByte(raw, 0) >= 0
+			totalBytes += file.Size
+			if totalBytes > MaxChangedBytes {
+				return ChangeManifest{}, ErrChangeLimit
+			}
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return ChangeManifest{}, statErr
 		}
@@ -275,6 +293,45 @@ func (manager *GitWorktreeManager) InspectChanges(ctx context.Context, workspace
 	raw, _ := json.Marshal(manifest)
 	manifest.Digest = hash(raw)
 	return manifest, nil
+}
+
+// PreviewIntegration compares the worker head with the current repository
+// head. git merge-tree is deliberately used because it does not touch the
+// index, worktree, refs, or object graph.
+func (manager *GitWorktreeManager) PreviewIntegration(ctx context.Context, workspaceID, expectedBase string) (IntegrationPreview, error) {
+	if err := contextError(ctx); err != nil || !validCommit(expectedBase) {
+		if err != nil {
+			return IntegrationPreview{}, err
+		}
+		return IntegrationPreview{}, ErrBaseCommit
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	record, err := manager.readRecord(workspaceID)
+	if err != nil {
+		return IntegrationPreview{}, err
+	}
+	if record.Workspace.State != StateAllocated || record.Workspace.BaseCommit != expectedBase {
+		return IntegrationPreview{}, ErrOwnership
+	}
+	current, err := manager.git(ctx, manager.config.RepositoryRoot, "rev-parse", "HEAD")
+	if err != nil {
+		return IntegrationPreview{}, err
+	}
+	head, err := manager.git(ctx, record.WorktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		return IntegrationPreview{}, err
+	}
+	current, head = strings.TrimSpace(current), strings.TrimSpace(head)
+	preview := IntegrationPreview{BaseCommit: expectedBase, CurrentCommit: current, HeadCommit: head, StaleBase: current != expectedBase}
+	output, mergeErr := manager.git(ctx, manager.config.RepositoryRoot, "merge-tree", expectedBase, current, head)
+	if mergeErr != nil {
+		return IntegrationPreview{}, fmt.Errorf("preview integration: %w: %s", mergeErr, sanitizeGitOutput(output))
+	}
+	preview.HasConflicts = strings.Contains(output, "<<<<<<<") || strings.Contains(output, "changed in both") || strings.Contains(output, "CONFLICT")
+	raw, _ := json.Marshal(preview)
+	preview.Digest = hash(raw)
+	return preview, nil
 }
 
 type porcelainEntry struct{ status, path string }

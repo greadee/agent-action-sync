@@ -208,3 +208,21 @@ Daemon coverage proves orchestration shutdown completes before storage close.
 Architecture checks prevent the scheduler from importing canonical history,
 result intake, projection, sync, or transport packages. Run the focused suite
 with the race detector on CI or a C-enabled host.
+
+## Result, review, and human-integration gate
+
+Phase 1 Slice 7 uses real portable work-history publication and SQLite
+projection with deterministic runtime, content, workspace, test-runner, and
+reviewer seams. Coverage proves exact command/evidence recording, verified
+artifact and handoff references, sanitized summaries, human approval and
+rejection, accepted replay, and clean projection rebuild. Negative cases cover
+failed tests, requested changes, stale bases, merge conflicts, unexpected
+binaries, forged envelopes, and stale attempt tokens. Disposable Git tests
+also prove binary classification and that integration preview neither changes
+the primary head nor hides base drift.
+
+Run the focused gate with:
+
+```powershell
+go test ./internal/integrationgate ./internal/workspace ./internal/workhistory ./internal/project
+```

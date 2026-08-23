@@ -112,6 +112,36 @@ func (service *Service) RegisterArtifact(ctx context.Context, request RegisterAr
 	return result, operationErr
 }
 
+// RegisterArtifactReference publishes verified artifact metadata without
+// copying worker-controlled bytes into portable history. The caller must
+// validate the referenced content and digest before crossing this boundary.
+func (service *Service) RegisterArtifactReference(ctx context.Context, request RegisterArtifactReferenceRequest) (OperationResult, error) {
+	return service.operate(ctx, request.Metadata, func(manifest project.ProjectManifest, _ project.Layout) (operationSpec, error) {
+		if !nonblank(request.ArtifactID, request.WorkPackageID, request.Name, request.MediaType, request.ContentHash) || request.Size < 0 {
+			return operationSpec{}, ErrInvalidRequest
+		}
+		recordID := deterministicID("artifact-", manifest.ProjectID, "register-artifact-reference", request.IdempotencyKey)
+		artifact := project.ArtifactManifest{
+			RecordHeader: project.NewRecordHeader(project.RecordArtifact, recordID, manifest.ProjectID),
+			ArtifactID:   request.ArtifactID, Name: redactText(request.Name), MediaType: request.MediaType,
+			Size: request.Size, HashAlgorithm: project.HashAlgorithmSHA256, ContentHash: request.ContentHash, CreatedAt: request.OccurredAt,
+			Provenance: provenance(request.Metadata, request.WorkPackageID, request.ExecutionID, request.SourceArtifactIDs),
+		}
+		recorded, err := event(manifest, request.Metadata, "register-artifact-reference-event", project.EventArtifactRecorded, request.WorkPackageID, request.ExecutionID, project.ArtifactRecordedPayload{ArtifactRecordID: recordID, ArtifactID: request.ArtifactID})
+		return operationSpec{records: []any{artifact, recorded}, validateState: func(state historyState) error {
+			if _, exists := state.workPackages[request.WorkPackageID]; !exists {
+				return ErrStateNotFound
+			}
+			if request.ExecutionID != "" {
+				if _, exists := state.executions[request.ExecutionID]; !exists {
+					return ErrStateNotFound
+				}
+			}
+			return nil
+		}}, err
+	})
+}
+
 func (service *Service) GetEvent(ctx context.Context, projectID, eventID string) (storage.ProjectEventProjection, error) {
 	if service == nil || service.Store == nil {
 		return storage.ProjectEventProjection{}, ErrInvalidRequest
