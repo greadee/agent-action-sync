@@ -86,6 +86,14 @@ func TestCompilerGoldenDeterminismBudgetsPrivacyAndTradeFiltering(t *testing.T) 
 	if replayPath, err := Cache(fixture.layout, second); err != nil || replayPath != cachePath {
 		t.Fatalf("cache replay=%q err=%v", replayPath, err)
 	}
+	if err := VerifyBundleBytes(first.Bytes, first.Bundle.Manifest.ContextDigest); err != nil {
+		t.Fatalf("verify bundle: %v", err)
+	}
+	tampered := append([]byte(nil), first.Bytes...)
+	tampered[len(tampered)-1] = '!'
+	if VerifyBundleBytes(tampered, first.Bundle.Manifest.ContextDigest) == nil || VerifyBundleBytes(first.Bytes, strings.Repeat("f", 64)) == nil {
+		t.Fatal("bundle verifier accepted tampered bytes or the wrong digest")
+	}
 }
 
 func TestCompilerFailsClosedOnScopeAndOmitsSymlink(t *testing.T) {

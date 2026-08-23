@@ -3,9 +3,10 @@
 ## Status and release boundary
 
 Setup Slice 6 defined provider-neutral contracts and deterministic fakes.
-Phase 1 Slice 4 now adds an explicitly composed local Git worktree manager, but
-does not enable a production runtime adapter, provider session, shell process,
-remote node, automatic merge, or canonical result publication.
+Phase 1 Slice 4 added an explicitly composed local Git worktree manager. Phase
+1 Slice 5 adds an opt-in supervised Codex CLI adapter, but the daemon does not
+compose or enable it yet. Remote nodes, automatic merge, and canonical result
+publication remain disabled.
 
 ## Runtime lifecycle
 
@@ -27,6 +28,10 @@ remote node, automatic merge, or canonical result publication.
 
 The deterministic fake implements the complete lifecycle and a test-only
 completion seam. It never invokes a process or transport.
+
+The concrete adapter's enforcement, credential, privacy, cancellation, and
+restart boundary is specified in [Supervised Codex Runtime
+Adapter](supervised-codex-runtime-adapter.md).
 
 ## Compute-node definition and observation
 
@@ -114,6 +119,7 @@ not run intake or grant project-history publication rights.
   contracts and storage interfaces where necessary.
 - They do not import `sync` or transport implementations.
 - `project` and `sync` do not import or invoke these packages.
-- No production runtime adapter may be composed until its capability, credential,
-  cancellation, workspace-containment, orphan-process, privacy, and result
-  conformance gates pass separately.
+- The supervised Codex adapter passes its isolated capability, credential,
+  cancellation, workspace-containment, restart, privacy, and result-conformance
+  tests, but it may not be composed until explicit local enablement and the
+  Phase 1 scheduler lifecycle are implemented.

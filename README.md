@@ -103,6 +103,7 @@ Useful docs:
 - [Deterministic dispatch selection](docs/architecture/deterministic-dispatch-selection.md)
 - [Context, contract, and attempt binding](docs/architecture/context-contract-attempt-binding.md)
 - [Safe Git worktree provisioning](docs/architecture/safe-git-worktree-provisioning.md)
+- [Supervised Codex runtime adapter](docs/architecture/supervised-codex-runtime-adapter.md)
 - [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)

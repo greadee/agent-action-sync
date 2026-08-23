@@ -21,7 +21,7 @@ func TestDeterministicFakeLifecycleIdempotencyAndResultCollection(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepare := PrepareRequest{Contract: contract, WorkspaceID: "workspace:one", IdempotencyKeyDigest: runtimeDigest("1"), ResumeKeyDigest: runtimeDigest("2")}
+	prepare := PrepareRequest{Contract: contract, AttemptID: "attempt:one", LeaseGeneration: 1, FencingDigest: runtimeDigest("9"), WorkspaceID: "workspace:one", IdempotencyKeyDigest: runtimeDigest("1"), ResumeKeyDigest: runtimeDigest("2")}
 	session, err := fake.Prepare(context.Background(), prepare)
 	if err != nil || session.Status != StatusPrepared || strings.Contains(session.SessionID, "provider") {
 		t.Fatalf("session=%+v err=%v", session, err)
@@ -74,7 +74,7 @@ func TestDeterministicFakeFailsClosedOnCapabilityAndBindingDrift(t *testing.T) {
 	nodeRef := runtimeBinding("node:fake", "b")
 	contract := runtimeContract(runtimeRef, nodeRef, []executioncontract.Capability{executioncontract.CapabilityInspect, executioncontract.CapabilityShell})
 	fake, _ := NewDeterministicFake(FakeConfig{Runtime: runtimeRef, Node: nodeRef, Capabilities: []executioncontract.Capability{executioncontract.CapabilityInspect}, Now: func() time.Time { return when }})
-	if _, err := fake.Prepare(context.Background(), PrepareRequest{Contract: contract, WorkspaceID: "workspace:one", IdempotencyKeyDigest: runtimeDigest("1"), ResumeKeyDigest: runtimeDigest("2")}); !IsCode(err, CodeCapabilityUnavailable) {
+	if _, err := fake.Prepare(context.Background(), PrepareRequest{Contract: contract, AttemptID: "attempt:one", LeaseGeneration: 1, FencingDigest: runtimeDigest("9"), WorkspaceID: "workspace:one", IdempotencyKeyDigest: runtimeDigest("1"), ResumeKeyDigest: runtimeDigest("2")}); !IsCode(err, CodeCapabilityUnavailable) {
 		t.Fatalf("capability drift error=%v", err)
 	}
 	forged := contract

@@ -73,17 +73,22 @@ func (fake *DeterministicFake) Prepare(ctx context.Context, request PrepareReque
 	if err := contextError(ctx); err != nil {
 		return Session{}, err
 	}
-	if !namespaced(request.WorkspaceID, "workspace:") || !validDigest(request.IdempotencyKeyDigest) || !validDigest(request.ResumeKeyDigest) {
+	if !namespaced(request.AttemptID, "attempt:") || request.LeaseGeneration < 1 || !validDigest(request.FencingDigest) || !namespaced(request.WorkspaceID, "workspace:") || !validDigest(request.IdempotencyKeyDigest) || !validDigest(request.ResumeKeyDigest) {
 		return Session{}, normalized(CodeInvalidRequest, false, "prepare request is incomplete")
 	}
 	if _, err := fake.Negotiate(ctx, NegotiationRequest{Contract: request.Contract, RequiredCapabilities: request.Contract.Permissions.Capabilities}); err != nil {
 		return Session{}, err
 	}
 	fingerprintBytes, _ := json.Marshal(struct {
-		Contract    executioncontract.ContractReference `json:"contract"`
-		WorkspaceID string                              `json:"workspace_id"`
-		ResumeKey   string                              `json:"resume_key_digest"`
-	}{contractReference(request.Contract), request.WorkspaceID, request.ResumeKeyDigest})
+		Contract          executioncontract.ContractReference `json:"contract"`
+		WorkspaceID       string                              `json:"workspace_id"`
+		ResumeKey         string                              `json:"resume_key_digest"`
+		ContextDigest     string                              `json:"context_digest"`
+		InstructionDigest string                              `json:"instruction_digest"`
+		AttemptID         string                              `json:"attempt_id"`
+		LeaseGeneration   int64                               `json:"lease_generation"`
+		FencingDigest     string                              `json:"fencing_digest"`
+	}{contractReference(request.Contract), request.WorkspaceID, request.ResumeKeyDigest, request.Contract.ContextDigest, request.Contract.Instruction.Digest, request.AttemptID, request.LeaseGeneration, request.FencingDigest})
 	fingerprint := hash(fingerprintBytes)
 
 	fake.mu.Lock()
@@ -98,6 +103,7 @@ func (fake *DeterministicFake) Prepare(ctx context.Context, request PrepareReque
 	when := fake.now()
 	session := Session{
 		SessionID: sessionID, Contract: contractReference(request.Contract), WorkspaceID: request.WorkspaceID,
+		AttemptID: request.AttemptID, LeaseGeneration: request.LeaseGeneration, FencingDigest: request.FencingDigest,
 		ResumeKeyDigest: request.ResumeKeyDigest, Status: StatusPrepared, Sequence: 1, UpdatedAt: when,
 	}
 	fake.sessions[sessionID] = &fakeSession{session: session}

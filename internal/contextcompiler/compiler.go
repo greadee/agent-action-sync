@@ -104,6 +104,23 @@ type Result struct {
 	Bytes  []byte
 }
 
+// VerifyBundleBytes checks canonical bundle bytes against the context digest
+// that an immutable execution contract authorized.
+func VerifyBundleBytes(raw []byte, expectedDigest string) error {
+	if len(raw) == 0 || len(raw) > DefaultMaxBundleBytes || expectedDigest == "" {
+		return ErrInvalidRequest
+	}
+	var bundle Bundle
+	if err := json.Unmarshal(raw, &bundle); err != nil {
+		return ErrInvalidRequest
+	}
+	result := Result{Bundle: bundle, Bytes: append([]byte(nil), raw...)}
+	if err := validateResult(result); err != nil || bundle.Manifest.ContextDigest != expectedDigest {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
 type ArtifactPublisher interface {
 	RegisterArtifact(context.Context, workhistory.RegisterArtifactRequest) (workhistory.OperationResult, error)
 }

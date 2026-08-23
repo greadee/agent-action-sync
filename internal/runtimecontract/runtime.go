@@ -33,6 +33,14 @@ const (
 	CodeCapabilityUnavailable ErrorCode = "capability_unavailable"
 	CodeUnavailable           ErrorCode = "runtime_unavailable"
 	CodeCanceled              ErrorCode = "canceled"
+	CodeTimedOut              ErrorCode = "timed_out"
+	CodeRateLimited           ErrorCode = "rate_limited"
+	CodeRefused               ErrorCode = "refused"
+	CodeExecutionFailed       ErrorCode = "execution_failed"
+	CodeMalformedOutput       ErrorCode = "malformed_output"
+	CodeDisconnected          ErrorCode = "disconnected"
+	CodeUncertainTermination  ErrorCode = "uncertain_termination"
+	CodeBudgetExceeded        ErrorCode = "budget_exceeded"
 )
 
 type NormalizedError struct {
@@ -60,7 +68,12 @@ type NegotiationResult struct {
 
 type PrepareRequest struct {
 	Contract             executioncontract.Contract
+	AttemptID            string
+	LeaseGeneration      int64
+	FencingDigest        string
 	WorkspaceID          string
+	ContextBundle        []byte
+	InstructionBundle    []byte
 	IdempotencyKeyDigest string
 	ResumeKeyDigest      string
 }
@@ -69,6 +82,9 @@ type Session struct {
 	SessionID       string
 	Contract        executioncontract.ContractReference
 	WorkspaceID     string
+	AttemptID       string
+	LeaseGeneration int64
+	FencingDigest   string
 	ResumeKeyDigest string
 	Status          Status
 	Sequence        int64
@@ -81,17 +97,32 @@ type ActionRequest struct {
 }
 
 type Observation struct {
-	SessionID string
-	Status    Status
-	Sequence  int64
-	UpdatedAt time.Time
-	ErrorCode ErrorCode
+	SessionID    string
+	Status       Status
+	Sequence     int64
+	UpdatedAt    time.Time
+	ErrorCode    ErrorCode
+	Retryable    bool
+	ProgressCode string
+	Usage        *UsageEvidence
+}
+
+type UsageEvidence struct {
+	Source                string                             `json:"source"`
+	Runtime               executioncontract.BindingReference `json:"runtime"`
+	Provider              executioncontract.BindingReference `json:"provider"`
+	Model                 executioncontract.BindingReference `json:"model"`
+	InputTokens           *int64                             `json:"input_tokens,omitempty"`
+	CachedInputTokens     *int64                             `json:"cached_input_tokens,omitempty"`
+	OutputTokens          *int64                             `json:"output_tokens,omitempty"`
+	ReasoningOutputTokens *int64                             `json:"reasoning_output_tokens,omitempty"`
+	ToolCalls             int64                              `json:"tool_calls"`
 }
 
 type CollectedResult struct {
-	ResultID       string
-	EnvelopeDigest string
-	ClaimedOutcome string
+	ResultID       string `json:"result_id"`
+	EnvelopeDigest string `json:"envelope_digest"`
+	ClaimedOutcome string `json:"claimed_outcome"`
 }
 
 type Adapter interface {

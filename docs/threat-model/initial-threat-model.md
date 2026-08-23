@@ -79,7 +79,7 @@
 | Duplicate task state or reducer drift | New orchestration code records local/agent status that disagrees with canonical work events | Scheduler persistence and projection | Existing `WORK_PACKAGE_*` and `EXECUTION_*` events remain canonical; assignments and leases are explicitly local operations; projections rebuild at a watermark | Implementation bugs can still derive inconsistent readiness | Architecture-import tests, reducer property tests, incremental-versus-replay equivalence, and no-duplicate-vocabulary review |
 | Forged, replayed, or conflicting worker result | Compromised worker/runtime claims another execution, reports false success/tests, reuses an ID, or changes content under one ID | Result-envelope intake | Treat envelopes as untrusted local input; bind project/execution/contract/assignment/worker/runtime/node identities and digests; idempotent same-ID/same-digest decisions; reject conflicts; authority publishes typed canonical records | Bound identities do not prove claims are true; malicious patches and fabricated test evidence still require gates/review | Identity-drift, digest-conflict, replay, forged-contract, fabricated-success, crash-recovery, and authority-publication tests |
 | Permission escalation through execution | Worker, provider, tool, or adapter requests broader filesystem, shell, network, secret, deployment, or merge access | Execution contract and runtime tool calls | Immutable contract contains deny-by-default intersection of project, work package, trade, worker, runtime/node, and user policy; amendments create a new version; unknown capabilities deny | OS account compromise or a faulty adapter may bypass application policy | Scope-overlap, forbidden-precedence, unknown-capability, amendment, secret-denial, and attempted-escalation tests |
-| Runtime adapter or provider compromise | Adapter/provider executes unexpected commands, leaks content, lies about status/cost, or retains data | Runtime/provider boundary | Provider-neutral narrow interface; credentials isolated behind approved stores; exact capability negotiation; bounded observations; results remain untrusted; production adapters disabled until separate release gate | External providers and local child processes are not equivalent security sandboxes | Deterministic fake conformance, error normalization, cancellation, credential non-disclosure, capability-drift, and adapter-specific security tests |
+| Runtime adapter or provider compromise | Adapter/provider executes unexpected commands, leaks content, lies about status/cost, or retains data | Runtime/provider boundary | Provider-neutral narrow interface; isolated pre-authenticated Codex home; minimal child environment; exact capability negotiation; strict sandbox/config invocation; normalized observations; fenced structured results remain untrusted; daemon composition stays disabled | External providers and local child processes are not equivalent security sandboxes | Deterministic fake conformance, malformed/forged result, error normalization, cancellation, credential/prompt non-disclosure, capability-drift, and adapter-specific security tests |
 | Workspace escape or repository poisoning | Worker uses traversal, symlinks, junctions, `.git` manipulation, hooks, submodules, or path races to affect files outside its grant | Workspace allocator and result collection | Resolve trusted repository/worktree roots; keep worktrees outside synchronized content; reject symlink/reparse escape and unsafe Git state; use opaque workspace IDs; collect only allowlisted scoped output | Same-account malware and repository features can create TOCTOU and tool-execution risk | Root containment, dirty-state, symlink/junction, collision, hook/submodule, scope, cleanup-ownership, and changed-during-read tests |
 | Lease split brain or stale completion | Crash, clock drift, delayed worker, or duplicate scheduler lets multiple workers believe they own one execution | Assignment and lease control state | Authority-local leases only; compare-and-swap generations and fencing digests; bounded expiry/renewal; restart reconciliation; stale result binding rejected; lease expiry alone does not publish work failure | External work may continue after cancellation and consume resources | Concurrent-acquire, stale-fence, expiry, renewal, restart, late-result, and cancellation tests |
 | Context poisoning or secret inclusion | Repository content, malicious instructions, symlinks, environment data, or oversized files inject hostile content or secrets into a worker bundle | Context compiler | Explicit source manifest; path/privacy allowlists; stable ordering; secret/redaction policy; symlink/binary/size/token bounds; source digests and omissions; exclude raw environment and local paths | Allowlisted source text can still contain prompt injection or undiscovered secrets | Golden determinism, secret fixture, symlink, binary, oversize, missing-source, scope, ordering, and omission tests |
@@ -117,6 +117,9 @@
 - Git worktrees are created only outside synchronized content from allowlisted
   base commits. Dirty or missing worktrees are quarantined for the operator;
   cleanup is owner/generation fenced and never recursively forced.
+- Runtime adapters retain only normalized lifecycle and nullable usage evidence.
+  Raw model reasoning, prompts, context bundles, tool output, and child-process
+  diagnostics are not durable orchestration data.
 
 ## Orchestration setup release controls
 
@@ -145,9 +148,10 @@ control records; only deterministic derived state may be rebuilt.
   for malware, classify secrets, sandbox active content, or provide encryption
   at rest.
 - No production runtime adapter, remote command endpoint, distributed compute
-  node, or automatic merge path is enabled. The local Git worktree adapter can
-  create an explicitly authorized isolated branch/worktree, but does not run
-  worker code or establish sandbox safety.
+  node, or automatic merge path is enabled in the daemon. An opt-in supervised
+  Codex adapter exists as an isolated library component but is not composed;
+  the local Git worktree adapter can create an explicitly authorized isolated
+  branch/worktree without running worker code itself.
 - Authority-local orchestration registries, contracts, leases, and intake state
   are not reconstructible solely from portable project history. Their backup,
   migration, and corruption recovery require separate local operations.

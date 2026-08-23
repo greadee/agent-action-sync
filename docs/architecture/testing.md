@@ -181,3 +181,15 @@ pre-provision cancellation, dirty-worktree quarantine, clean explicit release,
 and stale-registry quarantine. Existing preflight tests cover nested roots,
 target collisions, unsafe branch names, low disk, and symlink roots. The adapter has no merge,
 reset, clean, force-delete, or primary checkout operation.
+
+## Supervised runtime adapter gate
+
+Phase 1 Slice 5 uses a deterministic executor rather than the hosted provider
+to prove bounded Codex CLI invocation, strict structured output, exact
+contract/session/attempt/lease/fence matching, normalized progress, nullable
+usage provenance, token/tool/wall/concurrency controls, and action replay.
+Fixtures cover success, duplicate completion, malformed and forged output,
+refusal, rate limit, timeout, disconnect, budget exhaustion, cancellation, and
+restart uncertainty. Tests inspect durable state, arguments, and environment to
+prove prompts, context, credentials, provider sessions, and local paths are not
+retained. The adapter remains absent from daemon composition.

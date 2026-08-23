@@ -28,7 +28,7 @@ The initial agent is split into these domains:
 - `internal/workhistory`: typed, idempotent authority-side creation of canonical work records.
 - `internal/insights`: versioned descriptive calculations over accepted projected history.
 - `internal/orchestration`, `internal/registry`, `internal/contextcompiler`, and `internal/executioncontract`: deterministic setup-only task readiness, registry, context, and least-privilege contract logic.
-- `internal/runtimecontract`, `internal/computenode`, `internal/workspace`, and `internal/resultintake`: provider-neutral interfaces and untrusted-result validation; the shipped daemon keeps execution and workspace allocation disabled.
+- `internal/runtimecontract`, `internal/codexruntime`, `internal/computenode`, `internal/workspace`, and `internal/resultintake`: provider-neutral interfaces, an opt-in supervised Codex CLI adapter, and untrusted-result validation; the shipped daemon keeps execution and workspace allocation disabled.
 - `internal/api`: authenticated loopback administration contracts and handlers.
 - `internal/daemon`: application composition, lifecycle, local API ownership, share runtimes, and shutdown ordering.
 - `cmd/syncgate`: foreground daemon and local operator commands.

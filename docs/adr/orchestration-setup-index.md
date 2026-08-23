@@ -39,6 +39,7 @@ substitute for the individual decision records.
 | [Deterministic dispatch selection](../architecture/deterministic-dispatch-selection.md) | Ordered worker/node eligibility, stable preferences, closed explanations, and explicit override audit material | Implemented in Phase 1 Slice 2 |
 | [Context, contract, and attempt binding](../architecture/context-contract-attempt-binding.md) | Immutable compiled context and execution authority bound to a planned attempt before a lease or runtime action | Implemented in Phase 1 Slice 3 |
 | [Safe Git worktree provisioning](../architecture/safe-git-worktree-provisioning.md) | Pinned-base per-attempt branches, external worktrees, scoped manifests, restart ownership, and recoverable cleanup | Implemented in Phase 1 Slice 4 |
+| [Supervised Codex runtime adapter](../architecture/supervised-codex-runtime-adapter.md) | Opt-in process supervision, enforceable sandbox policy, normalized progress/usage, cancellation, restart uncertainty, and fenced structured results | Implemented in Phase 1 Slice 5; daemon composition remains disabled |
 
 Multi-writer project history, automatic conflict merging, learned routing,
 embeddings, generated retrospectives, predictions, raw transcript capture, and
