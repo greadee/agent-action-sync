@@ -35,6 +35,23 @@ The summary event is projection-rebuildable. Descriptive insights expose only
 outcome counts and nullable resource aggregates, including known/unknown counts
 and a minimum-sample warning for fewer than three accepted telemetry summaries.
 
+## Descriptive orchestration insights
+
+Slice 9 adds versioned project-scoped descriptive metrics. They calculate queue
+(created to ready), execution, review, acceptance, blocked, and parallel-overlap
+durations from accepted canonical events. Preparation and gate durations remain
+explicitly `known: false` until canonical events can identify their boundaries;
+they are never inferred as zero. Attempts, retries, failures, cancellations,
+and blocked/uncertain terminations are counts, not predictions or rankings.
+
+`telemetry_versioned_groups` hashes the exact worker, trade, provider, model,
+runtime, context, and instruction references into a stable opaque group key.
+It publishes aggregates only once a group has at least three accepted samples.
+Smaller groups are counted as suppressed and mark the metric weak, preventing a
+misleading worker or crew comparison. Every insight carries its accepted-event
+watermark, sample count, completeness, and evidence class. Rejected or pending
+records are excluded before any outcome or resource calculation.
+
 ## Memory inputs
 
 `telemetry.SummaryCandidate` deterministically derives a success or failure

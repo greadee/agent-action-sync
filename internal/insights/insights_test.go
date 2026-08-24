@@ -114,6 +114,84 @@ func TestTelemetryInsightsKeepMissingMeasurementsUnknown(t *testing.T) {
 	}
 }
 
+func TestOrchestrationInsightsSuppressSmallVersionedGroupsAndExcludeRejectedTelemetry(t *testing.T) {
+	when := time.Date(2026, 8, 20, 1, 0, 0, 0, time.UTC)
+	value := int64(12)
+	payload := telemetryPayload("worker:one")
+	payload.Observations = []project.TelemetryObservation{{Name: "input_tokens", Value: &value, Source: "provider_reported"}}
+	events := []storage.ProjectEventProjection{
+		event("created", project.EventWorkPackageCreated, when, "wp-one", "", project.WorkPackageCreatedPayload{DefinitionRecordID: "record"}),
+		event("ready", project.EventWorkPackageStateChanged, when.Add(time.Minute), "wp-one", "", project.WorkPackageStateChangedPayload{From: project.WorkPackagePlanned, To: project.WorkPackageReady}),
+		event("start", project.EventExecutionStarted, when.Add(2*time.Minute), "wp-one", "execution-one", project.ExecutionStartedPayload{ManifestRecordID: "manifest"}),
+		event("done", project.EventExecutionCompleted, when.Add(5*time.Minute), "wp-one", "execution-one", project.ExecutionCompletedPayload{}),
+		event("one", project.EventTelemetryRecorded, when.Add(5*time.Minute), "wp-one", "execution-one", payload),
+		event("two", project.EventTelemetryRecorded, when.Add(6*time.Minute), "wp-one", "execution-one", payload),
+		event("rejected", project.EventTelemetryRecorded, when.Add(7*time.Minute), "wp-one", "execution-one", payload),
+	}
+	events[len(events)-1].Status = "rejected"
+	results, err := calculate("project-insight", events, when)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var grouped map[string]any
+	for _, result := range results {
+		if result.MetricName == "telemetry_versioned_groups" {
+			if err := json.Unmarshal(result.ValueJSON, &grouped); err != nil {
+				t.Fatal(err)
+			}
+			if result.Completeness != "partial" || result.Evidence != "weak" {
+				t.Fatalf("small group quality=%s/%s", result.Completeness, result.Evidence)
+			}
+		}
+	}
+	if grouped["suppressed_small_groups"] != float64(1) {
+		t.Fatalf("small group was not suppressed: %#v", grouped)
+	}
+	if groups, ok := grouped["groups"].(map[string]any); !ok || len(groups) != 0 {
+		t.Fatalf("unsafe small group was exposed: %#v", grouped)
+	}
+	assertInsightValue(t, results, "orchestration_duration_breakdown", map[string]any{"acceptance": map[string]any{"known": false}, "blocked": map[string]any{"known": false}, "execution": map[string]any{"average_milliseconds": float64(180000), "count": float64(1), "known": true, "total_milliseconds": float64(180000)}, "gate": map[string]any{"known": false}, "parallel_overlap": map[string]any{"execution_count": float64(1), "known": true, "overlap_milliseconds": float64(0)}, "preparation": map[string]any{"known": false}, "queue": map[string]any{"average_milliseconds": float64(60000), "count": float64(1), "known": true, "total_milliseconds": float64(60000)}, "review": map[string]any{"known": false}})
+}
+
+func TestOrchestrationInsightsExposeOnlySafeVersionedGroups(t *testing.T) {
+	when := time.Date(2026, 8, 20, 2, 0, 0, 0, time.UTC)
+	value := int64(7)
+	events := make([]storage.ProjectEventProjection, 0, 3)
+	for index := 0; index < 3; index++ {
+		payload := telemetryPayload("worker:one")
+		payload.Observations = []project.TelemetryObservation{{Name: "tool_calls", Value: &value, Source: "provider_reported"}}
+		events = append(events, event("safe-"+string(rune('a'+index)), project.EventTelemetryRecorded, when.Add(time.Duration(index)*time.Minute), "wp-one", "execution-one", payload))
+	}
+	results, err := calculate("project-insight", events, when)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range results {
+		if result.MetricName == "telemetry_versioned_groups" {
+			var got map[string]any
+			if err := json.Unmarshal(result.ValueJSON, &got); err != nil {
+				t.Fatal(err)
+			}
+			groups := got["groups"].(map[string]any)
+			if len(groups) != 1 || got["suppressed_small_groups"] != float64(0) || result.Evidence != "strong" {
+				t.Fatalf("safe groups=%#v quality=%s", got, result.Evidence)
+			}
+			return
+		}
+	}
+	t.Fatal("missing telemetry_versioned_groups")
+}
+
+func telemetryPayload(workerID string) project.TelemetrySummaryPayload {
+	ref := func(id string) project.RegistryReference {
+		return project.RegistryReference{ID: id, Version: 1, Digest: hash(id)}
+	}
+	binding := func(id string) project.TelemetryBindingReference {
+		return project.TelemetryBindingReference{ID: id, Version: 1, Digest: hash(id)}
+	}
+	return project.TelemetrySummaryPayload{Worker: ref(workerID), Trade: ref("trade:one"), Provider: binding("provider:one"), Model: binding("model:one"), Runtime: binding("runtime:one"), Instruction: binding("instruction:one"), ContextDigest: hash("context"), FinalOutcome: "succeeded"}
+}
+
 func event(id string, kind project.EventType, when time.Time, workPackageID, executionID string, payload any) storage.ProjectEventProjection {
 	raw, _ := json.Marshal(payload)
 	return storage.ProjectEventProjection{ProjectID: "project-insight", EventID: id, RecordHash: hash(id), EventType: string(kind), OccurredAt: when, WorkPackageID: workPackageID, ExecutionID: executionID, ProducerWorkerID: "worker-one", ProducerDeviceID: "device-one", ProducerProvider: "provider-one", ProducerModel: "model-one", Status: "accepted", RecordPath: ".agent-project/history/events/2026/08/14/" + id + ".json", PayloadJSON: raw}

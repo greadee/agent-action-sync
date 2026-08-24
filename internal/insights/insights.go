@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"syncgate/internal/project"
@@ -33,6 +34,8 @@ var Definitions = []Definition{
 	{"retry_and_rework", DefinitionVersion}, {"work_by_producer", DefinitionVersion},
 	{"artifact_and_handoff_counts", DefinitionVersion}, {"projection_freshness", DefinitionVersion},
 	{"telemetry_outcomes", DefinitionVersion}, {"telemetry_resource_observations", DefinitionVersion},
+	{"orchestration_duration_breakdown", DefinitionVersion}, {"orchestration_outcomes", DefinitionVersion},
+	{"telemetry_versioned_groups", DefinitionVersion},
 }
 
 type Calculator struct {
@@ -90,9 +93,11 @@ func listEvents(ctx context.Context, store storage.Store, projectID string) ([]s
 }
 
 type packageState struct {
-	state             project.WorkPackageState
-	created, accepted time.Time
-	retries, rework   int64
+	state                                               project.WorkPackageState
+	created, ready, started, terminal, review, accepted time.Time
+	blockedAt                                           time.Time
+	blockedMilliseconds                                 int64
+	retries, rework                                     int64
 }
 type executionState struct {
 	started, ended time.Time
@@ -109,6 +114,12 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 			pending++
 		}
 	}
+	sort.Slice(accepted, func(i, j int) bool {
+		if accepted[i].OccurredAt.Equal(accepted[j].OccurredAt) {
+			return accepted[i].EventID < accepted[j].EventID
+		}
+		return accepted[i].OccurredAt.Before(accepted[j].OccurredAt)
+	})
 	packages := map[string]*packageState{}
 	executions := map[string]*executionState{}
 	testsPassed, testsFailed, testsSkipped := int64(0), int64(0), int64(0)
@@ -116,6 +127,7 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 	telemetryOutcomes := map[string]int64{"succeeded": 0, "failed": 0, "canceled": 0, "partial": 0}
 	telemetryTotal := int64(0)
 	telemetryKnown := map[string][]int64{"duration_milliseconds": {}, "input_tokens": {}, "output_tokens": {}, "provider_cost_micros": {}, "tool_calls": {}}
+	telemetryGroups := map[string]*versionedTelemetryGroup{}
 	groups := map[string]map[string]int64{"worker": {}, "model": {}, "provider": {}, "device": {}}
 	for _, event := range accepted {
 		addGroup(groups["worker"], event.ProducerWorkerID)
@@ -140,6 +152,19 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 				if payload.From == project.WorkPackageReview && payload.To == project.WorkPackageInProgress {
 					state.rework++
 				}
+				if payload.To == project.WorkPackageReady && state.ready.IsZero() {
+					state.ready = event.OccurredAt
+				}
+				if payload.To == project.WorkPackageReview && state.review.IsZero() {
+					state.review = event.OccurredAt
+				}
+				if payload.To == project.WorkPackageBlocked && state.blockedAt.IsZero() {
+					state.blockedAt = event.OccurredAt
+				}
+				if payload.From == project.WorkPackageBlocked && !state.blockedAt.IsZero() {
+					state.blockedMilliseconds += event.OccurredAt.Sub(state.blockedAt).Milliseconds()
+					state.blockedAt = time.Time{}
+				}
 			}
 		case project.EventWorkAccepted:
 			packages[event.WorkPackageID].state = project.WorkPackageAccepted
@@ -150,12 +175,18 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 			} else {
 				executions[event.ExecutionID].started = event.OccurredAt
 			}
+			if packages[event.WorkPackageID] != nil && packages[event.WorkPackageID].started.IsZero() {
+				packages[event.WorkPackageID].started = event.OccurredAt
+			}
 		case project.EventExecutionCompleted, project.EventExecutionFailed:
 			if executions[event.ExecutionID] == nil {
 				executions[event.ExecutionID] = &executionState{}
 			}
 			executions[event.ExecutionID].ended = event.OccurredAt
 			executions[event.ExecutionID].terminal = true
+			if packages[event.WorkPackageID] != nil && packages[event.WorkPackageID].terminal.IsZero() {
+				packages[event.WorkPackageID].terminal = event.OccurredAt
+			}
 		case project.EventTestRecorded:
 			var payload project.TestRecordedPayload
 			if json.Unmarshal(event.PayloadJSON, &payload) == nil {
@@ -184,6 +215,7 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 						}
 					}
 				}
+				addTelemetryGroup(telemetryGroups, payload)
 			}
 		}
 	}
@@ -284,6 +316,29 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 	if err := appendValue("telemetry_resource_observations", resources, telemetryTotal, partialTelemetry); err != nil {
 		return nil, err
 	}
+	durations := map[string]any{"queue": durationValue(packageDurations(packages, func(value *packageState) (time.Time, time.Time) { return value.created, value.ready })), "preparation": map[string]any{"known": false}, "execution": durationValue(packageDurations(packages, func(value *packageState) (time.Time, time.Time) { return value.started, value.terminal })), "gate": map[string]any{"known": false}, "review": durationValue(packageDurations(packages, func(value *packageState) (time.Time, time.Time) { return value.review, value.accepted })), "acceptance": durationValue(packageDurations(packages, func(value *packageState) (time.Time, time.Time) { return value.terminal, value.accepted })), "blocked": durationValue(blockedDurations(packages)), "parallel_overlap": overlapValue(executions)}
+	if err := appendValue("orchestration_duration_breakdown", durations, int64(len(packages)), true); err != nil {
+		return nil, err
+	}
+	canceled, failed, uncertain := int64(0), int64(0), int64(0)
+	for _, value := range packages {
+		if value.state == project.WorkPackageCanceled {
+			canceled++
+		}
+		if value.state == project.WorkPackageFailed {
+			failed++
+		}
+		if value.state == project.WorkPackageBlocked {
+			uncertain++
+		}
+	}
+	if err := appendValue("orchestration_outcomes", map[string]any{"attempts": int64(len(executions)), "retries": retries, "failures": failed, "cancellations": canceled, "uncertain_terminations": uncertain, "first_pass_acceptance": ratio(firstPass, acceptedPackages), "tests": map[string]int64{"passed": testsPassed, "failed": testsFailed, "skipped": testsSkipped}}, int64(len(packages)), false); err != nil {
+		return nil, err
+	}
+	groupValue, groupPartial := summarizeTelemetryGroups(telemetryGroups)
+	if err := appendValue("telemetry_versioned_groups", groupValue, telemetryTotal, groupPartial); err != nil {
+		return nil, err
+	}
 	latest := time.Time{}
 	for _, event := range accepted {
 		if event.OccurredAt.After(latest) {
@@ -294,6 +349,95 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 		return nil, err
 	}
 	return insights, nil
+}
+
+type versionedTelemetryGroup struct {
+	Count    int64
+	Outcomes map[string]int64
+	Values   map[string][]int64
+}
+
+func addTelemetryGroup(groups map[string]*versionedTelemetryGroup, payload project.TelemetrySummaryPayload) {
+	key := telemetryGroupKey(payload)
+	group := groups[key]
+	if group == nil {
+		group = &versionedTelemetryGroup{Outcomes: map[string]int64{}, Values: map[string][]int64{}}
+		groups[key] = group
+	}
+	group.Count++
+	group.Outcomes[payload.FinalOutcome]++
+	for _, observation := range payload.Observations {
+		if observation.Value != nil {
+			group.Values[observation.Name] = append(group.Values[observation.Name], *observation.Value)
+		}
+	}
+}
+func telemetryGroupKey(payload project.TelemetrySummaryPayload) string {
+	values := []string{payload.Worker.ID, fmt.Sprint(payload.Worker.Version), payload.Worker.Digest, payload.Trade.ID, fmt.Sprint(payload.Trade.Version), payload.Trade.Digest, payload.Provider.ID, fmt.Sprint(payload.Provider.Version), payload.Provider.Digest, payload.Model.ID, fmt.Sprint(payload.Model.Version), payload.Model.Digest, payload.Runtime.ID, fmt.Sprint(payload.Runtime.Version), payload.Runtime.Digest, payload.ContextDigest, payload.Instruction.ID, fmt.Sprint(payload.Instruction.Version), payload.Instruction.Digest}
+	hash := sha256.Sum256([]byte(strings.Join(values, "\x00")))
+	return hex.EncodeToString(hash[:])
+}
+func summarizeTelemetryGroups(groups map[string]*versionedTelemetryGroup) (map[string]any, bool) {
+	visible := map[string]any{}
+	suppressed := int64(0)
+	for key, group := range groups {
+		if group.Count < 3 {
+			suppressed++
+			continue
+		}
+		values := map[string]any{}
+		for name, observations := range group.Values {
+			values[name] = nullableAggregate(observations, group.Count)
+		}
+		visible[key] = map[string]any{"sample_count": group.Count, "outcomes": group.Outcomes, "observations": values, "evidence": "strong"}
+	}
+	return map[string]any{"groups": visible, "suppressed_small_groups": suppressed, "minimum_sample_warning": suppressed > 0}, suppressed > 0
+}
+func packageDurations(values map[string]*packageState, bounds func(*packageState) (time.Time, time.Time)) []int64 {
+	result := []int64{}
+	for _, value := range values {
+		start, end := bounds(value)
+		if !start.IsZero() && !end.IsZero() && !end.Before(start) {
+			result = append(result, end.Sub(start).Milliseconds())
+		}
+	}
+	return result
+}
+func blockedDurations(values map[string]*packageState) []int64 {
+	result := []int64{}
+	for _, value := range values {
+		if value.blockedMilliseconds > 0 {
+			result = append(result, value.blockedMilliseconds)
+		}
+	}
+	return result
+}
+func overlapValue(executions map[string]*executionState) map[string]any {
+	intervals := []*executionState{}
+	for _, value := range executions {
+		if !value.started.IsZero() && !value.ended.IsZero() && !value.ended.Before(value.started) {
+			intervals = append(intervals, value)
+		}
+	}
+	var total int64
+	for left := range intervals {
+		for right := left + 1; right < len(intervals); right++ {
+			start, end := intervals[left].started, intervals[left].ended
+			if intervals[right].started.After(start) {
+				start = intervals[right].started
+			}
+			if intervals[right].ended.Before(end) {
+				end = intervals[right].ended
+			}
+			if end.After(start) {
+				total += end.Sub(start).Milliseconds()
+			}
+		}
+	}
+	if len(intervals) == 0 {
+		return map[string]any{"known": false}
+	}
+	return map[string]any{"known": true, "execution_count": len(intervals), "overlap_milliseconds": total}
 }
 
 func addGroup(group map[string]int64, value string) {

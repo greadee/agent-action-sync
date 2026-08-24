@@ -226,3 +226,14 @@ Run the focused gate with:
 ```powershell
 go test ./internal/integrationgate ./internal/workspace ./internal/workhistory ./internal/project
 ```
+
+## Descriptive orchestration insight gate
+
+The insight suite rebuilds from accepted history and asserts that a rerun at the
+same watermark is identical. It treats absent provider usage as unknown,
+suppresses versioned telemetry groups below three accepted samples, and excludes
+rejected telemetry from accepted-outcome metrics.
+
+```powershell
+go test ./internal/insights
+```
