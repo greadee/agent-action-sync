@@ -100,6 +100,7 @@ Useful docs:
 - [Orchestration setup administration API](docs/architecture/orchestration-setup-administration-api.md)
 - [Orchestration operator control facade](docs/architecture/orchestration-setup-administration-api.md#operator-control-facade)
 - [Orchestration setup recovery and release gate](docs/operations/orchestration-setup-recovery.md)
+- [Orchestration pilot and recovery matrix](docs/operations/orchestration-pilot.md)
 - [Orchestration control, fencing, and recovery](docs/architecture/orchestration-control-recovery.md)
 - [Deterministic dispatch selection](docs/architecture/deterministic-dispatch-selection.md)
 - [Context, contract, and attempt binding](docs/architecture/context-contract-attempt-binding.md)
