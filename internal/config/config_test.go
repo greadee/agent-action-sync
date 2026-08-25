@@ -1,7 +1,10 @@
 package config
 
 import (
+	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -136,6 +139,49 @@ func TestConfigRejectsOverlappingDesktopRoots(t *testing.T) {
 	}
 	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
 		t.Fatal("expected overlapping data and log roots to fail")
+	}
+}
+
+func TestConfigExecutionIsDisabledByDefaultAndRequiresPreflight(t *testing.T) {
+	root := t.TempDir()
+	cfg := Config{
+		DeviceName: "DESKTOP", DataDir: filepath.Join(root, "data"),
+		Node: NodeConfig{
+			LogDir: filepath.Join(root, "logs"), RuntimeCacheDir: filepath.Join(root, "cache"),
+			WorktreeRoot: filepath.Join(root, "worktrees"), LifecycleMode: "foreground",
+		},
+	}
+	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
+		t.Fatalf("validate disabled execution: %v", err)
+	}
+	if cfg.Node.Execution.Enabled {
+		t.Fatal("execution must be disabled by default")
+	}
+	cfg.Node.Execution.Enabled = true
+	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
+		t.Fatal("expected execution without provider/runtime/preflight to fail")
+	}
+	cfg.Node.Execution = ExecutionConfig{
+		Enabled: true, ProviderID: "codex", RuntimeExecutable: filepath.Join(root, "codex.exe"),
+		PreflightReceipt: strings.Repeat("a", 64),
+	}
+	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
+		t.Fatalf("validate preflight-bound execution: %v", err)
+	}
+}
+
+func TestConfigRejectsOversizedFilesAndShareInventories(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oversized.json")
+	if err := os.WriteFile(path, []byte(strings.Repeat(" ", MaxConfigBytes+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFile(context.Background(), path); err == nil {
+		t.Fatal("expected oversized config file to fail")
+	}
+
+	cfg := Config{DeviceName: "DESKTOP", DataDir: t.TempDir(), Shares: make([]ShareConfig, MaxConfiguredShares+1)}
+	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
+		t.Fatal("expected oversized share inventory to fail")
 	}
 }
 

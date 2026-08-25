@@ -1,6 +1,15 @@
 {
   "device_name": "HOME-DESKTOP",
   "data_dir": "C:\\Users\\example\\AppData\\Local\\SyncGate",
+  "node": {
+    "log_dir": "C:\\Users\\example\\AppData\\Local\\SyncGate Logs",
+    "runtime_cache_dir": "C:\\Users\\example\\AppData\\Local\\SyncGate Cache",
+    "worktree_root": "C:\\Users\\example\\AppData\\Local\\SyncGate Worktrees",
+    "lifecycle_mode": "foreground",
+    "execution": {
+      "enabled": false
+    }
+  },
   "runtime_mode": "production",
   "identity": {
     "store": "windows_credential_manager",

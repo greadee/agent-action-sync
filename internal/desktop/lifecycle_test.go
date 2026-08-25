@@ -132,7 +132,7 @@ func TestInitializeRejectsIncompatibleDowngradeWithoutChangingState(t *testing.T
 	}
 }
 
-func TestInitializeRejectsConfigRootDriftBeforePreparingState(t *testing.T) {
+func TestInitializeFollowsActivatedConfiguredRoots(t *testing.T) {
 	roots, err := RootsUnder(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -149,16 +149,14 @@ func TestInitializeRejectsConfigRootDriftBeforePreparingState(t *testing.T) {
 	if err := writeJSONAtomic(roots.ConfigPath, cfg, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	statePath := filepath.Join(roots.DataDir, ControlStateFileName)
-	before, err := os.ReadFile(statePath)
+	result, err := Initialize(context.Background(), roots, buildinfo.Current(), now.Add(time.Hour))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("initialize configured roots: %v", err)
 	}
-	if _, err := Initialize(context.Background(), roots, buildinfo.Current(), now.Add(time.Hour)); err == nil {
-		t.Fatal("expected root drift to fail")
+	if result.Roots.WorktreeRoot != cfg.Node.WorktreeRoot {
+		t.Fatalf("configured worktree root = %q, want %q", result.Roots.WorktreeRoot, cfg.Node.WorktreeRoot)
 	}
-	after, err := os.ReadFile(statePath)
-	if err != nil || string(after) != string(before) {
-		t.Fatalf("root drift changed control state: %v", err)
+	if info, err := os.Stat(cfg.Node.WorktreeRoot); err != nil || !info.IsDir() {
+		t.Fatalf("configured worktree root was not prepared: %v", err)
 	}
 }

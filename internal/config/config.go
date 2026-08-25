@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -26,6 +27,8 @@ const (
 	RuntimeModeDevelopment      = "development"
 	IdentityStoreWindows        = "windows_credential_manager"
 	IdentityStoreDevelopment    = "development_file"
+	MaxConfigBytes              = 1 << 20
+	MaxConfiguredShares         = 1000
 )
 
 type Config struct {
@@ -40,10 +43,18 @@ type Config struct {
 }
 
 type NodeConfig struct {
-	LogDir          string `json:"log_dir,omitempty"`
-	RuntimeCacheDir string `json:"runtime_cache_dir,omitempty"`
-	WorktreeRoot    string `json:"worktree_root,omitempty"`
-	LifecycleMode   string `json:"lifecycle_mode,omitempty"`
+	LogDir          string          `json:"log_dir,omitempty"`
+	RuntimeCacheDir string          `json:"runtime_cache_dir,omitempty"`
+	WorktreeRoot    string          `json:"worktree_root,omitempty"`
+	LifecycleMode   string          `json:"lifecycle_mode,omitempty"`
+	Execution       ExecutionConfig `json:"execution,omitempty"`
+}
+
+type ExecutionConfig struct {
+	Enabled           bool   `json:"enabled"`
+	ProviderID        string `json:"provider_id,omitempty"`
+	RuntimeExecutable string `json:"runtime_executable,omitempty"`
+	PreflightReceipt  string `json:"preflight_receipt,omitempty"`
 }
 
 type IdentityConfig struct {
@@ -78,9 +89,17 @@ func LoadFile(ctx context.Context, path string) (Config, error) {
 		return Config{}, err
 	}
 
-	raw, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, MaxConfigBytes+1))
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+	if len(raw) > MaxConfigBytes {
+		return Config{}, fmt.Errorf("config exceeds %d-byte limit", MaxConfigBytes)
 	}
 
 	var cfg Config
@@ -100,6 +119,9 @@ func (cfg *Config) ApplyDefaultsAndValidate() error {
 	cfg.Node.RuntimeCacheDir = strings.TrimSpace(cfg.Node.RuntimeCacheDir)
 	cfg.Node.WorktreeRoot = strings.TrimSpace(cfg.Node.WorktreeRoot)
 	cfg.Node.LifecycleMode = strings.TrimSpace(cfg.Node.LifecycleMode)
+	cfg.Node.Execution.ProviderID = strings.TrimSpace(cfg.Node.Execution.ProviderID)
+	cfg.Node.Execution.RuntimeExecutable = strings.TrimSpace(cfg.Node.Execution.RuntimeExecutable)
+	cfg.Node.Execution.PreflightReceipt = strings.TrimSpace(cfg.Node.Execution.PreflightReceipt)
 	cfg.RuntimeMode = strings.TrimSpace(cfg.RuntimeMode)
 	cfg.Identity.Store = strings.TrimSpace(cfg.Identity.Store)
 
@@ -166,6 +188,9 @@ func (cfg *Config) ApplyDefaultsAndValidate() error {
 		return fmt.Errorf("transfer.max_parallel_transfers must be positive, got %d", cfg.Transfer.MaxParallelTransfers)
 	}
 	seenShares := map[string]bool{}
+	if len(cfg.Shares) > MaxConfiguredShares {
+		return fmt.Errorf("shares exceeds %d-entry limit", MaxConfiguredShares)
+	}
 	for i := range cfg.Shares {
 		if err := cfg.Shares[i].validate(seenShares); err != nil {
 			return fmt.Errorf("shares[%d]: %w", i, err)
@@ -225,7 +250,41 @@ func (node *NodeConfig) validate(dataDir string) error {
 	if node.LifecycleMode != "" && node.LifecycleMode != "foreground" {
 		return fmt.Errorf("unsupported lifecycle_mode %q", node.LifecycleMode)
 	}
+	if err := node.Execution.validate(); err != nil {
+		return fmt.Errorf("execution: %w", err)
+	}
 	return nil
+}
+
+func (execution *ExecutionConfig) validate() error {
+	configured := execution.ProviderID != "" || execution.RuntimeExecutable != "" || execution.PreflightReceipt != ""
+	if !configured && !execution.Enabled {
+		return nil
+	}
+	if !configIdentifier(execution.ProviderID) {
+		return errors.New("provider_id must be a lowercase identifier")
+	}
+	if !filepath.IsAbs(filepath.Clean(execution.RuntimeExecutable)) {
+		return errors.New("runtime_executable must be absolute")
+	}
+	execution.RuntimeExecutable = filepath.Clean(execution.RuntimeExecutable)
+	if len(execution.PreflightReceipt) != 64 || strings.Trim(execution.PreflightReceipt, "0123456789abcdef") != "" {
+		return errors.New("preflight_receipt must be a lowercase SHA-256 digest")
+	}
+	return nil
+}
+
+func configIdentifier(value string) bool {
+	if len(value) < 1 || len(value) > 64 {
+		return false
+	}
+	for index, character := range value {
+		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || index > 0 && character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func configPathsOverlap(left, right string) bool {

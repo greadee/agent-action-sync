@@ -91,8 +91,12 @@ try {
     $healthy = $false
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline) {
+        $previousErrorPreference = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
         & $exePath node-health --root $runtimeRoot --timeout 1s 2>$null
-        if ($LASTEXITCODE -eq 0) {
+        $healthExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousErrorPreference
+        if ($healthExitCode -eq 0) {
             $healthy = $true
             break
         }

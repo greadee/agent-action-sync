@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncgate.local/schemas/desktop-diagnostics-v1.schema.json",
+  "title": "SyncGate sanitized desktop diagnostics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "generated_at", "build", "node", "storage", "preflight", "credential", "warning_codes"],
+  "properties": {
+    "schema": { "const": "syncgate.desktop-diagnostics.v1" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "build": { "$ref": "#/$defs/build" },
+    "node": { "$ref": "#/$defs/node" },
+    "storage": { "$ref": "#/$defs/storage" },
+    "preflight": { "$ref": "#/$defs/preflight" },
+    "credential": { "$ref": "#/$defs/credential" },
+    "warning_codes": { "type": "array", "items": { "type": "string" }, "maxItems": 32, "uniqueItems": true }
+  },
+  "$defs": {
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit", "channel", "control_layout_version"],
+      "properties": {
+        "version": { "type": "string" },
+        "commit": { "type": "string" },
+        "channel": { "type": "string" },
+        "control_layout_version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["health_status", "identity_state", "configuration_id", "share_count", "opaque_share_ids", "execution_enabled"],
+      "properties": {
+        "health_status": { "enum": ["healthy", "stopped_or_unhealthy"] },
+        "identity_state": { "enum": ["initialized", "uninitialized", "invalid"] },
+        "opaque_node_id": { "type": "string", "pattern": "^node:[0-9a-f]{24}$" },
+        "configuration_id": { "type": "string", "pattern": "^config:[0-9a-f]{24}$" },
+        "share_count": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "opaque_share_ids": { "type": "array", "items": { "type": "string", "pattern": "^share:[0-9a-f]{24}$" }, "maxItems": 1000, "uniqueItems": true },
+        "execution_enabled": { "type": "boolean" }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_state_present", "database_present", "worktree_count", "worktree_count_capped"],
+      "properties": {
+        "control_state_present": { "type": "boolean" },
+        "database_present": { "type": "boolean" },
+        "worktree_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "worktree_count_capped": { "type": "boolean" }
+      }
+    },
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "check_codes"],
+      "properties": {
+        "status": { "enum": ["none", "passed", "expired", "invalid"] },
+        "check_codes": { "type": "array", "items": { "type": "string" }, "maxItems": 32, "uniqueItems": true }
+      }
+    },
+    "credential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configured"],
+      "properties": {
+        "provider_id": { "type": "string" },
+        "configured": { "type": "boolean" },
+        "storage": { "enum": ["os_credential_store"] }
+      }
+    }
+  }
+}

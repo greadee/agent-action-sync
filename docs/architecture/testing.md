@@ -138,6 +138,26 @@ decision. The gate documents a CGO-disabled race result as a skip; it must be
 completed on Linux CI or a C-enabled host. No release-gate test starts a real
 runtime, allocates a production workspace, or enables remote execution.
 
+## Desktop settings, credential, and execution opt-in gate
+
+The Windows Slice 2 gate proves that settings are staged, validated, and
+digest-confirmed before activation; the local API remains loopback-only; share
+registration is bounded; execution is disabled by default; and exported
+diagnostics contain no credentials, absolute paths, raw identity values, or
+preflight receipts. When Windows Credential Manager is available, the gate also
+uses a disposable Git project to exercise credential creation, preflight,
+enablement, disablement, and deletion. Unit tests inject the credential boundary
+so the same lifecycle remains covered on headless Windows sessions where the OS
+credential API has no usable logon session.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/check_desktop_node_slice2_release.ps1
+```
+
+Disabling execution must retain configuration, control state, registered
+shares, worktrees, and the provider credential. Slice 2 records authorization
+only; no scheduler or provider runtime is composed or started.
+
 ## Orchestration control and recovery gate
 
 Phase 1 Slice 1 adds pure reducer tests and SQLite integration coverage for

@@ -42,6 +42,36 @@ func main() {
 		runNode(os.Args[2:])
 	case "node-health":
 		runNodeHealth(os.Args[2:])
+	case "node-settings-show":
+		runNodeSettingsShow(os.Args[2:])
+	case "node-settings-stage":
+		runNodeSettingsStage(os.Args[2:])
+	case "node-share-stage":
+		runNodeShareStage(os.Args[2:])
+	case "node-settings-apply":
+		runNodeSettingsApply(os.Args[2:])
+	case "node-settings-discard":
+		runNodeSettingsDiscard(os.Args[2:])
+	case "node-identity-status":
+		runNodeIdentityStatus(os.Args[2:])
+	case "node-credential-set":
+		runNodeCredentialSet(os.Args[2:])
+	case "node-credential-status":
+		runNodeCredentialStatus(os.Args[2:])
+	case "node-credential-delete":
+		runNodeCredentialDelete(os.Args[2:])
+	case "node-disposable-mark":
+		runNodeDisposableMark(os.Args[2:])
+	case "node-execution-preflight":
+		runNodeExecutionPreflight(os.Args[2:])
+	case "node-execution-enable":
+		runNodeExecutionEnable(os.Args[2:])
+	case "node-execution-disable":
+		runNodeExecutionDisable(os.Args[2:])
+	case "node-execution-status":
+		runNodeExecutionStatus(os.Args[2:])
+	case "node-diagnostics-export":
+		runNodeDiagnosticsExport(os.Args[2:])
 	case "check-config":
 		runCheckConfig(os.Args[2:])
 	case "diagnostics":

@@ -40,6 +40,10 @@ The current implementation provides:
   version manifest, separated config/data/log/cache/worktree roots, idempotent
   first-run initialization, downgrade compatibility gate, and foreground node
   health command.
+- Staged and confirmation-bound desktop settings/share registration, OS-only
+  provider credential lifecycle, disposable-project execution opt-in, and a
+  sanitized diagnostics export containing only status, closed codes, counts,
+  and opaque IDs.
 
 ## MVP Boundary
 
@@ -73,6 +77,7 @@ Validate the Windows desktop-node release lifecycle with:
 
 ```powershell
 tools\check_desktop_node_slice1_release.ps1
+tools\check_desktop_node_slice2_release.ps1
 ```
 
 Initialize, run, and check an installed per-user node with:
@@ -81,6 +86,14 @@ Initialize, run, and check an installed per-user node with:
 syncgate node-init
 syncgate node-run
 syncgate node-health
+```
+
+Execution remains disabled by default. Inspect the bounded local surfaces with:
+
+```powershell
+syncgate node-settings-show
+syncgate node-identity-status
+syncgate node-execution-status
 ```
 
 Manual local send-once smoke path:
@@ -124,6 +137,9 @@ Useful docs:
 - [Desktop node packaging and lifecycle decision](docs/adr/phase-7-desktop-node-foundation.md)
 - [Desktop node installation and recovery](docs/operations/desktop-node-installation.md)
 - [Desktop version manifest v1](docs/protocol/desktop-version-manifest-v1.schema.json)
+- [Desktop settings, credentials, and execution opt-in decision](docs/adr/phase-8-desktop-settings-credentials.md)
+- [Desktop configuration and credential lifecycle](docs/operations/desktop-node-configuration.md)
+- [Sanitized desktop diagnostics v1](docs/protocol/desktop-diagnostics-v1.schema.json)
 - [Orchestration control, fencing, and recovery](docs/architecture/orchestration-control-recovery.md)
 - [Deterministic dispatch selection](docs/architecture/deterministic-dispatch-selection.md)
 - [Context, contract, and attempt binding](docs/architecture/context-contract-attempt-binding.md)

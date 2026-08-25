@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"syncgate/internal/buildinfo"
@@ -55,10 +54,8 @@ func Initialize(ctx context.Context, roots Roots, manifest buildinfo.Manifest, n
 	} else {
 		now = now.UTC()
 	}
-	for _, directory := range []string{validated.ConfigDir, validated.DataDir, validated.LogDir, validated.RuntimeCacheDir, validated.WorktreeRoot} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			return InitializationResult{}, fmt.Errorf("create desktop directory: %w", err)
-		}
+	if err := os.MkdirAll(validated.ConfigDir, 0o700); err != nil {
+		return InitializationResult{}, fmt.Errorf("create desktop config directory: %w", err)
 	}
 
 	result := InitializationResult{Roots: validated}
@@ -96,13 +93,19 @@ func Initialize(ctx context.Context, roots Roots, manifest buildinfo.Manifest, n
 		if err != nil {
 			return InitializationResult{}, fmt.Errorf("validate existing desktop config: %w", err)
 		}
-		if !samePath(cfg.DataDir, validated.DataDir) || !samePath(cfg.Node.LogDir, validated.LogDir) ||
-			!samePath(cfg.Node.RuntimeCacheDir, validated.RuntimeCacheDir) || !samePath(cfg.Node.WorktreeRoot, validated.WorktreeRoot) {
-			return InitializationResult{}, errors.New("existing desktop config roots do not match the selected node root; use the original root until an explicit relocation is completed")
+		configured, err := RootsFromConfig(validated, cfg)
+		if err != nil {
+			return InitializationResult{}, err
+		}
+		result.Roots = configured
+	}
+	for _, directory := range []string{result.Roots.ConfigDir, result.Roots.DataDir, result.Roots.LogDir, result.Roots.RuntimeCacheDir, result.Roots.WorktreeRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return InitializationResult{}, fmt.Errorf("create desktop directory: %w", err)
 		}
 	}
 
-	statePath := filepath.Join(validated.DataDir, ControlStateFileName)
+	statePath := filepath.Join(result.Roots.DataDir, ControlStateFileName)
 	state, created, err := prepareControlState(statePath, manifest, now)
 	if err != nil {
 		return InitializationResult{}, err
@@ -151,8 +154,11 @@ func prepareControlState(path string, manifest buildinfo.Manifest, now time.Time
 	return state, created, nil
 }
 
-func samePath(left, right string) bool {
-	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
+func RootsFromConfig(base Roots, cfg config.Config) (Roots, error) {
+	return validateRoots(Roots{
+		ConfigDir: base.ConfigDir, ConfigPath: base.ConfigPath, DataDir: cfg.DataDir,
+		LogDir: cfg.Node.LogDir, RuntimeCacheDir: cfg.Node.RuntimeCacheDir, WorktreeRoot: cfg.Node.WorktreeRoot,
+	})
 }
 
 func writeJSONAtomic(path string, value any, mode os.FileMode) error {
