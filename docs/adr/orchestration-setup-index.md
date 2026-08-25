@@ -31,6 +31,7 @@ substitute for the individual decision records.
 | [Orchestration setup administration API](../architecture/orchestration-setup-administration-api.md) | Authenticated bounded setup inventory, preflight, and authority-service routes without runtime start/allocation | Implemented in Slice 8 |
 | [Descriptive orchestration insights](../architecture/telemetry-provenance-memory-inputs.md#descriptive-orchestration-insights) | Versioned, rebuildable duration/outcome metrics with unknown values and safe-sample grouping | Implemented in Slice 9 |
 | [Orchestration pilot and recovery matrix](../operations/orchestration-pilot.md) | Deterministic dispatch, gate, restart, replica, and opt-in-hosted-runtime evidence boundary | Implemented in Slice 10 |
+| [Phase 1 operations and release gate](../operations/orchestration-phase1-operations.md) | Enablement boundary, operator recovery, compatibility, incident response, and machine-checkable release evidence | Implemented in Slice 11 |
 
 ## Phase 1 pilot decisions
 
