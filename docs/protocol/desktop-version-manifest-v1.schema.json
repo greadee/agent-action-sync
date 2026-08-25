@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncgate.local/schemas/desktop-version-manifest-v1.schema.json",
+  "title": "SyncGate Desktop Node version manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "application",
+    "version",
+    "commit",
+    "built_at",
+    "channel",
+    "goos",
+    "goarch",
+    "control_layout_version",
+    "minimum_control_layout_version"
+  ],
+  "properties": {
+    "application": { "const": "SyncGate Desktop Node" },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "commit": { "type": "string", "minLength": 1 },
+    "built_at": { "type": "string", "minLength": 1 },
+    "channel": { "type": "string", "minLength": 1 },
+    "goos": { "type": "string", "minLength": 1 },
+    "goarch": { "type": "string", "minLength": 1 },
+    "control_layout_version": { "type": "integer", "minimum": 1 },
+    "minimum_control_layout_version": { "type": "integer", "minimum": 1 }
+  }
+}

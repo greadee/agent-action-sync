@@ -16,9 +16,11 @@ import (
 	"time"
 
 	"syncgate/internal/api"
+	"syncgate/internal/buildinfo"
 	"syncgate/internal/config"
 	"syncgate/internal/core"
 	"syncgate/internal/daemon"
+	"syncgate/internal/desktop"
 	"syncgate/internal/pairing"
 	syncengine "syncgate/internal/sync"
 	"syncgate/internal/transfer"
@@ -32,6 +34,14 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "version":
+		runVersion(os.Args[2:])
+	case "node-init":
+		runNodeInit(os.Args[2:])
+	case "node-run":
+		runNode(os.Args[2:])
+	case "node-health":
+		runNodeHealth(os.Args[2:])
 	case "check-config":
 		runCheckConfig(os.Args[2:])
 	case "diagnostics":
@@ -109,6 +119,95 @@ func main() {
 	default:
 		exitf("unknown command %q", os.Args[1])
 	}
+}
+
+func runVersion(args []string) {
+	flags := flag.NewFlagSet("version", flag.ExitOnError)
+	jsonOutput := flags.Bool("json", false, "print the embedded release manifest as JSON")
+	_ = flags.Parse(args)
+	manifest := buildinfo.Current()
+	if err := manifest.Validate(); err != nil {
+		exitf("invalid embedded build manifest: %v", err)
+	}
+	if *jsonOutput {
+		printJSON(manifest)
+		return
+	}
+	fmt.Printf("syncgate version=%s commit=%s built_at=%s channel=%s target=%s/%s control_layout=%d\n",
+		manifest.Version, manifest.Commit, manifest.BuiltAt, manifest.Channel, manifest.GOOS, manifest.GOARCH, manifest.ControlLayoutVersion)
+}
+
+func runNodeInit(args []string) {
+	flags := flag.NewFlagSet("node-init", flag.ExitOnError)
+	root := flags.String("root", "", "optional explicit root containing separated config, data, logs, cache, and worktrees")
+	jsonOutput := flags.Bool("json", false, "print initialization state as JSON")
+	_ = flags.Parse(args)
+	roots := resolveDesktopRoots(*root)
+	result, err := desktop.Initialize(context.Background(), roots, buildinfo.Current(), time.Now().UTC())
+	if err != nil {
+		exitf("initialize desktop node: %v", err)
+	}
+	if *jsonOutput {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("syncgate node initialized: config_created=%t state_created=%t version=%s lifecycle=foreground\n",
+		result.ConfigCreated, result.StateCreated, result.State.LastPreparedVersion)
+	fmt.Printf("config=%s\ndata=%s\nlogs=%s\ncache=%s\nworktrees=%s\n",
+		result.Roots.ConfigPath, result.Roots.DataDir, result.Roots.LogDir, result.Roots.RuntimeCacheDir, result.Roots.WorktreeRoot)
+}
+
+func runNode(args []string) {
+	flags := flag.NewFlagSet("node-run", flag.ExitOnError)
+	root := flags.String("root", "", "optional explicit root containing separated mutable node state")
+	_ = flags.Parse(args)
+	roots := resolveDesktopRoots(*root)
+	if _, err := desktop.Initialize(context.Background(), roots, buildinfo.Current(), time.Now().UTC()); err != nil {
+		exitf("prepare desktop node: %v", err)
+	}
+	cfg, err := config.LoadFile(context.Background(), roots.ConfigPath)
+	if err != nil {
+		exitf("load desktop node config: %v", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fmt.Printf("syncgate desktop node starting: lifecycle=foreground health=http://%s:%d/healthz\n", cfg.LocalAPI.Host, cfg.LocalAPI.Port)
+	if err := daemon.RunConfig(ctx, roots.ConfigPath, daemon.Options{}); err != nil {
+		exitf("run desktop node: %v", err)
+	}
+}
+
+func runNodeHealth(args []string) {
+	flags := flag.NewFlagSet("node-health", flag.ExitOnError)
+	root := flags.String("root", "", "optional explicit root containing separated mutable node state")
+	timeout := flags.Duration("timeout", 3*time.Second, "maximum loopback health-check duration")
+	_ = flags.Parse(args)
+	roots := resolveDesktopRoots(*root)
+	cfg, err := config.LoadFile(context.Background(), roots.ConfigPath)
+	if err != nil {
+		exitf("load desktop node config: %v", err)
+	}
+	health, err := desktop.CheckHealth(context.Background(), cfg.LocalAPI.Host, cfg.LocalAPI.Port, *timeout)
+	if err != nil {
+		exitf("desktop node is unhealthy: %v", err)
+	}
+	fmt.Printf("syncgate node health=%s endpoint=http://%s:%d/healthz\n", health.Status, cfg.LocalAPI.Host, cfg.LocalAPI.Port)
+}
+
+func resolveDesktopRoots(root string) desktop.Roots {
+	var (
+		roots desktop.Roots
+		err   error
+	)
+	if strings.TrimSpace(root) == "" {
+		roots, err = desktop.DefaultRoots()
+	} else {
+		roots, err = desktop.RootsUnder(root)
+	}
+	if err != nil {
+		exitf("resolve desktop node paths: %v", err)
+	}
+	return roots
 }
 
 func runIdentityMigrate(args []string) {

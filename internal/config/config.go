@@ -31,11 +31,19 @@ const (
 type Config struct {
 	DeviceName  string         `json:"device_name"`
 	DataDir     string         `json:"data_dir"`
+	Node        NodeConfig     `json:"node,omitempty"`
 	RuntimeMode string         `json:"runtime_mode"`
 	Identity    IdentityConfig `json:"identity"`
 	LocalAPI    LocalAPIConfig `json:"local_api"`
 	Transfer    TransferConfig `json:"transfer"`
 	Shares      []ShareConfig  `json:"shares"`
+}
+
+type NodeConfig struct {
+	LogDir          string `json:"log_dir,omitempty"`
+	RuntimeCacheDir string `json:"runtime_cache_dir,omitempty"`
+	WorktreeRoot    string `json:"worktree_root,omitempty"`
+	LifecycleMode   string `json:"lifecycle_mode,omitempty"`
 }
 
 type IdentityConfig struct {
@@ -88,6 +96,10 @@ func LoadFile(ctx context.Context, path string) (Config, error) {
 func (cfg *Config) ApplyDefaultsAndValidate() error {
 	cfg.DeviceName = strings.TrimSpace(cfg.DeviceName)
 	cfg.DataDir = strings.TrimSpace(cfg.DataDir)
+	cfg.Node.LogDir = strings.TrimSpace(cfg.Node.LogDir)
+	cfg.Node.RuntimeCacheDir = strings.TrimSpace(cfg.Node.RuntimeCacheDir)
+	cfg.Node.WorktreeRoot = strings.TrimSpace(cfg.Node.WorktreeRoot)
+	cfg.Node.LifecycleMode = strings.TrimSpace(cfg.Node.LifecycleMode)
 	cfg.RuntimeMode = strings.TrimSpace(cfg.RuntimeMode)
 	cfg.Identity.Store = strings.TrimSpace(cfg.Identity.Store)
 
@@ -116,6 +128,9 @@ func (cfg *Config) ApplyDefaultsAndValidate() error {
 	}
 	if cfg.DataDir == "" {
 		return errors.New("data_dir is required")
+	}
+	if err := cfg.Node.validate(cfg.DataDir); err != nil {
+		return fmt.Errorf("node: %w", err)
 	}
 	switch cfg.RuntimeMode {
 	case RuntimeModeProduction:
@@ -150,10 +165,6 @@ func (cfg *Config) ApplyDefaultsAndValidate() error {
 	if cfg.Transfer.MaxParallelTransfers < 1 {
 		return fmt.Errorf("transfer.max_parallel_transfers must be positive, got %d", cfg.Transfer.MaxParallelTransfers)
 	}
-	if len(cfg.Shares) == 0 {
-		return errors.New("at least one share is required")
-	}
-
 	seenShares := map[string]bool{}
 	for i := range cfg.Shares {
 		if err := cfg.Shares[i].validate(seenShares); err != nil {
@@ -162,6 +173,72 @@ func (cfg *Config) ApplyDefaultsAndValidate() error {
 	}
 
 	return nil
+}
+
+func (node *NodeConfig) validate(dataDir string) error {
+	configuredPaths := 0
+	for _, path := range []string{node.LogDir, node.RuntimeCacheDir, node.WorktreeRoot} {
+		if path != "" {
+			configuredPaths++
+		}
+	}
+	if configuredPaths != 0 && configuredPaths != 3 {
+		return errors.New("log_dir, runtime_cache_dir, and worktree_root must be configured together")
+	}
+	if configuredPaths == 3 {
+		cleanedDataDir := filepath.Clean(dataDir)
+		if !filepath.IsAbs(cleanedDataDir) {
+			return errors.New("data_dir must be absolute when desktop paths are configured")
+		}
+		configured := []struct {
+			name string
+			path string
+		}{{name: "data_dir", path: cleanedDataDir}}
+		paths := []struct {
+			name  string
+			value *string
+		}{
+			{name: "log_dir", value: &node.LogDir},
+			{name: "runtime_cache_dir", value: &node.RuntimeCacheDir},
+			{name: "worktree_root", value: &node.WorktreeRoot},
+		}
+		for _, path := range paths {
+			cleaned := filepath.Clean(*path.value)
+			if !filepath.IsAbs(cleaned) {
+				return fmt.Errorf("%s must be absolute", path.name)
+			}
+			for _, previous := range configured {
+				if configPathsOverlap(previous.path, cleaned) {
+					return fmt.Errorf("%s must be separate from %s", path.name, previous.name)
+				}
+			}
+			configured = append(configured, struct {
+				name string
+				path string
+			}{name: path.name, path: cleaned})
+			*path.value = cleaned
+		}
+	}
+	if node.LifecycleMode == "" && configuredPaths == 3 {
+		node.LifecycleMode = "foreground"
+	}
+	if node.LifecycleMode != "" && node.LifecycleMode != "foreground" {
+		return fmt.Errorf("unsupported lifecycle_mode %q", node.LifecycleMode)
+	}
+	return nil
+}
+
+func configPathsOverlap(left, right string) bool {
+	if strings.EqualFold(filepath.Clean(left), filepath.Clean(right)) {
+		return true
+	}
+	for _, pair := range [][2]string{{left, right}, {right, left}} {
+		relative, err := filepath.Rel(pair[0], pair[1])
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (share *ShareConfig) validate(seen map[string]bool) error {

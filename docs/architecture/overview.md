@@ -37,6 +37,9 @@ The initial agent is split into these domains:
   explicit human acceptance through `workhistory`; it never merges changes.
 - `internal/api`: authenticated loopback administration contracts and handlers.
 - `internal/daemon`: application composition, lifecycle, local API ownership, share runtimes, and shutdown ordering.
+- `internal/buildinfo` and `internal/desktop`: release identity, separated
+  per-user mutable roots, first-run configuration, upgrade/downgrade layout
+  compatibility, and bounded loopback health checks.
 - `cmd/syncgate`: foreground daemon and local operator commands.
 
 The sync domain must not import concrete transport, SQLite, UI, coordinator,

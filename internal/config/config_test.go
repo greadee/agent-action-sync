@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestConfigDefaultsAndValidate(t *testing.T) {
 	cfg := Config{
@@ -90,6 +93,49 @@ func TestConfigRejectsNonLoopbackLocalAPI(t *testing.T) {
 
 	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
 		t.Fatal("expected non-loopback local API host to be rejected")
+	}
+}
+
+func TestConfigAllowsUnregisteredFirstRunNode(t *testing.T) {
+	root := t.TempDir()
+	cfg := Config{
+		DeviceName: "NEW-DESKTOP",
+		DataDir:    filepath.Join(root, "data"),
+		Node: NodeConfig{
+			LogDir:          filepath.Join(root, "logs"),
+			RuntimeCacheDir: filepath.Join(root, "cache"),
+			WorktreeRoot:    filepath.Join(root, "worktrees"),
+			LifecycleMode:   "foreground",
+		},
+	}
+	if err := cfg.ApplyDefaultsAndValidate(); err != nil {
+		t.Fatalf("validate empty first-run node: %v", err)
+	}
+	if len(cfg.Shares) != 0 {
+		t.Fatalf("first-run shares = %d, want 0", len(cfg.Shares))
+	}
+}
+
+func TestConfigRequiresCompleteDesktopPathSet(t *testing.T) {
+	root := t.TempDir()
+	cfg := Config{DeviceName: "DESKTOP", DataDir: filepath.Join(root, "data"), Node: NodeConfig{LogDir: filepath.Join(root, "logs")}}
+	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
+		t.Fatal("expected partial desktop path configuration to fail")
+	}
+}
+
+func TestConfigRejectsOverlappingDesktopRoots(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	cfg := Config{
+		DeviceName: "DESKTOP", DataDir: dataDir,
+		Node: NodeConfig{
+			LogDir: dataDir, RuntimeCacheDir: filepath.Join(root, "cache"),
+			WorktreeRoot: filepath.Join(root, "worktrees"), LifecycleMode: "foreground",
+		},
+	}
+	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
+		t.Fatal("expected overlapping data and log roots to fail")
 	}
 }
 

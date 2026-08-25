@@ -5,10 +5,11 @@ Private Sync Gate is a cross-platform, personal file transfer and one-way synchr
 The repository now contains the trusted transfer and one-way synchronization
 foundation, a foreground daemon, production pairing and mutual TLS, an
 authenticated loopback administration API, and the single-authority Agent
-Project history and projection foundation. It is still an active development
-project. Orchestration runtimes, remote administration, discovery,
-relay/coordinator services, browser access, and multi-writer synchronization
-remain disabled or deferred.
+Project history and projection foundation. It also contains the Windows desktop
+node packaging and first-run lifecycle foundation. It is still an active
+development project. Remote administration, discovery, relay/coordinator
+services, browser access, and multi-writer synchronization remain disabled or
+deferred.
 
 ## Current Status
 
@@ -35,6 +36,10 @@ The current implementation provides:
 - An authenticated, loopback-only administration API with bounded inventory, job control, pairing, project migration, history, artifact, insight, rejection, and rebuild operations.
 - Single-authority Agent Project manifests, immutable task DAG/work-package and execution history, deterministic readiness and context compilation, local trade/worker registry, immutable execution contracts, provider-neutral runtime/node/workspace contracts, an opt-in bounded DAG scheduler with deterministic fakes, authority-owned result/test/review/human-integration gates, handoffs, artifacts, SQLite projection/rebuild, and descriptive insights.
 - Integration, fuzz, and package-level tests for the transfer and synchronization paths.
+- A per-user Windows installer definition, signed-release build gate, embedded
+  version manifest, separated config/data/log/cache/worktree roots, idempotent
+  first-run initialization, downgrade compatibility gate, and foreground node
+  health command.
 
 ## MVP Boundary
 
@@ -62,6 +67,20 @@ Validate the current scaffold with:
 
 ```powershell
 tools\test.ps1
+```
+
+Validate the Windows desktop-node release lifecycle with:
+
+```powershell
+tools\check_desktop_node_slice1_release.ps1
+```
+
+Initialize, run, and check an installed per-user node with:
+
+```powershell
+syncgate node-init
+syncgate node-run
+syncgate node-health
 ```
 
 Manual local send-once smoke path:
@@ -102,6 +121,9 @@ Useful docs:
 - [Orchestration setup recovery and release gate](docs/operations/orchestration-setup-recovery.md)
 - [Orchestration pilot and recovery matrix](docs/operations/orchestration-pilot.md)
 - [Phase 1 orchestration operations and release gate](docs/operations/orchestration-phase1-operations.md)
+- [Desktop node packaging and lifecycle decision](docs/adr/phase-7-desktop-node-foundation.md)
+- [Desktop node installation and recovery](docs/operations/desktop-node-installation.md)
+- [Desktop version manifest v1](docs/protocol/desktop-version-manifest-v1.schema.json)
 - [Orchestration control, fencing, and recovery](docs/architecture/orchestration-control-recovery.md)
 - [Deterministic dispatch selection](docs/architecture/deterministic-dispatch-selection.md)
 - [Context, contract, and attempt binding](docs/architecture/context-contract-attempt-binding.md)

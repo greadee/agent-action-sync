@@ -1,0 +1,17 @@
+SyncGate uninstall preservation policy
+======================================
+
+The uninstaller removes only the installed application files and shortcuts.
+It does not delete per-user configuration, SQLite/control state, logs, runtime
+cache, registered project folders, or Git worktrees.
+
+Default preserved locations:
+
+  %APPDATA%\SyncGate\config.json
+  %LOCALAPPDATA%\SyncGate\data
+  %LOCALAPPDATA%\SyncGate\logs
+  %LOCALAPPDATA%\SyncGate\cache
+  %LOCALAPPDATA%\SyncGate\worktrees
+
+Project folders registered outside these roots are also never removed by the
+uninstaller. Removing preserved data is a separate, explicit operator action.

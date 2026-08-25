@@ -55,3 +55,8 @@ jobs:
       - name: Run focused race detector
         if: runner.os == 'Linux'
         run: go test -race ./internal/sync ./internal/transfer ./internal/filesystem
+
+      - name: Run desktop node Slice 1 release gate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: tools/check_desktop_node_slice1_release.ps1 -SkipTests

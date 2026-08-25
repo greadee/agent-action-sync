@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -19,9 +20,37 @@ import (
 	"syncgate/internal/config"
 	"syncgate/internal/core"
 	"syncgate/internal/daemon"
+	"syncgate/internal/desktop"
 	"syncgate/internal/identity"
 	syncengine "syncgate/internal/sync"
 )
+
+func TestFirstRunDesktopNodeStartsHealthyWithoutRegisteredShares(t *testing.T) {
+	cfg := config.Config{
+		DeviceName: "FIRST-RUN", DataDir: t.TempDir(), RuntimeMode: config.RuntimeModeDevelopment,
+		Identity: config.IdentityConfig{Store: config.IdentityStoreDevelopment, AllowInsecureDevelopmentFile: true},
+		LocalAPI: config.LocalAPIConfig{Host: "127.0.0.1", Port: integrationFreePort(t)},
+		Shares:   []config.ShareConfig{},
+	}
+	credentialStore := &integrationCredentialStore{credential: integrationAdminCredential(0x60)}
+	instance, client, cancel, done := startAdminDaemon(t, cfg, daemon.Options{AdminCredentialStore: credentialStore})
+	defer client.Close()
+	health, err := desktop.CheckHealth(context.Background(), cfg.LocalAPI.Host, cfg.LocalAPI.Port, time.Second)
+	if err != nil || health.Status != "ok" {
+		t.Fatalf("first-run health = %#v err=%v", health, err)
+	}
+	status, err := client.Status(context.Background())
+	if err != nil || status.ActiveShareCount != 0 || status.Lifecycle != api.LifecycleRunning {
+		t.Fatalf("first-run status = %#v err=%v", status, err)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("stop first-run daemon: %v", err)
+	}
+	if err := instance.Close(); err != nil && !errors.Is(err, daemon.ErrClosed) {
+		t.Fatalf("close first-run daemon: %v", err)
+	}
+}
 
 func TestLocalAdminAPIAcceptanceAndRestart(t *testing.T) {
 	ctx := context.Background()
