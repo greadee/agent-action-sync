@@ -17,6 +17,7 @@ const (
 	ControlDirectory           = ".agent-project"
 	ManifestRelativePath       = ControlDirectory + "/manifest.json"
 	HistoryEventsDirectory     = ControlDirectory + "/history/events"
+	TasksDirectory             = ControlDirectory + "/tasks"
 	WorkPackagesDirectory      = ControlDirectory + "/work-packages"
 	ExecutionsDirectory        = ControlDirectory + "/executions"
 	ArtifactManifestsDirectory = ControlDirectory + "/artifacts/manifests"
@@ -127,6 +128,26 @@ func WorkPackageDefinitionRelativePath(workPackageID string) (string, error) {
 	return validatedBuiltPath("build work package path", WorkPackagesDirectory+"/"+pathKey(workPackageID)+"/definition.json")
 }
 
+func TaskRevisionRelativePath(taskID string, revision int64) (string, error) {
+	if err := validateNamespacedIdentifier("task_id", taskID, "task:"); err != nil {
+		return "", domainError(ErrUnsafePath, "build task revision path", err)
+	}
+	if revision < 1 || revision > MaxAggregateRevision {
+		return "", domainError(ErrUnsafePath, "build task revision path", fmt.Errorf("task revision must be between 1 and %d", MaxAggregateRevision))
+	}
+	return validatedBuiltPath("build task revision path", fmt.Sprintf("%s/%s/revisions/%d/task.json", TasksDirectory, taskPathKey(taskID), revision))
+}
+
+func DependencyGraphRevisionRelativePath(taskID string, taskRevision, graphRevision int64) (string, error) {
+	if err := validateNamespacedIdentifier("task_id", taskID, "task:"); err != nil {
+		return "", domainError(ErrUnsafePath, "build dependency graph path", err)
+	}
+	if taskRevision < 1 || taskRevision > MaxAggregateRevision || graphRevision < 1 || graphRevision > MaxAggregateRevision {
+		return "", domainError(ErrUnsafePath, "build dependency graph path", fmt.Errorf("task and graph revisions must be between 1 and %d", MaxAggregateRevision))
+	}
+	return validatedBuiltPath("build dependency graph path", fmt.Sprintf("%s/%s/revisions/%d/graphs/%d.json", TasksDirectory, taskPathKey(taskID), taskRevision, graphRevision))
+}
+
 func ExecutionManifestRelativePath(executionID string) (string, error) {
 	if err := validateIdentifier("execution_id", executionID, true); err != nil {
 		return "", domainError(ErrUnsafePath, "build execution path", err)
@@ -187,6 +208,20 @@ func RecordRelativePath(record any) (string, error) {
 		return ManifestRelativePath, nil
 	case WorkPackageDefinition:
 		return WorkPackageDefinitionRelativePath(value.WorkPackageID)
+	case TaskRevision:
+		return TaskRevisionRelativePath(value.TaskID, value.Revision)
+	case *TaskRevision:
+		if value == nil {
+			return "", domainError(ErrUnsafePath, "build project record path", errors.New("record is nil"))
+		}
+		return TaskRevisionRelativePath(value.TaskID, value.Revision)
+	case DependencyGraphRevision:
+		return DependencyGraphRevisionRelativePath(value.TaskID, value.TaskRevision, value.Revision)
+	case *DependencyGraphRevision:
+		if value == nil {
+			return "", domainError(ErrUnsafePath, "build project record path", errors.New("record is nil"))
+		}
+		return DependencyGraphRevisionRelativePath(value.TaskID, value.TaskRevision, value.Revision)
 	case *WorkPackageDefinition:
 		if value == nil {
 			return "", domainError(ErrUnsafePath, "build project record path", errors.New("record is nil"))
@@ -226,7 +261,13 @@ func RecordRelativePath(record any) (string, error) {
 }
 
 func pathKey(identifier string) string {
-	return strings.ToLower(identifier)
+	// Namespaced IDs are portable record identities, but ':' is not a valid
+	// Windows path character. Keep the identity losslessly encoded on disk.
+	return strings.ReplaceAll(strings.ToLower(identifier), ":", "%3a")
+}
+
+func taskPathKey(taskID string) string {
+	return strings.ReplaceAll(pathKey(taskID), ":", "%3a")
 }
 
 func validatedBuiltPath(operation, relativePath string) (string, error) {

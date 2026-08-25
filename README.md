@@ -1,8 +1,14 @@
 # Private Sync Gate
 
-Private Sync Gate is a cross-platform, personal file transfer and one-way synchronization agent for trusted computers. The product goal is to let an owner run agents across multiple machines, coordinate shared workspaces, and move files between those machines without turning a home computer into an open public file server.
+Private Sync Gate is a cross-platform, personal file transfer and one-way synchronization agent for trusted computers. The product goal is to let an owner coordinate shared workspaces and move files between those machines without turning a home computer into an open public file server.
 
-The repository now contains the local transfer and one-way synchronization foundation. It is still an active development project: daemon lifecycle management, production pairing and mutual authentication, and a stable external API remain on the roadmap.
+The repository now contains the trusted transfer and one-way synchronization
+foundation, a foreground daemon, production pairing and mutual TLS, an
+authenticated loopback administration API, and the single-authority Agent
+Project history and projection foundation. It is still an active development
+project. Orchestration runtimes, remote administration, discovery,
+relay/coordinator services, browser access, and multi-writer synchronization
+remain disabled or deferred.
 
 ## Current Status
 
@@ -25,6 +31,9 @@ The current implementation provides:
 - Manual send-once and receive-once commands over development TCP/TLS.
 - One-way folder scanning, revision manifests, reconciliation, deletion guards, and safe receiver-side apply.
 - Persistent synchronization jobs, retries, watcher reconciliation, scheduler safety, and per-share diagnostics.
+- A foreground daemon with production Windows credential storage, explicit pairing and revocation, and paired mutual-TLS transport.
+- An authenticated, loopback-only administration API with bounded inventory, job control, pairing, project migration, history, artifact, insight, rejection, and rebuild operations.
+- Single-authority Agent Project manifests, immutable task DAG/work-package and execution history, deterministic readiness and context compilation, local trade/worker registry, immutable execution contracts, provider-neutral runtime/node/workspace contracts, an opt-in bounded DAG scheduler with deterministic fakes, authority-owned result/test/review/human-integration gates, handoffs, artifacts, SQLite projection/rebuild, and descriptive insights.
 - Integration, fuzz, and package-level tests for the transfer and synchronization paths.
 
 ## MVP Boundary
@@ -42,7 +51,10 @@ The current MVP boundary is local, owner-controlled transfer and one-way synchro
 - Receiver-authoritative writes with temporary files, verification, and atomic commit.
 - Explicit one-way change permissions and guarded deletions.
 
-Later phases add daemon lifecycle management, production pairing and mutual authentication, a stable API, LAN discovery, browser portal access, coordinator/relay services, and direct remote connectivity.
+Later phases add the remaining supervised-execution controls, LAN discovery,
+browser portal access, coordinator/relay services, direct remote connectivity,
+and separately designed multi-writer synchronization. File sync does not start
+agent runtimes or provide arbitrary remote shell access.
 
 ## Development
 
@@ -75,6 +87,28 @@ Useful docs:
 - [Deterministic work insights](docs/architecture/work-insights.md)
 - [Agent Project administration API](docs/architecture/project-administration-api.md)
 - [Agent Project migration and recovery](docs/operations/agent-project-migration.md)
+- [Orchestration setup entry gate](docs/architecture/orchestration-setup-entry-gate.md)
+- [Orchestration ADR index](docs/adr/orchestration-setup-index.md)
+- [Orchestration domain and authority decision](docs/adr/phase-5-orchestration-domain-authority.md)
+- [Task graph validation and readiness](docs/architecture/task-graph-readiness.md)
+- [Trade and worker registry](docs/architecture/trade-worker-registry.md)
+- [Project Context Compiler v1](docs/architecture/project-context-compiler.md)
+- [Execution contract and permission policy](docs/architecture/execution-contract-policy.md)
+- [Runtime, compute node, workspace, and result intake](docs/architecture/runtime-node-workspace-result-intake.md)
+- [Telemetry, provenance, and memory inputs](docs/architecture/telemetry-provenance-memory-inputs.md)
+- [Advanced-feature seams and evidence gates](docs/architecture/advanced-feature-seams.md)
+- [Orchestration setup administration API](docs/architecture/orchestration-setup-administration-api.md)
+- [Orchestration operator control facade](docs/architecture/orchestration-setup-administration-api.md#operator-control-facade)
+- [Orchestration setup recovery and release gate](docs/operations/orchestration-setup-recovery.md)
+- [Orchestration pilot and recovery matrix](docs/operations/orchestration-pilot.md)
+- [Phase 1 orchestration operations and release gate](docs/operations/orchestration-phase1-operations.md)
+- [Orchestration control, fencing, and recovery](docs/architecture/orchestration-control-recovery.md)
+- [Deterministic dispatch selection](docs/architecture/deterministic-dispatch-selection.md)
+- [Context, contract, and attempt binding](docs/architecture/context-contract-attempt-binding.md)
+- [Safe Git worktree provisioning](docs/architecture/safe-git-worktree-provisioning.md)
+- [Supervised Codex runtime adapter](docs/architecture/supervised-codex-runtime-adapter.md)
+- [DAG scheduler and bounded execution](docs/architecture/dag-scheduler-bounded-execution.md)
+- [Result, review, and human integration gate](docs/architecture/result-review-integration-gate.md)
 - [Testing](docs/architecture/testing.md)
 - [Threat model](docs/threat-model/initial-threat-model.md)
 - [Database schema](docs/architecture/database-schema.md)

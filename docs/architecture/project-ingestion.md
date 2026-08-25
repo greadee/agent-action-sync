@@ -14,6 +14,8 @@ record shapes:
 
 - `manifest.json`
 - `history/events/YYYY/MM/DD/<event-id>.json`
+- `tasks/<task-path-key>/revisions/<task-revision>/task.json`
+- `tasks/<task-path-key>/revisions/<task-revision>/graphs/<graph-revision>.json`
 - `work-packages/<work-package-id>/definition.json`
 - `executions/<execution-id>/manifest.json`
 - `executions/<execution-id>/handoff.json`
@@ -35,8 +37,8 @@ traversal order. An unchanged digest is a safe no-op.
 An ingestion run performs these durable steps:
 
 1. Idempotently register the validated root manifest.
-2. When the candidate-set digest changed, replace all event, artifact, and
-   rejection projection rows in one SQLite transaction.
+2. When the candidate-set digest changed, replace all event, artifact, task,
+   task-node, and rejection projection rows in one SQLite transaction.
 3. Advance the record-set checkpoint in a second transaction.
 
 The checkpoint is never written before the projection transaction commits. A
@@ -54,6 +56,14 @@ projecting events. An event with a missing referenced record is stored as
 `pending`, retaining its canonical payload and typed query fields. When a later
 run sees the dependency, the identical event hash is reconciled to `accepted`.
 No placeholder work package, execution, artifact, or event is invented.
+
+A task projection requires its exact task revision, graph revision, and every
+member work-package definition pinned by the graph. An incomplete or
+conflicting aggregate is rejected locally and cannot report readiness. When a
+late definition arrives, the next sorted candidate-set rebuild validates the
+complete graph and recreates the task and node projections from canonical
+events. Deleting SQLite task rows and running an explicit rebuild produces the
+same event watermark, readiness, parallel-ready set, and explanation codes.
 
 ## Rejection and quarantine
 

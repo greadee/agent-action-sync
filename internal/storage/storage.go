@@ -8,7 +8,9 @@ import (
 	"syncgate/internal/core"
 )
 
-var ErrNotFound = errors.New("storage record not found")
+var (
+	ErrNotFound = errors.New("storage record not found")
+)
 
 type Store interface {
 	Migrate(ctx context.Context) error
@@ -25,11 +27,18 @@ type Store interface {
 	ProjectRegistrations() ProjectRegistrationStore
 	ProjectEvents() ProjectEventStore
 	ProjectArtifacts() ProjectArtifactStore
+	ProjectTasks() ProjectTaskStore
+	ProjectTaskNodes() ProjectTaskNodeStore
 	ProjectCheckpoints() ProjectCheckpointStore
 	ProjectRejections() ProjectRejectionStore
 	ProjectProjections() ProjectProjectionStore
 	ProjectInsights() ProjectInsightStore
 	ProjectInsightProjections() ProjectInsightProjectionStore
+	Registry() RegistryStore
+	ExecutionContracts() ExecutionContractStore
+	ResultIntake() ResultIntakeStore
+	ExecutionTelemetry() ExecutionTelemetryStore
+	OrchestrationControl() OrchestrationControlStore
 	Close() error
 }
 

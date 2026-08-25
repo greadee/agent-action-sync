@@ -357,6 +357,382 @@ CREATE INDEX IF NOT EXISTS project_insights_lookup_idx
     ON project_insights(project_id, scope, metric_name, definition_version);
 `),
 	},
+	{
+		Version: 9,
+		Name:    "agent project task graph readiness projection",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS project_tasks (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL,
+    task_revision INTEGER NOT NULL CHECK (task_revision > 0),
+    graph_revision INTEGER NOT NULL CHECK (graph_revision > 0),
+    task_record_id TEXT NOT NULL,
+    task_record_hash TEXT NOT NULL,
+    task_record_path TEXT NOT NULL,
+    graph_record_id TEXT NOT NULL,
+    graph_record_hash TEXT NOT NULL,
+    graph_record_path TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    priority TEXT NOT NULL CHECK (priority IN ('low','normal','high','critical')),
+    state TEXT NOT NULL CHECK (state IN ('planned','waiting','ready','blocked','review','accepted','failed','canceled')),
+    explanation_code TEXT NOT NULL,
+    event_watermark TEXT NOT NULL,
+    parallel_ready_json TEXT NOT NULL CHECK (length(parallel_ready_json) <= 1048576),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, task_id, task_revision),
+    UNIQUE (project_id, task_record_id),
+    UNIQUE (project_id, task_record_path),
+    UNIQUE (project_id, graph_record_id),
+    UNIQUE (project_id, graph_record_path)
+);
+CREATE INDEX IF NOT EXISTS project_tasks_page_idx
+    ON project_tasks(project_id, task_id, task_revision);
+CREATE INDEX IF NOT EXISTS project_tasks_state_idx
+    ON project_tasks(project_id, state, task_id, task_revision);
+
+CREATE TABLE IF NOT EXISTS project_task_nodes (
+    project_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    task_revision INTEGER NOT NULL CHECK (task_revision > 0),
+    graph_revision INTEGER NOT NULL CHECK (graph_revision > 0),
+    work_package_id TEXT NOT NULL,
+    definition_record_id TEXT NOT NULL,
+    definition_hash TEXT NOT NULL,
+    definition_path TEXT NOT NULL,
+    canonical_state TEXT,
+    readiness TEXT NOT NULL CHECK (readiness IN ('planned','waiting','ready','blocked','review','accepted','failed','canceled')),
+    explanation_code TEXT NOT NULL,
+    dependencies_json TEXT NOT NULL CHECK (length(dependencies_json) <= 1048576),
+    barrier INTEGER NOT NULL CHECK (barrier IN (0,1)),
+    PRIMARY KEY (project_id, task_id, task_revision, work_package_id),
+    FOREIGN KEY (project_id, task_id, task_revision)
+        REFERENCES project_tasks(project_id, task_id, task_revision) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS project_task_nodes_readiness_idx
+    ON project_task_nodes(project_id, task_id, task_revision, readiness, work_package_id);
+`),
+	},
+	{
+		Version: 10,
+		Name:    "orchestration trade and worker registry",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS registry_trade_versions (
+    trade_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0),
+    name TEXT NOT NULL,
+    lifecycle TEXT NOT NULL CHECK (lifecycle IN ('active','deprecated','disabled')),
+    capability_tags_json TEXT NOT NULL CHECK (length(capability_tags_json) <= 1048576),
+    required_capabilities_json TEXT NOT NULL CHECK (length(required_capabilities_json) <= 1048576),
+    optional_capabilities_json TEXT NOT NULL CHECK (length(optional_capabilities_json) <= 1048576),
+    description TEXT NOT NULL,
+    evidence_json TEXT NOT NULL CHECK (length(evidence_json) <= 1048576),
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (trade_id, version)
+);
+CREATE INDEX IF NOT EXISTS registry_trade_versions_page_idx
+    ON registry_trade_versions(trade_id, version);
+CREATE INDEX IF NOT EXISTS registry_trade_versions_lifecycle_idx
+    ON registry_trade_versions(lifecycle, trade_id, version);
+
+CREATE TABLE IF NOT EXISTS registry_worker_versions (
+    worker_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0),
+    name TEXT NOT NULL,
+    lifecycle TEXT NOT NULL CHECK (lifecycle IN ('active','deprecated','disabled')),
+    trade_id TEXT NOT NULL,
+    trade_version INTEGER NOT NULL CHECK (trade_version > 0),
+    instruction_id TEXT NOT NULL,
+    instruction_version INTEGER NOT NULL CHECK (instruction_version > 0),
+    runtime_id TEXT NOT NULL,
+    runtime_version INTEGER NOT NULL CHECK (runtime_version > 0),
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    tool_policy_id TEXT NOT NULL,
+    tool_policy_version INTEGER NOT NULL CHECK (tool_policy_version > 0),
+    capability_tags_json TEXT NOT NULL CHECK (length(capability_tags_json) <= 1048576),
+    evidence_json TEXT NOT NULL CHECK (length(evidence_json) <= 1048576),
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (worker_id, version),
+    FOREIGN KEY (trade_id, trade_version) REFERENCES registry_trade_versions(trade_id, version)
+);
+CREATE INDEX IF NOT EXISTS registry_worker_versions_page_idx
+    ON registry_worker_versions(worker_id, version);
+CREATE INDEX IF NOT EXISTS registry_worker_versions_trade_idx
+    ON registry_worker_versions(trade_id, trade_version, worker_id, version);
+
+CREATE TABLE IF NOT EXISTS registry_project_trade_adaptations (
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    adaptation_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0),
+    trade_id TEXT NOT NULL,
+    trade_version INTEGER NOT NULL CHECK (trade_version > 0),
+    lifecycle TEXT NOT NULL CHECK (lifecycle IN ('active','deprecated','disabled')),
+    required_capabilities_json TEXT NOT NULL CHECK (length(required_capabilities_json) <= 1048576),
+    optional_capabilities_json TEXT NOT NULL CHECK (length(optional_capabilities_json) <= 1048576),
+    notes TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, adaptation_id, version),
+    FOREIGN KEY (trade_id, trade_version) REFERENCES registry_trade_versions(trade_id, version)
+);
+CREATE INDEX IF NOT EXISTS registry_project_trade_adaptations_page_idx
+    ON registry_project_trade_adaptations(project_id, adaptation_id, version);
+CREATE INDEX IF NOT EXISTS registry_project_trade_adaptations_trade_idx
+    ON registry_project_trade_adaptations(project_id, trade_id, trade_version, adaptation_id, version);
+
+CREATE TABLE IF NOT EXISTS registry_audit_events (
+    audit_id TEXT PRIMARY KEY,
+    action TEXT NOT NULL,
+    subject_kind TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    subject_version INTEGER NOT NULL CHECK (subject_version > 0),
+    project_id TEXT,
+    actor_id TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS registry_audit_events_page_idx
+    ON registry_audit_events(occurred_at, audit_id);
+CREATE INDEX IF NOT EXISTS registry_audit_events_project_idx
+    ON registry_audit_events(project_id, occurred_at, audit_id);
+`),
+	},
+	{
+		Version: 11,
+		Name:    "immutable execution contracts",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS execution_contract_versions (
+    contract_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0),
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL,
+    task_revision INTEGER NOT NULL CHECK (task_revision > 0),
+    graph_revision INTEGER NOT NULL CHECK (graph_revision > 0),
+    work_package_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    digest TEXT NOT NULL,
+    predecessor_digest TEXT,
+    contract_json BLOB NOT NULL CHECK (length(contract_json) <= 1048576),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (contract_id, version),
+    UNIQUE (project_id, execution_id, version)
+);
+CREATE INDEX IF NOT EXISTS execution_contract_project_idx
+    ON execution_contract_versions(project_id, contract_id, version);
+CREATE INDEX IF NOT EXISTS execution_contract_work_idx
+    ON execution_contract_versions(project_id, work_package_id, contract_id, version);
+CREATE INDEX IF NOT EXISTS execution_contract_execution_idx
+    ON execution_contract_versions(project_id, execution_id, contract_id, version);
+`),
+	},
+	{
+		Version: 12,
+		Name:    "untrusted result intake",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS orchestration_result_intake (
+    result_id TEXT PRIMARY KEY,
+    envelope_digest TEXT NOT NULL,
+    idempotency_key_digest TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    execution_id TEXT NOT NULL,
+    contract_id TEXT NOT NULL,
+    contract_version INTEGER NOT NULL CHECK (contract_version > 0),
+    contract_digest TEXT NOT NULL,
+    assignment_id TEXT NOT NULL,
+    assignment_digest TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('accepted', 'rejected')),
+    reason_code TEXT NOT NULL,
+    envelope_json BLOB NOT NULL CHECK (length(envelope_json) <= 1048576),
+    decided_at TEXT NOT NULL,
+    decided_by TEXT NOT NULL,
+    UNIQUE (project_id, execution_id, idempotency_key_digest)
+);
+CREATE INDEX IF NOT EXISTS orchestration_result_intake_execution_idx
+    ON orchestration_result_intake(project_id, execution_id, decided_at, result_id);
+CREATE INDEX IF NOT EXISTS orchestration_result_intake_contract_idx
+    ON orchestration_result_intake(contract_id, contract_version, result_id);
+`),
+	},
+	{
+		Version: 13,
+		Name:    "bounded execution telemetry",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS execution_telemetry (
+    telemetry_id TEXT PRIMARY KEY,
+    telemetry_digest TEXT NOT NULL,
+    idempotency_key_digest TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    execution_id TEXT NOT NULL,
+    contract_id TEXT NOT NULL,
+    contract_version INTEGER NOT NULL CHECK (contract_version > 0),
+    contract_digest TEXT NOT NULL,
+    final_outcome TEXT NOT NULL CHECK (final_outcome IN ('succeeded', 'failed', 'canceled', 'partial')),
+    summary_json BLOB NOT NULL CHECK (length(summary_json) <= 1048576),
+    created_at TEXT NOT NULL,
+    UNIQUE (project_id, execution_id, idempotency_key_digest)
+);
+CREATE INDEX IF NOT EXISTS execution_telemetry_execution_idx
+    ON execution_telemetry(project_id, execution_id, created_at, telemetry_id);
+CREATE INDEX IF NOT EXISTS execution_telemetry_contract_idx
+    ON execution_telemetry(contract_id, contract_version, telemetry_id);
+`),
+	},
+	{
+		Version: 14,
+		Name:    "durable orchestration control",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS orchestration_assignments (
+    assignment_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL,
+    task_revision INTEGER NOT NULL CHECK (task_revision > 0),
+    graph_revision INTEGER NOT NULL CHECK (graph_revision > 0),
+    work_package_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    contract_id TEXT NOT NULL,
+    contract_version INTEGER NOT NULL CHECK (contract_version > 0),
+    contract_digest TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('planned','leased','preparing','running','paused','collecting','awaiting_gates','accepted','failed','canceled','expired')),
+    current_attempt_id TEXT NOT NULL,
+    current_attempt_number INTEGER NOT NULL CHECK (current_attempt_number > 0),
+    idempotency_digest TEXT NOT NULL,
+    recovery_disposition TEXT NOT NULL CHECK (recovery_disposition IN ('none','resume','reconcile','needs_operator')),
+    failure_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (project_id, work_package_id)
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL,
+    work_package_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+    supersedes_attempt_id TEXT REFERENCES orchestration_attempts(attempt_id),
+    state TEXT NOT NULL CHECK (state IN ('planned','leased','preparing','running','paused','collecting','awaiting_gates','accepted','failed','canceled','expired')),
+    lease_generation INTEGER NOT NULL DEFAULT 0 CHECK (lease_generation >= 0),
+    runtime_session_id TEXT,
+    workspace_id TEXT,
+    idempotency_digest TEXT NOT NULL,
+    recovery_disposition TEXT NOT NULL CHECK (recovery_disposition IN ('none','resume','reconcile','needs_operator')),
+    failure_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (assignment_id, attempt_number),
+    UNIQUE (project_id, work_package_id, attempt_number),
+    UNIQUE (project_id, work_package_id, idempotency_digest)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS orchestration_active_attempt_idx
+    ON orchestration_attempts(project_id, work_package_id)
+    WHERE state IN ('planned','leased','preparing','running','paused','collecting','awaiting_gates');
+
+CREATE TABLE IF NOT EXISTS orchestration_leases (
+    lease_id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    generation INTEGER NOT NULL CHECK (generation > 0),
+    owner_node_id TEXT NOT NULL,
+    owner_runtime_id TEXT NOT NULL,
+    fencing_digest TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('active','released','expired')),
+    acquired_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    released_at TEXT,
+    UNIQUE (attempt_id, generation)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS orchestration_active_lease_idx
+    ON orchestration_leases(attempt_id) WHERE state = 'active';
+
+CREATE TABLE IF NOT EXISTS orchestration_resource_bindings (
+    attempt_id TEXT PRIMARY KEY REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    lease_generation INTEGER NOT NULL CHECK (lease_generation > 0),
+    runtime_session_id TEXT NOT NULL,
+    runtime_resume_key_digest TEXT NOT NULL,
+    runtime_state TEXT NOT NULL CHECK (runtime_state IN ('preparing','running','paused','stopped','unknown')),
+    workspace_id TEXT NOT NULL,
+    workspace_generation INTEGER NOT NULL CHECK (workspace_generation > 0),
+    workspace_state TEXT NOT NULL CHECK (workspace_state IN ('allocated','releasing','released','unknown')),
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_gate_status (
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    gate_id TEXT NOT NULL,
+    gate_version INTEGER NOT NULL CHECK (gate_version > 0),
+    gate_digest TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending','satisfied','failed','waived')),
+    evidence_id TEXT,
+    reason_code TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (attempt_id, gate_id, gate_version)
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_operator_decisions (
+    decision_id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    decision TEXT NOT NULL CHECK (decision IN ('cancel','retry','accept','gate_waive','reconcile')),
+    reason_code TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    idempotency_digest TEXT NOT NULL,
+    decided_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_operations (
+    operation_id TEXT PRIMARY KEY,
+    operation_digest TEXT NOT NULL,
+    assignment_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL,
+    resulting_state TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS orchestration_audit_events (
+    audit_id TEXT PRIMARY KEY,
+    assignment_id TEXT NOT NULL REFERENCES orchestration_assignments(assignment_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    from_state TEXT,
+    to_state TEXT NOT NULL,
+    reason_code TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    lease_generation INTEGER NOT NULL CHECK (lease_generation >= 0),
+    occurred_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS orchestration_assignment_state_idx
+    ON orchestration_assignments(project_id, state, updated_at, assignment_id);
+CREATE INDEX IF NOT EXISTS orchestration_audit_assignment_idx
+    ON orchestration_audit_events(assignment_id, occurred_at, audit_id);
+`),
+	},
+	{
+		Version: 15,
+		Name:    "orchestration attempt contract bindings",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS orchestration_attempt_bindings (
+    attempt_id TEXT PRIMARY KEY REFERENCES orchestration_attempts(attempt_id) ON DELETE CASCADE,
+    contract_id TEXT NOT NULL,
+    contract_version INTEGER NOT NULL CHECK (contract_version > 0),
+    contract_digest TEXT NOT NULL,
+    context_digest TEXT NOT NULL,
+    context_compiler_version TEXT NOT NULL,
+    binding_digest TEXT NOT NULL UNIQUE,
+    binding_json BLOB NOT NULL CHECK (length(binding_json) > 0 AND length(binding_json) <= 1048576),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS orchestration_attempt_binding_contract_idx
+    ON orchestration_attempt_bindings(contract_id, contract_version, attempt_id);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

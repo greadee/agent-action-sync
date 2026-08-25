@@ -187,6 +187,8 @@ type ProjectInsightWriter interface {
 type ProjectProjectionWriter interface {
 	ProjectEventStore
 	ProjectArtifactStore
+	ProjectTaskStore
+	ProjectTaskNodeStore
 	ProjectCheckpointStore
 	ProjectRejectionStore
 }

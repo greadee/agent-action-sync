@@ -34,6 +34,8 @@ type AdministrationServiceOptions struct {
 	ProjectRebuild            ProjectRebuildFunc
 	ProjectMigrationPreflight ProjectMigrationPreflightFunc
 	ProjectMigrationApply     ProjectMigrationApplyFunc
+	Setup                     SetupAdministration
+	Orchestration             OrchestrationAdministration
 }
 
 type LocalAdministrationService struct {
@@ -48,6 +50,8 @@ type LocalAdministrationService struct {
 	projectRebuild            ProjectRebuildFunc
 	projectMigrationPreflight ProjectMigrationPreflightFunc
 	projectMigrationApply     ProjectMigrationApplyFunc
+	setup                     SetupAdministration
+	orchestration             OrchestrationAdministration
 	projectMu                 sync.Mutex
 	rebuilding                map[string]bool
 	migrating                 map[string]bool
@@ -65,6 +69,7 @@ func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdmin
 		scan: options.Scan, control: options.Control, pairing: options.Pairing, projectStore: options.ProjectStore,
 		projectRebuild: options.ProjectRebuild, projectMigrationPreflight: options.ProjectMigrationPreflight,
 		projectMigrationApply: options.ProjectMigrationApply, rebuilding: map[string]bool{}, migrating: map[string]bool{},
+		setup: options.Setup, orchestration: options.Orchestration,
 	}, nil
 }
 

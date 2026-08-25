@@ -125,6 +125,45 @@ func TestDaemonProjectMigrationAPIUsesConfiguredShareAndPersistsAudit(t *testing
 	}
 }
 
+func TestDaemonSetupFacadeKeepsExecutionDisabled(t *testing.T) {
+	cfg := testConfigWithInterval(t.TempDir(), t.TempDir(), 3600)
+	cfg.LocalAPI.Port = freeLocalAPIPort(t)
+	credentialStore := &daemonCredentialStore{credential: daemonAdminCredential(0x4a)}
+	options := Options{AdminCredentialStore: credentialStore, WatcherFactory: func(string) (syncengine.Watcher, error) { return newDaemonWatcher(2), nil }}
+	instance, err := Bootstrap(context.Background(), cfg, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.ConfigureLocalAPI(options); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := runDaemon(t, instance, ctx)
+	defer func() {
+		cancel()
+		if err := waitForDaemon(t, done); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	client, err := api.NewClient(api.ClientOptions{Address: instance.LocalAPIAddress(), Credential: credentialStore.credential})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	capabilities, err := client.CapabilityInventory(context.Background())
+	if err != nil || capabilities.RuntimeExecutionEnabled || capabilities.WorkspaceAllocationEnabled || len(capabilities.Runtimes) != 0 || len(capabilities.Nodes) != 0 {
+		t.Fatalf("capabilities=%+v err=%v", capabilities, err)
+	}
+	_, err = client.CreateTaskGraph(context.Background(), api.TaskGraphCreateInput{
+		ProjectID: "project-one", TaskID: "task:one", TaskRevision: 1, GraphRevision: 1,
+		SpecificationID: "spec-one", SpecificationDigest: strings.Repeat("a", 64), IdempotencyKey: "setup-disabled",
+	})
+	var clientError *api.ClientError
+	if !errors.As(err, &clientError) || clientError.StatusCode != http.StatusServiceUnavailable || clientError.Code != "unavailable" {
+		t.Fatalf("disabled graph publication error=%v", err)
+	}
+}
+
 func TestLocalAPIConfigurationFailuresLeaveNoRunningDaemon(t *testing.T) {
 	t.Run("port conflict", func(t *testing.T) {
 		listener, err := net.Listen("tcp4", "127.0.0.1:0")

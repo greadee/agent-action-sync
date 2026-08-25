@@ -55,6 +55,8 @@ type Report struct {
 	DiscoveredRecords  int
 	ProjectedEvents    int
 	ProjectedArtifacts int
+	ProjectedTasks     int
+	ProjectedTaskNodes int
 	PendingEvents      int
 	RejectedRecords    int
 	AlreadyPresent     int
@@ -132,6 +134,10 @@ func (service *Projector) run(ctx context.Context, rootPath string, expectedShar
 		return Report{ProjectID: manifest.ProjectID, Trigger: trigger}, err
 	}
 	prepareArtifactCandidates(layout, candidates)
+	taskAggregates, err := prepareTaskAggregates(ctx, candidates)
+	if err != nil {
+		return Report{ProjectID: manifest.ProjectID, Trigger: trigger}, err
+	}
 	report := Report{ProjectID: manifest.ProjectID, Trigger: trigger, DiscoveredRecords: len(candidates)}
 	if service.Hooks.AfterDiscovery != nil {
 		if err := service.Hooks.AfterDiscovery(); err != nil {
@@ -163,6 +169,19 @@ func (service *Projector) run(ctx context.Context, rootPath string, expectedShar
 	}
 
 	state := buildProjectionState(candidates, manifest.RecordID)
+	type projectedTask struct {
+		task  storage.ProjectTaskProjection
+		nodes []storage.ProjectTaskNodeProjection
+	}
+	projectedTasks := make([]projectedTask, 0, len(taskAggregates))
+	for _, aggregate := range taskAggregates {
+		snapshot, reduceErr := aggregate.reduce(ctx, candidates, state)
+		if reduceErr != nil {
+			return report, reduceErr
+		}
+		taskProjection, nodeProjections := aggregate.project(snapshot)
+		projectedTasks = append(projectedTasks, projectedTask{task: taskProjection, nodes: nodeProjections})
+	}
 	for _, candidate := range candidates {
 		if candidate.valid {
 			continue
@@ -217,6 +236,18 @@ func (service *Projector) run(ctx context.Context, rootPath string, expectedShar
 				if result.AlreadyPresent {
 					report.AlreadyPresent++
 				}
+			}
+		}
+		for _, projected := range projectedTasks {
+			if _, err := writer.SaveProjectTask(ctx, projected.task); err != nil {
+				return err
+			}
+			report.ProjectedTasks++
+			for _, node := range projected.nodes {
+				if _, err := writer.SaveProjectTaskNode(ctx, node); err != nil {
+					return err
+				}
+				report.ProjectedTaskNodes++
 			}
 		}
 		return nil
@@ -339,6 +370,12 @@ func isCanonicalCandidateShape(relativePath string) bool {
 	if len(parts) == 4 && parts[0] == project.ControlDirectory && parts[1] == "work-packages" && parts[3] == "definition.json" {
 		return true
 	}
+	if len(parts) == 6 && parts[0] == project.ControlDirectory && parts[1] == "tasks" && parts[3] == "revisions" && parts[5] == "task.json" {
+		return true
+	}
+	if len(parts) == 7 && parts[0] == project.ControlDirectory && parts[1] == "tasks" && parts[3] == "revisions" && parts[5] == "graphs" && strings.HasSuffix(parts[6], ".json") {
+		return true
+	}
 	if len(parts) == 4 && parts[0] == project.ControlDirectory && parts[1] == "executions" && (parts[3] == "manifest.json" || parts[3] == "handoff.json") {
 		return true
 	}
@@ -348,6 +385,10 @@ func isCanonicalCandidateShape(relativePath string) bool {
 func recordProjectID(value any) string {
 	switch record := value.(type) {
 	case *project.ProjectManifest:
+		return record.ProjectID
+	case *project.TaskRevision:
+		return record.ProjectID
+	case *project.DependencyGraphRevision:
 		return record.ProjectID
 	case *project.WorkPackageDefinition:
 		return record.ProjectID
@@ -582,6 +623,12 @@ func diagnosticMessage(code string) string {
 		return "artifact content is missing or does not match its manifest"
 	case "unresolved_dependencies":
 		return "event is preserved pending referenced project records"
+	case "missing_task_graph":
+		return "task revision is preserved pending its dependency graph"
+	case "missing_task_revision":
+		return "dependency graph is preserved pending its task revision"
+	case "invalid_task_graph":
+		return "task graph failed deterministic membership or dependency validation"
 	default:
 		return "project record was not accepted"
 	}

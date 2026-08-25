@@ -11,7 +11,7 @@ import (
 const (
 	SchemaFamily        = "syncgate.agent-project"
 	SchemaMajor         = 1
-	SchemaMinor         = 0
+	SchemaMinor         = 4
 	HashAlgorithmSHA256 = "sha256"
 
 	MaxRecordBytes       = 1 << 20
@@ -22,12 +22,15 @@ const (
 	MaxTextBytes         = 8192
 	MaxListItems         = 256
 	MaxRelativePathBytes = 4096
+	MaxAggregateRevision = 1_000_000
 )
 
 type RecordKind string
 
 const (
 	RecordProjectManifest RecordKind = "project_manifest"
+	RecordTaskRevision    RecordKind = "task_revision"
+	RecordDependencyGraph RecordKind = "dependency_graph_revision"
 	RecordWorkPackage     RecordKind = "work_package_definition"
 	RecordExecution       RecordKind = "execution_manifest"
 	RecordWorkEvent       RecordKind = "work_event"
@@ -106,19 +109,113 @@ type WorkScope struct {
 	Forbidden []string `json:"forbidden,omitempty"`
 }
 
+type TaskPriority string
+
+const (
+	TaskPriorityLow      TaskPriority = "low"
+	TaskPriorityNormal   TaskPriority = "normal"
+	TaskPriorityHigh     TaskPriority = "high"
+	TaskPriorityCritical TaskPriority = "critical"
+)
+
+type RiskLevel string
+
+const (
+	RiskLow      RiskLevel = "low"
+	RiskMedium   RiskLevel = "medium"
+	RiskHigh     RiskLevel = "high"
+	RiskCritical RiskLevel = "critical"
+)
+
+type RiskDimension struct {
+	Name  string    `json:"name"`
+	Level RiskLevel `json:"level"`
+}
+
+type ResourceConstraints struct {
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
+	RequiredTools        []string `json:"required_tools,omitempty"`
+	AllowedOS            []string `json:"allowed_os,omitempty"`
+	AllowedArchitectures []string `json:"allowed_architectures,omitempty"`
+	MinimumMemoryMB      int64    `json:"minimum_memory_mb,omitempty"`
+	MinimumDiskMB        int64    `json:"minimum_disk_mb,omitempty"`
+}
+
+type QualityGateReference struct {
+	GateID   string `json:"gate_id"`
+	Version  int64  `json:"version"`
+	Digest   string `json:"digest"`
+	Required bool   `json:"required"`
+}
+
+type RevisionReference struct {
+	Revision int64  `json:"revision"`
+	Digest   string `json:"digest"`
+}
+
+// RegistryReference identifies an immutable local registry version without
+// copying provider configuration or credentials into portable project history.
+type RegistryReference struct {
+	ID      string `json:"id"`
+	Version int64  `json:"version"`
+	Digest  string `json:"digest"`
+}
+
+type TaskRevision struct {
+	RecordHeader
+	TaskID        string                 `json:"task_id"`
+	Revision      int64                  `json:"task_revision"`
+	Predecessor   *RevisionReference     `json:"predecessor,omitempty"`
+	Objective     string                 `json:"objective"`
+	Priority      TaskPriority           `json:"priority"`
+	Risk          []RiskDimension        `json:"risk,omitempty"`
+	Resources     *ResourceConstraints   `json:"resources,omitempty"`
+	GraphRevision int64                  `json:"graph_revision"`
+	QualityGates  []QualityGateReference `json:"quality_gates,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	Provenance    Provenance             `json:"provenance"`
+}
+
+type DependencyGraphMember struct {
+	WorkPackageID      string `json:"work_package_id"`
+	DefinitionRecordID string `json:"definition_record_id"`
+	DefinitionDigest   string `json:"definition_digest"`
+}
+
+type DependencyGraphRevision struct {
+	RecordHeader
+	TaskID              string                  `json:"task_id"`
+	TaskRevision        int64                   `json:"task_revision"`
+	Revision            int64                   `json:"graph_revision"`
+	Predecessor         *RevisionReference      `json:"predecessor,omitempty"`
+	Members             []DependencyGraphMember `json:"members"`
+	DependencySetDigest string                  `json:"dependency_set_digest"`
+	Barriers            []string                `json:"barriers,omitempty"`
+	CreatedAt           time.Time               `json:"created_at"`
+	Provenance          Provenance              `json:"provenance"`
+}
+
 type WorkPackageDefinition struct {
 	RecordHeader
-	WorkPackageID      string     `json:"work_package_id"`
-	Objective          string     `json:"objective"`
-	Trade              string     `json:"trade"`
-	Specialization     string     `json:"specialization,omitempty"`
-	Scope              WorkScope  `json:"scope"`
-	Dependencies       []string   `json:"dependencies,omitempty"`
-	Deliverables       []string   `json:"deliverables"`
-	AcceptanceCriteria []string   `json:"acceptance_criteria"`
-	ReviewRequired     bool       `json:"review_required"`
-	CreatedAt          time.Time  `json:"created_at"`
-	Provenance         Provenance `json:"provenance"`
+	WorkPackageID      string                 `json:"work_package_id"`
+	Objective          string                 `json:"objective"`
+	Trade              string                 `json:"trade"`
+	Specialization     string                 `json:"specialization,omitempty"`
+	Scope              WorkScope              `json:"scope"`
+	Dependencies       []string               `json:"dependencies,omitempty"`
+	Deliverables       []string               `json:"deliverables"`
+	AcceptanceCriteria []string               `json:"acceptance_criteria"`
+	ReviewRequired     bool                   `json:"review_required"`
+	TaskID             string                 `json:"task_id,omitempty"`
+	TaskRevision       int64                  `json:"task_revision,omitempty"`
+	GraphRevision      int64                  `json:"graph_revision,omitempty"`
+	Priority           TaskPriority           `json:"priority,omitempty"`
+	Risk               []RiskDimension        `json:"risk,omitempty"`
+	Resources          *ResourceConstraints   `json:"resources,omitempty"`
+	QualityGates       []QualityGateReference `json:"quality_gates,omitempty"`
+	TradeReference     *RegistryReference     `json:"trade_reference,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+	Provenance         Provenance             `json:"provenance"`
 }
 
 type ExecutionState string
@@ -133,12 +230,15 @@ const (
 
 type ExecutionManifest struct {
 	RecordHeader
-	ExecutionID   string         `json:"execution_id"`
-	WorkPackageID string         `json:"work_package_id"`
-	State         ExecutionState `json:"state"`
-	Producer      Producer       `json:"producer"`
-	CreatedAt     time.Time      `json:"created_at"`
-	Provenance    Provenance     `json:"provenance"`
+	ExecutionID       string             `json:"execution_id"`
+	WorkPackageID     string             `json:"work_package_id"`
+	State             ExecutionState     `json:"state"`
+	Producer          Producer           `json:"producer"`
+	TradeReference    *RegistryReference `json:"trade_reference,omitempty"`
+	WorkerReference   *RegistryReference `json:"worker_reference,omitempty"`
+	ContractReference *RegistryReference `json:"contract_reference,omitempty"`
+	CreatedAt         time.Time          `json:"created_at"`
+	Provenance        Provenance         `json:"provenance"`
 }
 
 type EventType string
@@ -156,6 +256,7 @@ const (
 	EventReviewRecorded          EventType = "REVIEW_RECORDED"
 	EventArtifactRecorded        EventType = "ARTIFACT_RECORDED"
 	EventWorkAccepted            EventType = "WORK_ACCEPTED"
+	EventTelemetryRecorded       EventType = "TELEMETRY_RECORDED"
 )
 
 type Correlation struct {

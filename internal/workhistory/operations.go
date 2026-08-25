@@ -3,10 +3,144 @@ package workhistory
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
+	"syncgate/internal/orchestration"
 	"syncgate/internal/project"
 )
+
+func (service *Service) CreateTask(ctx context.Context, request CreateTaskRequest) (OperationResult, error) {
+	return service.operate(ctx, request.Metadata, func(manifest project.ProjectManifest, _ project.Layout) (operationSpec, error) {
+		if !nonblank(request.TaskID, request.Objective) || request.TaskRevision != 1 || request.GraphRevision != 1 || len(request.WorkPackages) == 0 {
+			return operationSpec{}, ErrInvalidRequest
+		}
+		risk, resources, gates, barriers := orchestration.NormalizeTaskInputs(request.Risk, request.Resources, request.QualityGates, request.Barriers)
+		task := project.TaskRevision{
+			RecordHeader: project.NewRecordHeader(project.RecordTaskRevision, deterministicID("task-", manifest.ProjectID, "create-task-revision", request.IdempotencyKey), manifest.ProjectID),
+			TaskID:       request.TaskID, Revision: request.TaskRevision, Objective: redactText(request.Objective), Priority: request.Priority,
+			Risk: risk, Resources: resources, GraphRevision: request.GraphRevision, QualityGates: gates,
+			CreatedAt: request.OccurredAt, Provenance: provenance(request.Metadata, "", "", nil),
+		}
+		if _, err := portableRecordDigest(task); err != nil {
+			return operationSpec{}, fmt.Errorf("%w: task definition is invalid: %v", ErrInvalidRequest, err)
+		}
+
+		requests := append([]TaskWorkPackageRequest(nil), request.WorkPackages...)
+		sort.Slice(requests, func(i, j int) bool { return requests[i].WorkPackageID < requests[j].WorkPackageID })
+		definitions := make(map[string]orchestration.WorkPackageDefinition, len(requests))
+		records := make([]any, 0, 2+len(requests)*2)
+		records = append(records, task)
+		for _, work := range requests {
+			if _, duplicate := definitions[work.WorkPackageID]; duplicate {
+				return operationSpec{}, fmt.Errorf("%w: duplicate work package %s", ErrInvalidRequest, work.WorkPackageID)
+			}
+			if !nonblank(work.WorkPackageID, work.Objective, work.Trade) || len(work.Deliverables) == 0 || len(work.AcceptanceCriteria) == 0 {
+				return operationSpec{}, ErrInvalidRequest
+			}
+			if err := validatePaths(append(append(append([]string{}, work.Scope.Allowed...), work.Scope.Inspect...), work.Scope.Forbidden...)); err != nil {
+				return operationSpec{}, err
+			}
+			workRisk, workResources, workGates, _ := orchestration.NormalizeTaskInputs(work.Risk, work.Resources, work.QualityGates, nil)
+			if work.Priority == "" {
+				work.Priority = request.Priority
+			}
+			if len(workRisk) == 0 {
+				workRisk = append([]project.RiskDimension(nil), risk...)
+			}
+			if workResources == nil {
+				workResources = cloneResourceConstraints(resources)
+			}
+			if len(workGates) == 0 {
+				workGates = append([]project.QualityGateReference(nil), gates...)
+			}
+			dependencies := append([]string(nil), work.Dependencies...)
+			sort.Strings(dependencies)
+			definitionID := deterministicID("wp-", manifest.ProjectID, "create-task-work-package:"+work.WorkPackageID, request.IdempotencyKey)
+			definition := project.WorkPackageDefinition{
+				RecordHeader:  project.NewRecordHeader(project.RecordWorkPackage, definitionID, manifest.ProjectID),
+				WorkPackageID: work.WorkPackageID, Objective: redactText(work.Objective), Trade: redactText(work.Trade),
+				Specialization: redactText(work.Specialization), Scope: work.Scope, Dependencies: dependencies,
+				Deliverables: redactList(work.Deliverables), AcceptanceCriteria: redactList(work.AcceptanceCriteria),
+				ReviewRequired: work.ReviewRequired, TaskID: request.TaskID, TaskRevision: request.TaskRevision,
+				GraphRevision: request.GraphRevision, Priority: work.Priority, Risk: workRisk, Resources: workResources, QualityGates: workGates,
+				TradeReference: cloneRegistryReference(work.TradeReference),
+				CreatedAt:      request.OccurredAt, Provenance: provenance(request.Metadata, work.WorkPackageID, "", nil),
+			}
+			digest, err := portableRecordDigest(definition)
+			if err != nil {
+				return operationSpec{}, fmt.Errorf("%w: work package %s is invalid: %v", ErrInvalidRequest, work.WorkPackageID, err)
+			}
+			definitions[work.WorkPackageID] = orchestration.WorkPackageDefinition{Record: definition, RecordDigest: digest}
+			records = append(records, definition)
+		}
+		dependencyDigest, err := orchestration.DependencySetDigest(ctx, definitions)
+		if err != nil {
+			return operationSpec{}, err
+		}
+		members := make([]project.DependencyGraphMember, 0, len(requests))
+		for _, work := range requests {
+			definition := definitions[work.WorkPackageID]
+			members = append(members, project.DependencyGraphMember{
+				WorkPackageID: work.WorkPackageID, DefinitionRecordID: definition.Record.RecordID, DefinitionDigest: definition.RecordDigest,
+			})
+		}
+		graph := project.DependencyGraphRevision{
+			RecordHeader: project.NewRecordHeader(project.RecordDependencyGraph, deterministicID("graph-", manifest.ProjectID, "create-task-graph", request.IdempotencyKey), manifest.ProjectID),
+			TaskID:       request.TaskID, TaskRevision: request.TaskRevision, Revision: request.GraphRevision,
+			Members: members, DependencySetDigest: dependencyDigest, Barriers: barriers,
+			CreatedAt: request.OccurredAt, Provenance: provenance(request.Metadata, "", "", nil),
+		}
+		if _, err := portableRecordDigest(graph); err != nil {
+			return operationSpec{}, fmt.Errorf("%w: graph definition is invalid: %v", ErrInvalidRequest, err)
+		}
+		if err := orchestration.ValidateGraph(ctx, orchestration.Graph{Task: task, Revision: graph, Definitions: definitions}); err != nil {
+			return operationSpec{}, err
+		}
+		records = append(records, graph)
+		for _, work := range requests {
+			definition := definitions[work.WorkPackageID].Record
+			created, err := event(manifest, request.Metadata, "create-task-work-package-event:"+work.WorkPackageID, project.EventWorkPackageCreated, work.WorkPackageID, "", project.WorkPackageCreatedPayload{DefinitionRecordID: definition.RecordID})
+			if err != nil {
+				return operationSpec{}, err
+			}
+			records = append(records, created)
+		}
+		return operationSpec{records: records}, nil
+	})
+}
+
+func portableRecordDigest(record any) (string, error) {
+	raw, err := project.MarshalRecord(record)
+	if err != nil {
+		return "", err
+	}
+	decoded, err := project.DecodeRecord(raw)
+	if err != nil {
+		return "", err
+	}
+	return decoded.Digest, nil
+}
+
+func cloneResourceConstraints(value *project.ResourceConstraints) *project.ResourceConstraints {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	copy.RequiredCapabilities = append([]string(nil), value.RequiredCapabilities...)
+	copy.RequiredTools = append([]string(nil), value.RequiredTools...)
+	copy.AllowedOS = append([]string(nil), value.AllowedOS...)
+	copy.AllowedArchitectures = append([]string(nil), value.AllowedArchitectures...)
+	return &copy
+}
+
+func cloneRegistryReference(value *project.RegistryReference) *project.RegistryReference {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
 
 func (service *Service) CreateWorkPackage(ctx context.Context, request CreateWorkPackageRequest) (OperationResult, error) {
 	return service.operate(ctx, request.Metadata, func(manifest project.ProjectManifest, _ project.Layout) (operationSpec, error) {
@@ -22,7 +156,7 @@ func (service *Service) CreateWorkPackage(ctx context.Context, request CreateWor
 			WorkPackageID: request.WorkPackageID, Objective: redactText(request.Objective), Trade: redactText(request.Trade),
 			Specialization: redactText(request.Specialization), Scope: request.Scope, Dependencies: append([]string(nil), request.Dependencies...),
 			Deliverables: redactList(request.Deliverables), AcceptanceCriteria: redactList(request.AcceptanceCriteria),
-			ReviewRequired: request.ReviewRequired, CreatedAt: request.OccurredAt,
+			ReviewRequired: request.ReviewRequired, TradeReference: cloneRegistryReference(request.TradeReference), CreatedAt: request.OccurredAt,
 			Provenance: provenance(request.Metadata, request.WorkPackageID, "", nil),
 		}
 		created, err := event(manifest, request.Metadata, "create-work-package-event", project.EventWorkPackageCreated, request.WorkPackageID, "", project.WorkPackageCreatedPayload{DefinitionRecordID: definitionID})
@@ -60,7 +194,7 @@ func (service *Service) StartExecution(ctx context.Context, request StartExecuti
 		execution := project.ExecutionManifest{
 			RecordHeader: project.NewRecordHeader(project.RecordExecution, manifestID, manifest.ProjectID),
 			ExecutionID:  request.ExecutionID, WorkPackageID: request.WorkPackageID, State: project.ExecutionRunning,
-			Producer: sanitizeProducer(request.Producer), CreatedAt: request.OccurredAt,
+			Producer: sanitizeProducer(request.Producer), TradeReference: cloneRegistryReference(request.TradeReference), WorkerReference: cloneRegistryReference(request.WorkerReference), ContractReference: cloneRegistryReference(request.ContractReference), CreatedAt: request.OccurredAt,
 			Provenance: provenance(request.Metadata, request.WorkPackageID, request.ExecutionID, nil),
 		}
 		started, err := event(manifest, request.Metadata, "start-execution-event", project.EventExecutionStarted, request.WorkPackageID, request.ExecutionID, project.ExecutionStartedPayload{ManifestRecordID: manifestID})
@@ -138,9 +272,29 @@ func (service *Service) RecordTest(ctx context.Context, request RecordTestReques
 		if !nonblank(request.WorkPackageID, request.ExecutionID, request.Name) || request.DurationMilliseconds < 0 {
 			return operationSpec{}, ErrInvalidRequest
 		}
-		recorded, err := event(manifest, request.Metadata, "record-test", project.EventTestRecorded, request.WorkPackageID, request.ExecutionID, project.TestRecordedPayload{Name: redactText(request.Name), Outcome: request.Outcome, DurationMilliseconds: request.DurationMilliseconds})
+		recorded, err := event(manifest, request.Metadata, "record-test", project.EventTestRecorded, request.WorkPackageID, request.ExecutionID, project.TestRecordedPayload{
+			Name: redactText(request.Name), Outcome: request.Outcome, DurationMilliseconds: request.DurationMilliseconds,
+			CommandID: request.CommandID, CommandDigest: request.CommandDigest, ExitCode: request.ExitCode,
+			EvidenceID: request.EvidenceID, EvidenceDigest: request.EvidenceDigest,
+		})
 		return operationSpec{records: []any{recorded}, validateState: func(state historyState) error {
 			return requireExecution(state.executions[request.ExecutionID], state.executions[request.ExecutionID] != "", project.ExecutionRunning)
+		}}, err
+	})
+}
+
+func (service *Service) RecordTelemetry(ctx context.Context, request RecordTelemetryRequest) (OperationResult, error) {
+	return service.operate(ctx, request.Metadata, func(manifest project.ProjectManifest, _ project.Layout) (operationSpec, error) {
+		if !nonblank(request.WorkPackageID, request.ExecutionID) || request.Summary.WorkPackageID != request.WorkPackageID {
+			return operationSpec{}, ErrInvalidRequest
+		}
+		recorded, err := event(manifest, request.Metadata, "record-telemetry", project.EventTelemetryRecorded, request.WorkPackageID, request.ExecutionID, request.Summary)
+		return operationSpec{records: []any{recorded}, validateState: func(state historyState) error {
+			_, exists := state.executions[request.ExecutionID]
+			if !exists {
+				return ErrStateNotFound
+			}
+			return nil
 		}}, err
 	})
 }

@@ -17,6 +17,8 @@ workspace/
 .agent-project/
   manifest.json
   history/events/YYYY/MM/DD/<event-id>.json
+  tasks/<task-path-key>/revisions/<task-revision>/task.json
+  tasks/<task-path-key>/revisions/<task-revision>/graphs/<graph-revision>.json
   work-packages/<work-package-id>/definition.json
   executions/<execution-id>/manifest.json
   executions/<execution-id>/handoff.json
@@ -67,7 +69,8 @@ diagnostics identify the matching rule.
 Every final portable-record path is derived from its validated typed record:
 
 - The project manifest has one fixed path.
-- Work-package, execution, handoff, and artifact paths use their scoped IDs.
+- Task, graph, work-package, execution, handoff, and artifact paths use their
+  scoped IDs and revisions.
 - Work events use their UTC occurrence date and record ID.
 - Artifact blobs use their verified SHA-256 digest.
 
@@ -75,6 +78,9 @@ Path-bearing identifiers are ASCII-lowercased before use. This makes case-only
 IDs address one immutable path on both case-sensitive and case-insensitive
 filesystems. The original identifier remains unchanged in record content; a
 case-only second record is therefore a content conflict.
+The required `task:` namespace separator is encoded as `%3a` in task path keys.
+The identifier grammar excludes `%`, so the encoding is collision-free while
+avoiding the non-portable Windows drive-separator character.
 
 ## Atomic publication
 

@@ -270,3 +270,54 @@ CREATE TABLE project_projection_rejections (
   count, completeness, and evidence state keep each metric auditable. A
   history-projection rebuild explicitly invalidates insight rows; canonical
   records are unchanged.
+- Migration 9 adds `project_tasks` and `project_task_nodes`. They contain only
+  rebuildable task/DAG readiness, canonical record identities and hashes,
+  stable explanation codes, parallel-ready membership, and node dependency
+  views. They contain no assignment, lease, runtime session, credential, or
+  agent-authored state. Both tables are removed by an Agent Project projection
+  reset and reconstructed from portable task/graph/work-package records plus
+  accepted canonical events.
+- Migration 10 adds local `registry_trade_versions`, `registry_worker_versions`,
+  `registry_project_trade_adaptations`, and `registry_audit_events`. These are
+  durable local control data, not Agent Project projections and not portable
+  records. Their schema has no credential, secret, token, runtime-session, or
+  provider-session column. Portable history retains only resolved registry
+  ID/version/digest references.
+- Migration 11 adds local immutable `execution_contract_versions`. Each row
+  binds a contract ID/version and execution identity to a digest, predecessor
+  digest, and bounded canonical contract JSON. Same-content replay is
+  idempotent, mutation conflicts, and a unique project/execution/version key
+  prevents competing contract identities. This is authority control state,
+  not a rebuildable Agent Project projection; it contains logical secret IDs
+  only, never secret values, credentials, access tokens, or runtime sessions.
+- Migration 12 adds `orchestration_result_intake` for immutable untrusted
+  result envelopes and sanitized authority decisions. The result ID is the
+  immutable key; same-digest replay is idempotent, different-digest reuse
+  conflicts, and one project execution cannot reuse an idempotency digest under
+  another result ID. Rows bind project/execution, contract, assignment, decision,
+  reason, actor, and bounded canonical envelope JSON. The table is local
+  control state, never a portable work event, and has no prompt, terminal,
+  credential, secret-value, provider-session, or staging-path columns.
+- Migration 13 adds `execution_telemetry` as a bounded, allowlisted local
+  evidence projection. Rows bind telemetry to the exact execution contract,
+  task/graph/work-package revisions, registry and runtime references, and a
+  canonical summary digest. It stores nullable measurements and content
+  references only; it has no raw prompt, tool, terminal, secret, workspace,
+  or provider-session column. Telemetry cannot authorize execution or satisfy
+  a work acceptance gate.
+- Migration 14 adds the authority-local orchestration control tables for
+  assignments, monotonic attempts, fenced leases, opaque runtime/workspace
+  bindings, gate status, operator decisions, idempotent operations, and audit
+  events. Partial unique indexes enforce one active attempt per project/work
+  package and one active lease per attempt. These rows survive canonical
+  projection rebuilds but never create portable history. They store comparison
+  digests and logical IDs, not bearer tokens, credentials, raw prompts,
+  terminal output, provider sessions, or absolute workspace paths. See
+  [Orchestration control, fencing, and recovery](orchestration-control-recovery.md).
+- Migration 15 adds `orchestration_attempt_bindings`, keyed one-to-one by
+  attempt, to preserve the immutable execution-contract and compiled-context
+  authority that was present before preparation. Its bounded binding envelope
+  records only digests, logical references, effective policy, and compiler
+  notices; it has no source contents, raw prompt, secret, credential,
+  terminal-output, provider-session, or absolute-path column. See
+  [Context, contract, and attempt binding](context-contract-attempt-binding.md).

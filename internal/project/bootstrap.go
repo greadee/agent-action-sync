@@ -191,6 +191,7 @@ var bootstrapDirectories = []string{
 	ControlDirectory,
 	ControlDirectory + "/history",
 	HistoryEventsDirectory,
+	TasksDirectory,
 	WorkPackagesDirectory,
 	ExecutionsDirectory,
 	ControlDirectory + "/artifacts",
