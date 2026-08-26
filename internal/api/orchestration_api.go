@@ -177,7 +177,7 @@ func (v AssignmentControlInput) Validate() error {
 		return errBadRequest
 	}
 	switch v.Action {
-	case "pause", "resume", "cancel", "retry", "reassign":
+	case "pause", "resume", "cancel", "retry", "reassign", "fail", "evaluate":
 		return nil
 	default:
 		return errBadRequest

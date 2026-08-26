@@ -44,6 +44,9 @@ func TestGitWorktreeProvisioningRestartManifestAndCleanup(t *testing.T) {
 		t.Fatalf("restart=%+v err=%v", observed, err)
 	}
 	worktree := restarted.target(request.WorkspaceID)
+	if localPath, err := restarted.ResolveLocalPath(context.Background(), request.WorkspaceID); err != nil || localPath != worktree {
+		t.Fatalf("runtime path=%q err=%v", localPath, err)
+	}
 	writeGitFile(t, worktree, "src/main.go", "package main\n// changed\n")
 	gitTest(t, worktree, "add", "src/main.go")
 	gitTest(t, worktree, "commit", "-m", "update source")
@@ -64,6 +67,9 @@ func TestGitWorktreeProvisioningRestartManifestAndCleanup(t *testing.T) {
 	}
 	if observed, err := restarted.Inspect(context.Background(), request.WorkspaceID); err != nil || observed.State != StateReleased || observed.Generation != 2 {
 		t.Fatalf("released=%+v err=%v", observed, err)
+	}
+	if _, err := restarted.ResolveLocalPath(context.Background(), request.WorkspaceID); !errors.Is(err, ErrWorkspaceMissing) {
+		t.Fatalf("released runtime path error=%v", err)
 	}
 	if _, err := os.Stat(worktree); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("released worktree remains: %v", err)

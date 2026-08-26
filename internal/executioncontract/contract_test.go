@@ -92,6 +92,26 @@ func TestPolicyPathsFailClosedWithForbiddenPrecedenceAndScopeEscape(t *testing.T
 	}
 }
 
+func TestWholeWorkspacePolicyRootIsExplicitAndAuthorizesContainedPaths(t *testing.T) {
+	request := contractFixture()
+	request.WorkPackage.Scope = project.WorkScope{Allowed: []string{"."}, Inspect: []string{"."}}
+	for index := range request.PolicyLayers {
+		request.PolicyLayers[index].InspectPaths = []string{"."}
+		request.PolicyLayers[index].WritePaths = []string{"."}
+		request.PolicyLayers[index].ForbiddenPaths = nil
+	}
+	contract := mustBuild(t, request)
+	if !reflect.DeepEqual(contract.Permissions.InspectPaths, []string{"."}) || !reflect.DeepEqual(contract.Permissions.WritePaths, []string{"."}) {
+		t.Fatalf("whole-workspace permissions = %+v", contract.Permissions)
+	}
+	if err := AuthorizePath(contract, CapabilityWrite, "src/main.go"); err != nil {
+		t.Fatalf("whole-workspace write authorization: %v", err)
+	}
+	if err := AuthorizePath(contract, CapabilityWrite, "../escape"); !errors.Is(err, ErrPrivilegeEscalation) {
+		t.Fatalf("whole-workspace escape error = %v", err)
+	}
+}
+
 func TestPolicyDeniesSecretsUnknownCapabilitiesAndPrivilegeEscalation(t *testing.T) {
 	missingLayerRequest := contractFixture()
 	missingLayerRequest.PolicyLayers = missingLayerRequest.PolicyLayers[1:]

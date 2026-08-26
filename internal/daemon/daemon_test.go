@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -63,6 +64,46 @@ func TestDaemonRunsAuthoritativeStartupAndManualScans(t *testing.T) {
 	cancel()
 	if err := waitForDaemon(t, done); err != nil {
 		t.Fatalf("shutdown daemon: %v", err)
+	}
+}
+
+func TestDaemonComposesOrchestrationOnlyWhenExecutionEnabled(t *testing.T) {
+	dataDir := t.TempDir()
+	shareRoot := t.TempDir()
+	cfg := testConfig(dataDir, shareRoot)
+	runtimePath := filepath.Join(t.TempDir(), "runtime.exe")
+	cfg.Node.Execution = config.ExecutionConfig{
+		Enabled: true, ProviderID: "codex", ModelID: "gpt-5.6-sol", RuntimeExecutable: runtimePath,
+		PreflightReceipt: strings.Repeat("a", 64), MaxConcurrent: 1,
+	}
+	called := 0
+	composer := func(context.Context, config.Config, storage.Store, identity.DeviceIdentity) (OrchestrationComponents, error) {
+		called++
+		return OrchestrationComponents{Scheduler: &orderedOrchestrationScheduler{events: &orderedEvents{}}, Administration: disabledOrchestrationFacade{}}, nil
+	}
+	instance, err := Bootstrap(context.Background(), cfg, Options{ComposeOrchestration: composer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called != 1 || instance.orchestrationScheduler == nil || instance.orchestrationAdmin == nil {
+		t.Fatalf("composition called=%d scheduler=%v admin=%v", called, instance.orchestrationScheduler, instance.orchestrationAdmin)
+	}
+	_ = instance.Close()
+
+	cfg.Node.Execution.Enabled = false
+	called = 0
+	instance, err = Bootstrap(context.Background(), cfg, Options{ComposeOrchestration: composer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called != 0 || instance.orchestrationScheduler != nil {
+		t.Fatalf("disabled execution composed runtime: called=%d scheduler=%v", called, instance.orchestrationScheduler)
+	}
+	_ = instance.Close()
+
+	cfg.Node.Execution.Enabled = true
+	if _, err := Bootstrap(context.Background(), cfg, Options{}); err == nil || !strings.Contains(err.Error(), "composition is unavailable") {
+		t.Fatalf("missing enabled composition error = %v", err)
 	}
 }
 

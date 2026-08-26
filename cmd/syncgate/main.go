@@ -72,6 +72,10 @@ func main() {
 		runNodeExecutionStatus(os.Args[2:])
 	case "node-diagnostics-export":
 		runNodeDiagnosticsExport(os.Args[2:])
+	case "node-resources":
+		runNodeResources(os.Args[2:])
+	case "node-result-import":
+		runNodeResultImport(os.Args[2:])
 	case "check-config":
 		runCheckConfig(os.Args[2:])
 	case "diagnostics":
@@ -202,7 +206,7 @@ func runNode(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	fmt.Printf("syncgate desktop node starting: lifecycle=foreground health=http://%s:%d/healthz\n", cfg.LocalAPI.Host, cfg.LocalAPI.Port)
-	if err := daemon.RunConfig(ctx, roots.ConfigPath, daemon.Options{}); err != nil {
+	if err := daemon.RunConfig(ctx, roots.ConfigPath, daemon.Options{ComposeOrchestration: desktop.NewOrchestrationComposer(roots)}); err != nil {
 		exitf("run desktop node: %v", err)
 	}
 }
@@ -834,7 +838,7 @@ func runOrchestrationAssignmentControl(args []string) {
 	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
 	projectID := flags.String("project", "", "Agent Project ID")
 	assignmentID := flags.String("assignment", "", "assignment ID")
-	action := flags.String("action", "", "pause, resume, cancel, retry, or reassign")
+	action := flags.String("action", "", "pause, resume, cancel, fail, retry, evaluate, or reassign")
 	key := flags.String("idempotency-key", "", "caller idempotency key")
 	_ = flags.Parse(args)
 	input := api.AssignmentControlInput{ProjectID: strings.TrimSpace(*projectID), AssignmentID: strings.TrimSpace(*assignmentID), Action: strings.TrimSpace(*action), IdempotencyKey: strings.TrimSpace(*key)}

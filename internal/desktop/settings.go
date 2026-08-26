@@ -57,8 +57,10 @@ type IdentitySettings struct {
 type ExecutionSettings struct {
 	Enabled                    bool   `json:"enabled"`
 	ProviderID                 string `json:"provider_id,omitempty"`
+	ModelID                    string `json:"model_id,omitempty"`
 	RuntimeExecutable          string `json:"runtime_executable,omitempty"`
 	PreflightReceiptConfigured bool   `json:"preflight_receipt_configured"`
+	MaxConcurrent              int    `json:"max_concurrent"`
 }
 
 type ShareSettings struct {
@@ -257,6 +259,7 @@ func settingsView(cfg config.Config, roots Roots) SettingsView {
 		Identity: IdentitySettings{Store: cfg.Identity.Store},
 		Execution: ExecutionSettings{
 			Enabled: cfg.Node.Execution.Enabled, ProviderID: cfg.Node.Execution.ProviderID,
+			ModelID: cfg.Node.Execution.ModelID, MaxConcurrent: cfg.Node.Execution.MaxConcurrent,
 			RuntimeExecutable:          cfg.Node.Execution.RuntimeExecutable,
 			PreflightReceiptConfigured: cfg.Node.Execution.PreflightReceipt != "",
 		},

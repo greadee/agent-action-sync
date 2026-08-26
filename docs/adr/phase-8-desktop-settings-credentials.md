@@ -65,8 +65,9 @@ the following while the node is stopped:
 
 Enablement rechecks the credential, runtime digest, project containment,
 disposable marker, clean status, and Git HEAD to close the preflight/activation
-gap. The enabled record is inspectable configuration, but Slice 2 does not wire
-it into a runtime or scheduler. Runtime composition remains Slice 3 work.
+gap. The enabled record is inspectable configuration. Phase 9 composes it into
+the local runtime and scheduler only after repeating those mutable checks; this
+ADR continues to define the authorization record and credential boundary.
 
 Disabling execution changes only the enabled boolean. It preserves provider
 metadata, the preflight record, SQLite/control state, runtime observations,

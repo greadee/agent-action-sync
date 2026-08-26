@@ -94,6 +94,7 @@
 | Scheduler dispatch race or premature dependency release | Concurrent triggers dispatch the same attempt twice, overrun worker/node policy, or unlock dependents on a runtime success claim | Daemon-owned DAG scheduler | Serialize cycles; enforce a maximum of two plus user/node/runtime ceilings; renew fenced leases; queue by priority and stable ID; derive readiness only from canonical events; stop runtime success at `collecting`; drain before SQLite close | External work may outlive cancellation, and a local privileged process can still interfere with runtime or workspace resources | Concurrent-cycle, lease-cap, acceptance-barrier, starvation, cancellation, restart-reconciliation, and shutdown-order tests |
 | Malicious patch or premature integration | Worker result carries harmful changes or a plausible completion claim bypasses review | Result intake, test/review gates, human integration | Exact attempt/contract binding; digest/size and scoped manifest verification; binary/symlink/aggregate limits; separately authorized exact-command tests; non-mutating stale/conflict preview; required reviewer evidence; explicit operator decision; no automatic merge | A human may approve a harmful change; content scanning is not yet a sandbox | Forged/stale result, unsafe/binary/oversized patch, failed test, changed base, conflict, requested changes, rejection, replay, and clean-rebuild tests |
 | Desktop credential or enablement disclosure | Settings, diagnostics, command arguments, or local records expose a provider secret or accidentally authorize execution | Desktop configuration and execution opt-in | Provider secrets exist only in the OS credential store and enter through bounded stdin; settings are staged and digest-confirmed; enablement requires a fresh disposable-project preflight and exact confirmation; diagnostics export only status, counts, check codes, and opaque identifiers | Same-account malware can read process memory or invoke the OS credential API, and a compromised runtime can misuse an authorized credential | Secret-fixture export tests, argument inspection, credential lifecycle tests, stale/changed preflight tests, and enable-disable preservation tests |
+| Desktop startup or recovery replay | An enabled node starts work without an operator action, replays an uncertain runtime after restart, or exceeds local capacity | Desktop daemon composition, scheduler, and local compute leases | Repeat disposable authorization checks at composition; start scheduler paused; require authenticated project-scoped start; classify ambiguous sessions `needs_operator`; reject resume until explicit cancel/fail; retry creates a new attempt; enforce one-or-two machine leases from short-lived resource observations | A surviving child process may continue outside application control, and same-account malware can invoke local controls | Feature-gate, paused-start, restart-reconcile, no-replay, explicit fail/retry, lease-ceiling, resource-observation, and daemon shutdown tests |
 
 ## Security Principles
 
@@ -149,11 +150,10 @@ control records; only deterministic derived state may be rebuilt.
 - Content-addressed artifact storage verifies integrity only. It does not scan
   for malware, classify secrets, sandbox active content, or provide encryption
   at rest.
-- No production runtime adapter, remote command endpoint, distributed compute
-  node, or automatic merge path is enabled in the daemon. An opt-in supervised
-  Codex adapter exists as an isolated library component but is not composed;
-  the local Git worktree adapter can create an explicitly authorized isolated
-  branch/worktree without running worker code itself.
+- No remote command endpoint, distributed compute node, or automatic merge path
+  is enabled in the daemon. The supervised Codex adapter is composed only for
+  an explicitly enabled and revalidated disposable local project; it starts
+  paused and retains node-local runtime, worktree, credential, and result data.
 - Authority-local orchestration registries, contracts, leases, and intake state
   are not reconstructible solely from portable project history. Their backup,
   migration, and corruption recovery require separate local operations.

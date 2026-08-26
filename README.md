@@ -78,6 +78,7 @@ Validate the Windows desktop-node release lifecycle with:
 ```powershell
 tools\check_desktop_node_slice1_release.ps1
 tools\check_desktop_node_slice2_release.ps1
+tools\check_desktop_node_slice3_release.ps1
 ```
 
 Initialize, run, and check an installed per-user node with:
@@ -94,6 +95,7 @@ Execution remains disabled by default. Inspect the bounded local surfaces with:
 syncgate node-settings-show
 syncgate node-identity-status
 syncgate node-execution-status
+syncgate node-resources
 ```
 
 Manual local send-once smoke path:
@@ -122,6 +124,8 @@ Useful docs:
 - [Orchestration setup entry gate](docs/architecture/orchestration-setup-entry-gate.md)
 - [Orchestration ADR index](docs/adr/orchestration-setup-index.md)
 - [Orchestration domain and authority decision](docs/adr/phase-5-orchestration-domain-authority.md)
+- [Desktop runtime composition decision](docs/adr/phase-9-desktop-runtime-composition.md)
+- [Desktop runtime operation and recovery](docs/operations/desktop-runtime-recovery.md)
 - [Task graph validation and readiness](docs/architecture/task-graph-readiness.md)
 - [Trade and worker registry](docs/architecture/trade-worker-registry.md)
 - [Project Context Compiler v1](docs/architecture/project-context-compiler.md)

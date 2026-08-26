@@ -157,6 +157,14 @@ func TestConfigExecutionIsDisabledByDefaultAndRequiresPreflight(t *testing.T) {
 	if cfg.Node.Execution.Enabled {
 		t.Fatal("execution must be disabled by default")
 	}
+	if cfg.Node.Execution.MaxConcurrent != 1 {
+		t.Fatalf("default execution ceiling = %d", cfg.Node.Execution.MaxConcurrent)
+	}
+	cfg.Node.Execution.MaxConcurrent = 3
+	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
+		t.Fatal("expected disabled execution with an unsafe ceiling to fail")
+	}
+	cfg.Node.Execution.MaxConcurrent = 1
 	cfg.Node.Execution.Enabled = true
 	if err := cfg.ApplyDefaultsAndValidate(); err == nil {
 		t.Fatal("expected execution without provider/runtime/preflight to fail")

@@ -271,3 +271,10 @@ type OrchestrationControlStore interface {
 	SaveOperatorDecision(context.Context, OrchestrationDecisionRequest) (RegistryWriteResult, error)
 	ListOrchestrationAudit(context.Context, string) ([]OrchestrationAuditEvent, error)
 }
+
+// OrchestrationInventoryStore is an optional bounded local-administration
+// read model. It exposes no runtime sessions, workspace paths, credentials, or
+// raw result content.
+type OrchestrationInventoryStore interface {
+	ListOrchestrationAssignments(context.Context, string, PageRequest) (Page[OrchestrationAssignment], error)
+}

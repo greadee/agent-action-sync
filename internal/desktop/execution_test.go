@@ -20,10 +20,10 @@ func TestExecutionEnablementRequiresCredentialDisposablePreflightAndConfirmation
 	if err != nil || !marker.Disposable {
 		t.Fatalf("mark disposable = %#v err=%v", marker, err)
 	}
-	if _, err := manager.Preflight(context.Background(), "codex", runtimePath, projectRoot, "wrong"); err == nil {
+	if _, err := manager.Preflight(context.Background(), "codex", "gpt-5.6-sol", runtimePath, projectRoot, "wrong"); err == nil {
 		t.Fatal("expected disposable preflight confirmation to fail")
 	}
-	preflight, err := manager.Preflight(context.Background(), "codex", runtimePath, projectRoot, DisposableConfirmation)
+	preflight, err := manager.Preflight(context.Background(), "codex", "gpt-5.6-sol", runtimePath, projectRoot, DisposableConfirmation)
 	if err != nil || !preflight.Ready || len(preflight.CheckCodes) < 7 {
 		t.Fatalf("execution preflight = %#v err=%v", preflight, err)
 	}
@@ -70,7 +70,7 @@ func TestExecutionPreflightExpiresAndRuntimeChangesFailClosed(t *testing.T) {
 	if _, err := manager.MarkDisposable(context.Background(), projectRoot, MarkDisposableConfirmation); err != nil {
 		t.Fatal(err)
 	}
-	preflight, err := manager.Preflight(context.Background(), "codex", runtimePath, projectRoot, DisposableConfirmation)
+	preflight, err := manager.Preflight(context.Background(), "codex", "gpt-5.6-sol", runtimePath, projectRoot, DisposableConfirmation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestExecutionEnablementRechecksDisposableProject(t *testing.T) {
 	if _, err := manager.MarkDisposable(context.Background(), projectRoot, MarkDisposableConfirmation); err != nil {
 		t.Fatal(err)
 	}
-	preflight, err := manager.Preflight(context.Background(), "codex", runtimePath, projectRoot, DisposableConfirmation)
+	preflight, err := manager.Preflight(context.Background(), "codex", "gpt-5.6-sol", runtimePath, projectRoot, DisposableConfirmation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestExecutionPreflightRequiresOSCredentialAndIsolatedProject(t *testing.T) 
 	credentialStore.secret = nil
 	outside := t.TempDir()
 	gitTestCommand(t, outside, "init")
-	if _, err := manager.Preflight(context.Background(), "codex", runtimePath, outside, DisposableConfirmation); err == nil || !strings.Contains(err.Error(), "isolated child") {
+	if _, err := manager.Preflight(context.Background(), "codex", "gpt-5.6-sol", runtimePath, outside, DisposableConfirmation); err == nil || !strings.Contains(err.Error(), "isolated child") {
 		t.Fatalf("outside project error = %v", err)
 	}
 }

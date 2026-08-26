@@ -263,6 +263,18 @@ func validatePaths(paths []string) error {
 	return nil
 }
 
+func validateScopePaths(paths []string) error {
+	for _, value := range paths {
+		if value == "." {
+			continue
+		}
+		if err := project.ValidateProjectRelativePath(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func nonblank(values ...string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == "" {

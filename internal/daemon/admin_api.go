@@ -110,6 +110,9 @@ func (daemon *Daemon) ConfigureLocalAPI(options Options) error {
 	}
 	orchestration := options.OrchestrationAdministration
 	if orchestration == nil {
+		orchestration = daemon.orchestrationAdmin
+	}
+	if orchestration == nil {
 		orchestration = disabledOrchestrationFacade{}
 	}
 	service, err := api.NewAdministrationService(api.AdministrationServiceOptions{

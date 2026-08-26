@@ -53,8 +53,10 @@ type NodeConfig struct {
 type ExecutionConfig struct {
 	Enabled           bool   `json:"enabled"`
 	ProviderID        string `json:"provider_id,omitempty"`
+	ModelID           string `json:"model_id,omitempty"`
 	RuntimeExecutable string `json:"runtime_executable,omitempty"`
 	PreflightReceipt  string `json:"preflight_receipt,omitempty"`
+	MaxConcurrent     int    `json:"max_concurrent,omitempty"`
 }
 
 type IdentityConfig struct {
@@ -120,6 +122,7 @@ func (cfg *Config) ApplyDefaultsAndValidate() error {
 	cfg.Node.WorktreeRoot = strings.TrimSpace(cfg.Node.WorktreeRoot)
 	cfg.Node.LifecycleMode = strings.TrimSpace(cfg.Node.LifecycleMode)
 	cfg.Node.Execution.ProviderID = strings.TrimSpace(cfg.Node.Execution.ProviderID)
+	cfg.Node.Execution.ModelID = strings.TrimSpace(cfg.Node.Execution.ModelID)
 	cfg.Node.Execution.RuntimeExecutable = strings.TrimSpace(cfg.Node.Execution.RuntimeExecutable)
 	cfg.Node.Execution.PreflightReceipt = strings.TrimSpace(cfg.Node.Execution.PreflightReceipt)
 	cfg.RuntimeMode = strings.TrimSpace(cfg.RuntimeMode)
@@ -257,12 +260,24 @@ func (node *NodeConfig) validate(dataDir string) error {
 }
 
 func (execution *ExecutionConfig) validate() error {
+	if execution.MaxConcurrent == 0 {
+		execution.MaxConcurrent = 1
+	}
+	if execution.MaxConcurrent < 1 || execution.MaxConcurrent > 2 {
+		return errors.New("max_concurrent must be between 1 and 2")
+	}
 	configured := execution.ProviderID != "" || execution.RuntimeExecutable != "" || execution.PreflightReceipt != ""
 	if !configured && !execution.Enabled {
 		return nil
 	}
 	if !configIdentifier(execution.ProviderID) {
 		return errors.New("provider_id must be a lowercase identifier")
+	}
+	if execution.ModelID == "" {
+		execution.ModelID = "gpt-5.6-sol"
+	}
+	if !configModelIdentifier(execution.ModelID) {
+		return errors.New("model_id must be a lowercase identifier")
 	}
 	if !filepath.IsAbs(filepath.Clean(execution.RuntimeExecutable)) {
 		return errors.New("runtime_executable must be absolute")
@@ -280,6 +295,19 @@ func configIdentifier(value string) bool {
 	}
 	for index, character := range value {
 		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || index > 0 && character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func configModelIdentifier(value string) bool {
+	if len(value) < 1 || len(value) > 64 || value[0] == '.' || value[len(value)-1] == '.' {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '-' || character == '.' {
 			continue
 		}
 		return false

@@ -232,13 +232,13 @@ func validateWorkPackage(record WorkPackageDefinition, requireIntegrity bool) er
 	if err := validateText("specialization", record.Specialization, MaxNameBytes, false); err != nil {
 		return err
 	}
-	if err := validatePathList("scope.allowed", record.Scope.Allowed); err != nil {
+	if err := validateScopePathList("scope.allowed", record.Scope.Allowed); err != nil {
 		return err
 	}
-	if err := validatePathList("scope.inspect", record.Scope.Inspect); err != nil {
+	if err := validateScopePathList("scope.inspect", record.Scope.Inspect); err != nil {
 		return err
 	}
-	if err := validatePathList("scope.forbidden", record.Scope.Forbidden); err != nil {
+	if err := validateScopePathList("scope.forbidden", record.Scope.Forbidden); err != nil {
 		return err
 	}
 	if err := validateIdentifierList("dependencies", record.Dependencies); err != nil {
@@ -981,6 +981,25 @@ func validatePathList(name string, values []string) error {
 	for index, value := range values {
 		if err := validateRelativePath(fmt.Sprintf("%s[%d]", name, index), value); err != nil {
 			return err
+		}
+		if _, exists := seen[value]; exists {
+			return fmt.Errorf("%s contains duplicate %q", name, value)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
+func validateScopePathList(name string, values []string) error {
+	if len(values) > MaxListItems {
+		return fmt.Errorf("%s has more than %d items", name, MaxListItems)
+	}
+	seen := make(map[string]struct{}, len(values))
+	for index, value := range values {
+		if value != "." {
+			if err := validateRelativePath(fmt.Sprintf("%s[%d]", name, index), value); err != nil {
+				return err
+			}
 		}
 		if _, exists := seen[value]; exists {
 			return fmt.Errorf("%s contains duplicate %q", name, value)

@@ -216,6 +216,29 @@ func TestSchedulerReportsStableRuntimeAndBudgetBlocks(t *testing.T) {
 	})
 }
 
+func TestSchedulerStartsPausedAndRequiresExplicitResume(t *testing.T) {
+	fixture := newSchedulerFixtureWithoutStart(t, 1, 1)
+	fixture.scheduler.config.StartPaused = true
+	if err := fixture.scheduler.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if status := fixture.scheduler.Status(); !status.Started || !status.Paused || status.Active != 0 {
+		t.Fatalf("paused startup status = %#v", status)
+	}
+	requests := fixture.requests(t, map[string][]string{"work:one": nil}, nil)
+	report, err := fixture.scheduler.Cycle(context.Background(), requests)
+	if err != nil || itemFor(report, "work:one").Reasons[0] != "scheduler_paused" {
+		t.Fatalf("paused cycle = %#v err=%v", report, err)
+	}
+	if err := fixture.scheduler.Resume(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	report, err = fixture.scheduler.Cycle(context.Background(), requests)
+	if err != nil || itemFor(report, "work:one").Outcome != OutcomeDispatched {
+		t.Fatalf("resumed cycle = %#v err=%v", report, err)
+	}
+}
+
 func TestSchedulerReconcilesBeforeDispatchAndDoesNotReplayUncertainRuntime(t *testing.T) {
 	fixture := newSchedulerFixtureWithoutStart(t, 2, 2)
 	fixture.control.snapshots["assignment:recovered"] = storage.OrchestrationSnapshot{

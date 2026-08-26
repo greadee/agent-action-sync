@@ -73,6 +73,7 @@ type Config struct {
 	MaxConcurrent  int
 	LeaseDuration  time.Duration
 	PollInterval   time.Duration
+	StartPaused    bool
 }
 
 type DispatchRequest struct {
@@ -131,6 +132,14 @@ type Scheduler struct {
 	recovery []RecoveryReport
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
+}
+
+type Status struct {
+	Started       bool
+	Paused        bool
+	Draining      bool
+	Active        int
+	RecoveryCount int
 }
 
 type activeAttempt struct {
@@ -205,6 +214,7 @@ func (scheduler *Scheduler) Start(ctx context.Context) error {
 		return nil
 	}
 	scheduler.started = true
+	scheduler.paused = scheduler.config.StartPaused
 	scheduler.recovery = reports
 	scheduler.cancel = cancel
 	for _, snapshot := range snapshots {
@@ -220,6 +230,15 @@ func (scheduler *Scheduler) Start(ctx context.Context) error {
 		go scheduler.run(runCtx, source)
 	}
 	return nil
+}
+
+func (scheduler *Scheduler) Status() Status {
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	return Status{
+		Started: scheduler.started, Paused: scheduler.paused, Draining: scheduler.draining,
+		Active: len(scheduler.active), RecoveryCount: len(scheduler.recovery),
+	}
 }
 
 func (scheduler *Scheduler) run(ctx context.Context, source WorkSource) {

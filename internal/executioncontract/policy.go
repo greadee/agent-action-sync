@@ -148,7 +148,10 @@ func validatePolicyLayer(layer PolicyLayer) error {
 	}
 	for _, paths := range [][]string{layer.InspectPaths, layer.WritePaths, layer.ForbiddenPaths} {
 		for _, path := range paths {
-			if err := project.ValidateProjectRelativePath(path); err != nil {
+			if path != "." {
+				if err := project.ValidateProjectRelativePath(path); err == nil {
+					continue
+				}
 				return fmt.Errorf("%w: policy path", ErrInvalidContract)
 			}
 		}
@@ -245,6 +248,9 @@ func removeFullyForbidden(paths, forbidden []string) []string {
 	return canonicalPaths(result)
 }
 func within(path, parent string) bool {
+	if parent == "." {
+		return true
+	}
 	return path == parent || strings.HasPrefix(path, strings.TrimSuffix(parent, "/")+"/")
 }
 func containsCapability(values []Capability, value Capability) bool {

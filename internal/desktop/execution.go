@@ -42,6 +42,7 @@ type ExecutionPreflightRecord struct {
 	SchemaVersion     int       `json:"schema_version"`
 	Receipt           string    `json:"receipt"`
 	ProviderID        string    `json:"provider_id"`
+	ModelID           string    `json:"model_id"`
 	RuntimeExecutable string    `json:"runtime_executable"`
 	RuntimeDigest     string    `json:"runtime_digest"`
 	ProjectRoot       string    `json:"project_root"`
@@ -62,6 +63,8 @@ type ExecutionPreflightResult struct {
 type ExecutionState struct {
 	Enabled                     bool   `json:"enabled"`
 	ProviderID                  string `json:"provider_id,omitempty"`
+	ModelID                     string `json:"model_id,omitempty"`
+	MaxConcurrent               int    `json:"max_concurrent"`
 	RuntimeExecutableConfigured bool   `json:"runtime_executable_configured"`
 	PreflightReceiptConfigured  bool   `json:"preflight_receipt_configured"`
 }
@@ -117,13 +120,20 @@ func (manager ExecutionManager) MarkDisposable(ctx context.Context, projectRoot,
 	return marker, nil
 }
 
-func (manager ExecutionManager) Preflight(ctx context.Context, providerID, runtimeExecutable, projectRoot, confirmation string) (ExecutionPreflightResult, error) {
+func (manager ExecutionManager) Preflight(ctx context.Context, providerID, modelID, runtimeExecutable, projectRoot, confirmation string) (ExecutionPreflightResult, error) {
 	if confirmation != DisposableConfirmation {
 		return ExecutionPreflightResult{}, errors.New("disposable project confirmation did not match")
 	}
 	providerID = strings.TrimSpace(providerID)
 	if !desktopIdentifier(providerID) {
 		return ExecutionPreflightResult{}, errors.New("provider ID must be a lowercase identifier")
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		modelID = "gpt-5.6-sol"
+	}
+	if !desktopModelIdentifier(modelID) {
+		return ExecutionPreflightResult{}, errors.New("model ID must be a lowercase identifier")
 	}
 	active, roots, err := SettingsManager{Base: manager.Base}.Active(ctx)
 	if err != nil {
@@ -180,11 +190,11 @@ func (manager ExecutionManager) Preflight(ctx context.Context, providerID, runti
 		return ExecutionPreflightResult{}, fmt.Errorf("generate execution preflight receipt: %w", err)
 	}
 	projectDigest := sha256.Sum256([]byte(strings.ToLower(project) + "\x00" + marker.OpaqueID))
-	receiptDigest := sha256.Sum256([]byte(hex.EncodeToString(nonce) + "\x00" + providerID + "\x00" + runtimeDigest + "\x00" + hex.EncodeToString(projectDigest[:]) + "\x00" + head + "\x00" + now.Format(time.RFC3339Nano)))
+	receiptDigest := sha256.Sum256([]byte(hex.EncodeToString(nonce) + "\x00" + providerID + "\x00" + modelID + "\x00" + runtimeDigest + "\x00" + hex.EncodeToString(projectDigest[:]) + "\x00" + head + "\x00" + now.Format(time.RFC3339Nano)))
 	clearSecret(nonce)
 	checks := []string{"config_valid", "credential_os_backed", "disposable_marker_valid", "git_clean", "git_head_valid", "project_isolated", "runtime_executable_valid"}
 	record := ExecutionPreflightRecord{
-		SchemaVersion: 1, Receipt: hex.EncodeToString(receiptDigest[:]), ProviderID: providerID,
+		SchemaVersion: 1, Receipt: hex.EncodeToString(receiptDigest[:]), ProviderID: providerID, ModelID: modelID,
 		RuntimeExecutable: runtimeExecutable, RuntimeDigest: runtimeDigest,
 		ProjectRoot: project, ProjectDigest: hex.EncodeToString(projectDigest[:]), HeadDigest: head,
 		PassedAt: now, ExpiresAt: now.Add(ExecutionPreflightLifetime), CheckCodes: checks,
@@ -250,7 +260,7 @@ func (manager ExecutionManager) Enable(ctx context.Context, receipt, confirmatio
 		return ExecutionState{}, errors.New("disposable project changed after preflight")
 	}
 	active.Node.Execution = config.ExecutionConfig{
-		Enabled: true, ProviderID: record.ProviderID,
+		Enabled: true, ProviderID: record.ProviderID, ModelID: record.ModelID, MaxConcurrent: 1,
 		RuntimeExecutable: record.RuntimeExecutable, PreflightReceipt: record.Receipt,
 	}
 	if err := active.ApplyDefaultsAndValidate(); err != nil {
@@ -292,6 +302,47 @@ func (manager ExecutionManager) State(ctx context.Context) (ExecutionState, erro
 		return ExecutionState{}, err
 	}
 	return executionState(active), nil
+}
+
+// ValidateEnabledAuthorization rechecks the durable Slice 2 authorization at
+// node startup without extending or replaying it. An enabled switch remains
+// valid after its activation receipt expires, but every mutable preflight fact
+// is checked again before runtime components are constructed.
+func (manager ExecutionManager) ValidateEnabledAuthorization(ctx context.Context, cfg config.Config, roots Roots) (ExecutionPreflightRecord, error) {
+	if !cfg.Node.Execution.Enabled {
+		return ExecutionPreflightRecord{}, errors.New("local execution is disabled")
+	}
+	record, err := readExecutionPreflight(filepath.Join(roots.DataDir, ExecutionPreflightFileName))
+	if err != nil || record.Receipt != cfg.Node.Execution.PreflightReceipt || record.ProviderID != cfg.Node.Execution.ProviderID || record.ModelID != cfg.Node.Execution.ModelID || record.RuntimeExecutable != cfg.Node.Execution.RuntimeExecutable {
+		return ExecutionPreflightRecord{}, errors.New("enabled execution authorization does not match preflight evidence")
+	}
+	manager.Credentials.ScopeRoot = roots.ConfigDir
+	credential, err := manager.Credentials.Status(record.ProviderID)
+	if err != nil || !credential.Configured {
+		return ExecutionPreflightRecord{}, errors.New("enabled provider credential is unavailable")
+	}
+	_, digest, err := inspectRuntimeExecutable(record.RuntimeExecutable)
+	if err != nil || digest != record.RuntimeDigest {
+		return ExecutionPreflightRecord{}, errors.New("enabled runtime executable changed after preflight")
+	}
+	project, err := manager.validateProjectRoot(roots, record.ProjectRoot)
+	if err != nil {
+		return ExecutionPreflightRecord{}, errors.New("enabled disposable project changed after preflight")
+	}
+	if _, err := manager.gitDirectory(ctx, project); err != nil {
+		return ExecutionPreflightRecord{}, errors.New("enabled disposable project changed after preflight")
+	}
+	marker, err := readDisposableMarker(disposableMarkerPath(roots.DataDir, project))
+	if err != nil {
+		return ExecutionPreflightRecord{}, errors.New("enabled disposable project changed after preflight")
+	}
+	projectDigest := sha256.Sum256([]byte(strings.ToLower(project) + "\x00" + marker.OpaqueID))
+	status, statusErr := manager.git(ctx, project, "status", "--porcelain=v1", "--untracked-files=all")
+	head, headErr := manager.git(ctx, project, "rev-parse", "HEAD")
+	if statusErr != nil || headErr != nil || strings.TrimSpace(status) != "" || strings.TrimSpace(head) != record.HeadDigest || hex.EncodeToString(projectDigest[:]) != record.ProjectDigest {
+		return ExecutionPreflightRecord{}, errors.New("enabled disposable project changed after preflight")
+	}
+	return record, nil
 }
 
 func (manager ExecutionManager) validateProjectRoot(roots Roots, projectRoot string) (string, error) {
@@ -404,7 +455,7 @@ func readExecutionPreflight(path string) (ExecutionPreflightRecord, error) {
 	if err := readStrictJSON(path, &record); err != nil {
 		return ExecutionPreflightRecord{}, fmt.Errorf("read execution preflight: %w", err)
 	}
-	if record.SchemaVersion != 1 || !lowerHexDigest(record.Receipt, 64) || !desktopIdentifier(record.ProviderID) || !filepath.IsAbs(record.ProjectRoot) ||
+	if record.SchemaVersion != 1 || !lowerHexDigest(record.Receipt, 64) || !desktopIdentifier(record.ProviderID) || !desktopModelIdentifier(record.ModelID) || !filepath.IsAbs(record.ProjectRoot) ||
 		!lowerHexDigest(record.RuntimeDigest, 64) || !lowerHexDigest(record.ProjectDigest, 64) || !lowerHexDigest(record.HeadDigest, len(record.HeadDigest)) || len(record.HeadDigest) < 40 || len(record.HeadDigest) > 64 ||
 		record.PassedAt.IsZero() || record.ExpiresAt.IsZero() || len(record.CheckCodes) == 0 {
 		return ExecutionPreflightRecord{}, errors.New("execution preflight record is invalid")
@@ -468,7 +519,7 @@ func ensureNoPendingSettings(base Roots) error {
 
 func executionState(cfg config.Config) ExecutionState {
 	return ExecutionState{
-		Enabled: cfg.Node.Execution.Enabled, ProviderID: cfg.Node.Execution.ProviderID,
+		Enabled: cfg.Node.Execution.Enabled, ProviderID: cfg.Node.Execution.ProviderID, ModelID: cfg.Node.Execution.ModelID, MaxConcurrent: cfg.Node.Execution.MaxConcurrent,
 		RuntimeExecutableConfigured: cfg.Node.Execution.RuntimeExecutable != "",
 		PreflightReceiptConfigured:  cfg.Node.Execution.PreflightReceipt != "",
 	}
@@ -476,6 +527,19 @@ func executionState(cfg config.Config) ExecutionState {
 
 func lowerHexDigest(value string, length int) bool {
 	return len(value) == length && strings.Trim(value, "0123456789abcdef") == ""
+}
+
+func desktopModelIdentifier(value string) bool {
+	if len(value) < 1 || len(value) > 64 || value[0] == '.' || value[len(value)-1] == '.' {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '-' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 type boundedOutput struct {

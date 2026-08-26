@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"time"
 
 	"syncgate/internal/config"
 	"syncgate/internal/desktop"
 	"syncgate/internal/identity"
+	"syncgate/internal/resultintake"
 )
 
 const deleteProviderCredentialConfirmation = "DELETE PROVIDER CREDENTIAL"
@@ -199,11 +202,12 @@ func runNodeExecutionPreflight(args []string) {
 	flags := flag.NewFlagSet("node-execution-preflight", flag.ExitOnError)
 	root := flags.String("root", "", "optional explicit desktop node root")
 	provider := flags.String("provider", "", "provider identifier")
+	model := flags.String("model", "gpt-5.6-sol", "bounded model identifier")
 	runtimeExecutable := flags.String("runtime", "", "absolute supervised runtime executable")
 	project := flags.String("project", "", "absolute disposable Git project root")
 	confirmation := flags.String("confirm", "", "exact disposable-project confirmation phrase")
 	_ = flags.Parse(args)
-	result, err := executionManager(resolveDesktopRoots(*root)).Preflight(context.Background(), *provider, *runtimeExecutable, *project, *confirmation)
+	result, err := executionManager(resolveDesktopRoots(*root)).Preflight(context.Background(), *provider, *model, *runtimeExecutable, *project, *confirmation)
 	if err != nil {
 		exitf("preflight local execution: %v", err)
 	}
@@ -257,6 +261,59 @@ func runNodeDiagnosticsExport(args []string) {
 		exitf("export sanitized diagnostics: %v", err)
 	}
 	printJSON(report)
+}
+
+func runNodeResources(args []string) {
+	flags := flag.NewFlagSet("node-resources", flag.ExitOnError)
+	root := flags.String("root", "", "optional explicit desktop node root")
+	_ = flags.Parse(args)
+	base := resolveDesktopRoots(*root)
+	cfg, roots, err := (desktop.SettingsManager{Base: base}).Active(context.Background())
+	if err != nil {
+		exitf("read desktop settings: %v", err)
+	}
+	ceiling := cfg.Node.Execution.MaxConcurrent
+	if ceiling == 0 {
+		ceiling = 1
+	}
+	resources, err := desktop.ObserveMachineResources(roots.WorktreeRoot, ceiling, time.Now().UTC())
+	if err != nil {
+		exitf("observe local machine resources: %v", err)
+	}
+	printJSON(resources)
+}
+
+func runNodeResultImport(args []string) {
+	flags := flag.NewFlagSet("node-result-import", flag.ExitOnError)
+	root := flags.String("root", "", "optional explicit desktop node root")
+	fromStdin := flags.Bool("from-stdin", false, "read a bounded result envelope from stdin")
+	_ = flags.Parse(args)
+	if !*fromStdin {
+		exitf("--from-stdin is required")
+	}
+	base := resolveDesktopRoots(*root)
+	cfg, roots, err := (desktop.SettingsManager{Base: base}).Active(context.Background())
+	if err != nil {
+		exitf("read desktop settings: %v", err)
+	}
+	if !cfg.Node.Execution.Enabled {
+		exitf("local execution is disabled")
+	}
+	raw, err := io.ReadAll(io.LimitReader(os.Stdin, resultintake.MaxEnvelopeBytes+1))
+	if err != nil || len(raw) > resultintake.MaxEnvelopeBytes {
+		exitf("read bounded result envelope: input exceeds the limit")
+	}
+	envelope, err := (desktop.LocalResultStore{Root: filepath.Join(roots.DataDir, "orchestration", "results")}).PutEnvelope(context.Background(), raw)
+	for index := range raw {
+		raw[index] = 0
+	}
+	if err != nil {
+		exitf("import result envelope: %v", err)
+	}
+	printJSON(struct {
+		ResultID string `json:"result_id"`
+		Digest   string `json:"digest"`
+	}{ResultID: envelope.ResultID, Digest: envelope.Digest})
 }
 
 func providerCredentials(base desktop.Roots) desktop.ProviderCredentials {

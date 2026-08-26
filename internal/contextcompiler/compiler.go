@@ -453,6 +453,9 @@ func scopeAllows(scope project.WorkScope, path string) bool {
 	return false
 }
 func within(path, parent string) bool {
+	if parent == "." {
+		return true
+	}
 	return path == parent || strings.HasPrefix(path, strings.TrimSuffix(parent, "/")+"/")
 }
 func forbiddenContextPath(path string) bool {

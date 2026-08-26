@@ -67,6 +67,31 @@ func TestOrchestrationPlanAuditsExplicitOperatorOverride(t *testing.T) {
 	}
 }
 
+func TestOrchestrationAssignmentInventoryIsProjectScopedAndBounded(t *testing.T) {
+	fixture := newControlFixture(t)
+	fixture.plan("inventory-a")
+	fixture.now = fixture.now.Add(time.Second)
+	fixture.plan("inventory-b")
+	fixture.now = fixture.now.Add(time.Second)
+	fixture.plan("inventory-c")
+
+	first, err := fixture.store.OrchestrationControl().(storage.OrchestrationInventoryStore).ListOrchestrationAssignments(context.Background(), fixture.project, storage.PageRequest{Limit: 2})
+	if err != nil || len(first.Items) != 2 || first.NextCursor == nil {
+		t.Fatalf("first assignment page = %+v, err=%v", first, err)
+	}
+	if first.Items[0].AssignmentID != "assignment-inventory-c" || first.Items[1].AssignmentID != "assignment-inventory-b" {
+		t.Fatalf("assignment order = %+v", first.Items)
+	}
+	second, err := fixture.store.OrchestrationControl().(storage.OrchestrationInventoryStore).ListOrchestrationAssignments(context.Background(), fixture.project, storage.PageRequest{Limit: 2, Cursor: *first.NextCursor})
+	if err != nil || len(second.Items) != 1 || second.Items[0].AssignmentID != "assignment-inventory-a" || second.NextCursor != nil {
+		t.Fatalf("second assignment page = %+v, err=%v", second, err)
+	}
+	empty, err := fixture.store.OrchestrationControl().(storage.OrchestrationInventoryStore).ListOrchestrationAssignments(context.Background(), "project-other", storage.PageRequest{Limit: 2})
+	if err != nil || len(empty.Items) != 0 {
+		t.Fatalf("cross-project assignment page = %+v, err=%v", empty, err)
+	}
+}
+
 func (fixture *controlFixture) claimRequest(key, claimant string) orchestration.ClaimRequest {
 	return orchestration.ClaimRequest{
 		AssignmentID: "assignment-" + key, AttemptID: "attempt-" + key + "-1", LeaseID: "lease-" + key + "-" + claimant,

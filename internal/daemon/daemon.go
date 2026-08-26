@@ -53,12 +53,20 @@ type Options struct {
 	OrchestrationScheduler      OrchestrationScheduler
 	OrchestrationDrain          time.Duration
 	OrchestrationAdministration api.OrchestrationAdministration
+	ComposeOrchestration        OrchestrationComposer
 }
 
 type OrchestrationScheduler interface {
 	Start(context.Context) error
 	Shutdown(context.Context) error
 }
+
+type OrchestrationComponents struct {
+	Scheduler      OrchestrationScheduler
+	Administration api.OrchestrationAdministration
+}
+
+type OrchestrationComposer func(context.Context, config.Config, storage.Store, identity.DeviceIdentity) (OrchestrationComponents, error)
 
 type Daemon struct {
 	Config   config.Config
@@ -86,6 +94,7 @@ type Daemon struct {
 	localAPI                *localAPIState
 	requestProjectIngestion func(context.Context, core.ShareID, string) error
 	orchestrationScheduler  OrchestrationScheduler
+	orchestrationAdmin      api.OrchestrationAdministration
 	orchestrationDrain      time.Duration
 }
 
@@ -163,6 +172,20 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 	if err != nil {
 		return nil, fmt.Errorf("initialize local identity: %w", err)
 	}
+	if cfg.Node.Execution.Enabled && options.OrchestrationScheduler == nil {
+		if options.ComposeOrchestration == nil {
+			return nil, errors.New("local execution is enabled but orchestration composition is unavailable")
+		}
+		components, composeErr := options.ComposeOrchestration(ctx, cfg, store, deviceIdentity)
+		if composeErr != nil {
+			return nil, fmt.Errorf("compose local orchestration: %w", composeErr)
+		}
+		if components.Scheduler == nil || components.Administration == nil {
+			return nil, errors.New("local orchestration composition is incomplete")
+		}
+		options.OrchestrationScheduler = components.Scheduler
+		options.OrchestrationAdministration = components.Administration
+	}
 
 	if err := store.Devices().TrustDevice(ctx, storage.Device{
 		ID:          deviceIdentity.DeviceID,
@@ -221,6 +244,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 		jobMaxBackoff:           options.JobMaxBackoff,
 		requestProjectIngestion: options.RequestProjectIngestion,
 		orchestrationScheduler:  options.OrchestrationScheduler,
+		orchestrationAdmin:      options.OrchestrationAdministration,
 		orchestrationDrain:      options.OrchestrationDrain,
 		startedAt:               options.Now().UTC(),
 	}, nil

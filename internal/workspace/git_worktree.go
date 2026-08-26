@@ -181,6 +181,25 @@ func (manager *GitWorktreeManager) Inspect(ctx context.Context, workspaceID stri
 	return manager.reconcileRecord(ctx, record)
 }
 
+// ResolveLocalPath is an authority-local runtime seam. The returned absolute
+// path must never be exposed through an API or durable orchestration record.
+func (manager *GitWorktreeManager) ResolveLocalPath(ctx context.Context, workspaceID string) (string, error) {
+	if err := contextError(ctx); err != nil {
+		return "", err
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	record, err := manager.readRecord(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	workspaceValue, err := manager.reconcileRecord(ctx, record)
+	if err != nil || workspaceValue.State != StateAllocated {
+		return "", ErrWorkspaceMissing
+	}
+	return record.WorktreePath, nil
+}
+
 func (manager *GitWorktreeManager) Release(ctx context.Context, claim CleanupClaim) error {
 	if err := contextError(ctx); err != nil {
 		return err

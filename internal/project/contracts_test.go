@@ -201,6 +201,15 @@ func TestDecodeRejectsOmittedRequiredZeroValuedFields(t *testing.T) {
 	}
 }
 
+func TestWorkPackageScopeAcceptsExplicitWholeWorkspaceRoot(t *testing.T) {
+	record := mutateWorkPackage(func(record *WorkPackageDefinition) {
+		record.Scope = WorkScope{Allowed: []string{"."}, Inspect: []string{"."}}
+	})
+	if _, err := MarshalRecord(record); err != nil {
+		t.Fatalf("whole-workspace scope: %v", err)
+	}
+}
+
 func TestRecordValidationRejectsInvalidReferencesHashesTimesAndBounds(t *testing.T) {
 	tests := []struct {
 		name   string

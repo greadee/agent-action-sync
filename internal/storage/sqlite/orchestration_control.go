@@ -371,6 +371,60 @@ func (store orchestrationControlStore) GetAssignment(ctx context.Context, assign
 	return orchestrationSnapshotDB(ctx, store.db, assignmentID)
 }
 
+func (store orchestrationControlStore) ListOrchestrationAssignments(ctx context.Context, projectID string, requested storage.PageRequest) (storage.Page[storage.OrchestrationAssignment], error) {
+	page, err := storage.NormalizePageRequest(requested)
+	if err != nil || projectID == "" {
+		return storage.Page[storage.OrchestrationAssignment]{}, errors.New("invalid orchestration assignment query")
+	}
+	if !page.Cursor.Timestamp.IsZero() && page.Cursor.ID == "" {
+		return storage.Page[storage.OrchestrationAssignment]{}, errors.New("assignment cursor requires an ID")
+	}
+	query := `SELECT assignment_id, project_id, task_id, task_revision, graph_revision, work_package_id, execution_id,
+contract_id, contract_version, contract_digest, worker_id, node_id, state, current_attempt_id,
+current_attempt_number, idempotency_digest, recovery_disposition, failure_code, created_at, updated_at
+FROM orchestration_assignments WHERE project_id = ?`
+	arguments := []any{projectID}
+	if !page.Cursor.Timestamp.IsZero() {
+		cursor := formatTime(page.Cursor.Timestamp)
+		query += ` AND (updated_at < ? OR (updated_at = ? AND assignment_id < ?))`
+		arguments = append(arguments, cursor, cursor, page.Cursor.ID)
+	}
+	query += ` ORDER BY updated_at DESC, assignment_id DESC LIMIT ?`
+	arguments = append(arguments, page.Limit+1)
+	rows, err := store.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return storage.Page[storage.OrchestrationAssignment]{}, err
+	}
+	defer rows.Close()
+	items := make([]storage.OrchestrationAssignment, 0, page.Limit+1)
+	for rows.Next() {
+		var item storage.OrchestrationAssignment
+		var failure sql.NullString
+		var created, updated string
+		if err := rows.Scan(
+			&item.AssignmentID, &item.ProjectID, &item.TaskID, &item.TaskRevision, &item.GraphRevision,
+			&item.WorkPackageID, &item.ExecutionID, &item.ContractID, &item.ContractVersion, &item.ContractDigest,
+			&item.WorkerID, &item.NodeID, &item.State, &item.CurrentAttemptID, &item.CurrentAttempt,
+			&item.IdempotencyDigest, &item.RecoveryDisposition, &failure, &created, &updated,
+		); err != nil {
+			return storage.Page[storage.OrchestrationAssignment]{}, err
+		}
+		item.FailureCode = failure.String
+		item.CreatedAt, item.UpdatedAt = parseStoredTime(created), parseStoredTime(updated)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return storage.Page[storage.OrchestrationAssignment]{}, err
+	}
+	result := storage.Page[storage.OrchestrationAssignment]{Items: items}
+	if len(result.Items) > page.Limit {
+		result.Items = result.Items[:page.Limit]
+		last := result.Items[len(result.Items)-1]
+		result.NextCursor = &storage.PageCursor{Timestamp: last.UpdatedAt, ID: last.AssignmentID}
+	}
+	return result, nil
+}
+
 func (store orchestrationControlStore) SaveGateStatus(ctx context.Context, request storage.OrchestrationGateRequest) (result storage.RegistryWriteResult, err error) {
 	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {

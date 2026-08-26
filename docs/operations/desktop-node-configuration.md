@@ -81,6 +81,7 @@ syncgate node-disposable-mark `
 
 $preflight = syncgate node-execution-preflight `
   --provider codex `
+  --model gpt-5.6-sol `
   --runtime C:\Path\To\codex.exe `
   --project C:\Path\To\SyncGate\worktrees\disposable-pilot `
   --confirm "I CONFIRM THIS PROJECT IS DISPOSABLE" | ConvertFrom-Json
@@ -91,9 +92,11 @@ syncgate node-execution-enable `
 ```
 
 The receipt expires after 15 minutes. Activation fails if the credential,
-runtime binary, Git HEAD, clean status, marker, or containment changes. Enabling
-the switch in Slice 2 records authorization only; runtime/scheduler composition
-is still disabled until Slice 3.
+runtime binary, Git HEAD, clean status, marker, or containment changes. The
+enabled authorization is revalidated again whenever the Slice 3 daemon
+composes the runtime. The scheduler still starts paused and requires an
+explicit authenticated start command; see
+[Desktop runtime operation and recovery](desktop-runtime-recovery.md).
 
 Disable without deleting history, worktrees, or credentials:
 

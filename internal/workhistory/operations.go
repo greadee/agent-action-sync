@@ -38,7 +38,7 @@ func (service *Service) CreateTask(ctx context.Context, request CreateTaskReques
 			if !nonblank(work.WorkPackageID, work.Objective, work.Trade) || len(work.Deliverables) == 0 || len(work.AcceptanceCriteria) == 0 {
 				return operationSpec{}, ErrInvalidRequest
 			}
-			if err := validatePaths(append(append(append([]string{}, work.Scope.Allowed...), work.Scope.Inspect...), work.Scope.Forbidden...)); err != nil {
+			if err := validateScopePaths(append(append(append([]string{}, work.Scope.Allowed...), work.Scope.Inspect...), work.Scope.Forbidden...)); err != nil {
 				return operationSpec{}, err
 			}
 			workRisk, workResources, workGates, _ := orchestration.NormalizeTaskInputs(work.Risk, work.Resources, work.QualityGates, nil)
@@ -147,7 +147,7 @@ func (service *Service) CreateWorkPackage(ctx context.Context, request CreateWor
 		if !nonblank(request.WorkPackageID, request.Objective, request.Trade) || len(request.Deliverables) == 0 || len(request.AcceptanceCriteria) == 0 {
 			return operationSpec{}, ErrInvalidRequest
 		}
-		if err := validatePaths(append(append(append([]string{}, request.Scope.Allowed...), request.Scope.Inspect...), request.Scope.Forbidden...)); err != nil {
+		if err := validateScopePaths(append(append(append([]string{}, request.Scope.Allowed...), request.Scope.Inspect...), request.Scope.Forbidden...)); err != nil {
 			return operationSpec{}, err
 		}
 		definitionID := deterministicID("wp-", manifest.ProjectID, "create-work-package-definition", request.IdempotencyKey)
