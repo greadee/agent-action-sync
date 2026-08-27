@@ -241,6 +241,25 @@ func (scheduler *Scheduler) Status() Status {
 	}
 }
 
+// SetMaxConcurrent applies an authority-local project ceiling while dispatch
+// is paused. It cannot be changed under a running scheduler, which keeps the
+// boundary deterministic across project selection changes.
+func (scheduler *Scheduler) SetMaxConcurrent(ctx context.Context, value int) error {
+	if ctx == nil || value < 1 || value > 2 {
+		return ErrInvalidConfiguration
+	}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if scheduler.started && !scheduler.paused {
+		return errors.New("scheduler concurrency can only change while paused")
+	}
+	scheduler.config.MaxConcurrent = value
+	return nil
+}
+
 func (scheduler *Scheduler) run(ctx context.Context, source WorkSource) {
 	defer scheduler.wg.Done()
 	ticker := time.NewTicker(scheduler.config.PollInterval)

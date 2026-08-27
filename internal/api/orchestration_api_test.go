@@ -40,6 +40,14 @@ func TestOrchestrationRoutesAuthenticateBindAndSanitize(t *testing.T) {
 			t.Fatalf("response leaked %q: %s", forbidden, recorder.Body.String())
 		}
 	}
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/orchestration/projects/project-one/policy", strings.NewReader(`{"project_id":"project-one","max_concurrent":1,"idempotency_key":"policy-one"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+string(credential))
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("omitted scheduling policy=%d body=%s", recorder.Code, recorder.Body.String())
+	}
 	input := AssignmentControlInput{ProjectID: "project-one", AssignmentID: "assignment:one", Action: "pause", IdempotencyKey: "operation-one"}
 	raw, _ := json.Marshal(input)
 	request = httptest.NewRequest(http.MethodPost, "/api/v1/projects/project-other/assignments/assignment:one/controls", strings.NewReader(string(raw)))
@@ -74,6 +82,15 @@ func TestOrchestrationRoutesAreUnavailableWithoutDaemonFacade(t *testing.T) {
 
 type orchestrationFacadeStub struct{ nodes, controlled bool }
 
+func (stub *orchestrationFacadeStub) ListLocalProjects(context.Context, storage.PageRequest) (LocalProjectPage, error) {
+	return LocalProjectPage{Items: []LocalProjectItem{{ProjectID: "project-one", DisplayName: "One", SchedulerState: "paused", AssignmentCounts: []StatusCount{}, GateCounts: []StatusCount{}}}, Page: InventoryPage{Limit: 1}}, nil
+}
+func (stub *orchestrationFacadeStub) SelectLocalProject(context.Context, LocalProjectSelectionInput) (LocalProjectItem, error) {
+	return LocalProjectItem{}, nil
+}
+func (stub *orchestrationFacadeStub) SetLocalProjectPolicy(context.Context, LocalProjectPolicyInput) (LocalProjectItem, error) {
+	return LocalProjectItem{}, nil
+}
 func (stub *orchestrationFacadeStub) ApproveTaskGraph(context.Context, TaskGraphApprovalInput) (TaskGraphApprovalResult, error) {
 	return TaskGraphApprovalResult{}, nil
 }

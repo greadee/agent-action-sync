@@ -39,6 +39,7 @@ type Store interface {
 	ResultIntake() ResultIntakeStore
 	ExecutionTelemetry() ExecutionTelemetryStore
 	OrchestrationControl() OrchestrationControlStore
+	LocalProjectOperations() LocalProjectOperationsStore
 	Close() error
 }
 

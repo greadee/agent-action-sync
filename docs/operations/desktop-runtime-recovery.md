@@ -7,6 +7,10 @@ node. Even when execution is enabled, the scheduler starts paused.
 
 ## Inspect and start local execution
 
+For multiple registered projects, complete the selection and policy steps in
+[Desktop multi-project operations](desktop-multi-project-operations.md) before
+starting the scheduler.
+
 ```powershell
 syncgate node-execution-status
 syncgate node-resources
@@ -75,4 +79,5 @@ Validate the shipped boundary with:
 
 ```powershell
 tools\check_desktop_node_slice3_release.ps1
+tools\check_desktop_node_slice4_release.ps1
 ```

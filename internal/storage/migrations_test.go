@@ -206,3 +206,17 @@ func TestOrchestrationAttemptBindingMigrationStoresOnlyBoundedAuthorityMetadata(
 		}
 	}
 }
+
+func TestLocalProjectAuthorityMigrationIsExclusiveAndAuthorityLocal(t *testing.T) {
+	sql := strings.ToLower(Migrations[15].SQL)
+	for _, required := range []string{"local_project_policies", "local_project_selection", "singleton = 1", "max_concurrent between 1 and 2"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("local project authority migration is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"root_path", "workspace", "credential", "content", "prompt", "runtime_session"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("local project authority migration contains forbidden field %q", forbidden)
+		}
+	}
+}

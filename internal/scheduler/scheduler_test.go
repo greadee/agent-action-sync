@@ -239,6 +239,28 @@ func TestSchedulerStartsPausedAndRequiresExplicitResume(t *testing.T) {
 	}
 }
 
+func TestSchedulerAppliesProjectConcurrencyOnlyWhilePaused(t *testing.T) {
+	fixture := newSchedulerFixtureWithoutStart(t, 2, 2)
+	fixture.scheduler.config.StartPaused = true
+	if err := fixture.scheduler.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.scheduler.Shutdown(context.Background()) })
+	if err := fixture.scheduler.SetMaxConcurrent(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.scheduler.Resume(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.scheduler.SetMaxConcurrent(context.Background(), 2); err == nil {
+		t.Fatal("changed concurrency while scheduler was running")
+	}
+	report, err := fixture.scheduler.Cycle(context.Background(), fixture.requests(t, map[string][]string{"work:a": nil, "work:b": nil}, nil))
+	if err != nil || report.Active != 1 || countOutcome(report, OutcomeDispatched) != 1 {
+		t.Fatalf("project concurrency report = %+v, err=%v", report, err)
+	}
+}
+
 func TestSchedulerReconcilesBeforeDispatchAndDoesNotReplayUncertainRuntime(t *testing.T) {
 	fixture := newSchedulerFixtureWithoutStart(t, 2, 2)
 	fixture.control.snapshots["assignment:recovered"] = storage.OrchestrationSnapshot{

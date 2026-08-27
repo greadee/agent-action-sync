@@ -79,6 +79,7 @@ Validate the Windows desktop-node release lifecycle with:
 tools\check_desktop_node_slice1_release.ps1
 tools\check_desktop_node_slice2_release.ps1
 tools\check_desktop_node_slice3_release.ps1
+tools\check_desktop_node_slice4_release.ps1
 ```
 
 Initialize, run, and check an installed per-user node with:

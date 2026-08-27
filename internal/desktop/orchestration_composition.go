@@ -3,8 +3,10 @@ package desktop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"syncgate/internal/codexruntime"
@@ -39,16 +41,17 @@ type LocalOrchestrationOptions struct {
 }
 
 type LocalOrchestration struct {
-	Scheduler      *scheduler.Scheduler
-	Administration *LocalOrchestrationAdministration
-	Runtime        *codexruntime.Adapter
-	Node           *LocalNodeProvider
-	Workspace      *workspace.GitWorktreeManager
-	Results        LocalResultStore
-	RuntimeRef     executioncontract.BindingReference
-	ProviderRef    executioncontract.BindingReference
-	ModelRef       executioncontract.BindingReference
-	NodeRef        executioncontract.BindingReference
+	Scheduler           *scheduler.Scheduler
+	Administration      *LocalOrchestrationAdministration
+	Runtime             *codexruntime.Adapter
+	Node                *LocalNodeProvider
+	Workspace           *workspace.GitWorktreeManager
+	Results             LocalResultStore
+	RuntimeRef          executioncontract.BindingReference
+	ProviderRef         executioncontract.BindingReference
+	ModelRef            executioncontract.BindingReference
+	NodeRef             executioncontract.BindingReference
+	AuthorizedProjectID string
 }
 
 func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOptions) (*LocalOrchestration, error) {
@@ -61,6 +64,10 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 	}
 	manager := ExecutionManager{Base: options.Base, Credentials: options.Credentials, Now: options.Now}
 	record, err := manager.ValidateEnabledAuthorization(ctx, options.Config, roots)
+	if err != nil {
+		return nil, err
+	}
+	authorizedProjectID, err := registeredProjectForRoot(ctx, options.Store.ProjectRegistrations(), record.ProjectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +126,12 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 	if options.Binder != nil {
 		binder = options.Binder
 	}
+	var workSource scheduler.WorkSource
+	if options.Source != nil {
+		workSource = authorizedWorkSource{source: options.Source, projectID: authorizedProjectID}
+	}
 	schedulerValue, err := scheduler.New(scheduler.Config{
-		Binder: binder, Control: control, Workspace: workspaces, Source: options.Source,
+		Binder: binder, Control: control, Workspace: workspaces, Source: workSource,
 		ActorID: "scheduler:desktop", MaxConcurrent: options.Config.Node.Execution.MaxConcurrent,
 		StartPaused: true,
 		ResolveRuntime: func(_ context.Context, id string) (runtimecontract.Adapter, error) {
@@ -154,12 +165,76 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 	}
 	administration := NewLocalOrchestrationAdministration(LocalAdministrationOptions{
 		Scheduler: schedulerValue, Control: control, Inventory: options.Store.OrchestrationControl(),
-		Projects: options.Store.ProjectRegistrations(), Node: node, Gate: gate, Now: options.Now,
+		Projects: options.Store.ProjectRegistrations(), Operations: options.Store.LocalProjectOperations(),
+		AuthorizedProjectID: authorizedProjectID, MaxConcurrent: options.Config.Node.Execution.MaxConcurrent,
+		Node: node, Gate: gate, Now: options.Now,
 	})
 	return &LocalOrchestration{
 		Scheduler: schedulerValue, Administration: administration, Runtime: adapter, Node: node,
 		Workspace: workspaces, Results: results, RuntimeRef: runtimeRef, ProviderRef: providerRef, ModelRef: modelRef, NodeRef: nodeRef,
+		AuthorizedProjectID: authorizedProjectID,
 	}, nil
+}
+
+const maxCompositionProjectRegistrations = 1000
+
+func registeredProjectForRoot(ctx context.Context, projects storage.ProjectRegistrationStore, root string) (string, error) {
+	if projects == nil || root == "" {
+		return "", errors.New("authorized project registration is unavailable")
+	}
+	cursor := storage.PageCursor{}
+	seen := 0
+	for {
+		page, err := projects.ListProjects(ctx, storage.PageRequest{Limit: storage.MaxAdminPageLimit, Cursor: cursor})
+		if err != nil {
+			return "", fmt.Errorf("list authorized project registrations: %w", err)
+		}
+		for _, registration := range page.Items {
+			seen++
+			if sameLocalPath(registration.RootPath, root) {
+				return registration.ProjectID, nil
+			}
+		}
+		if page.NextCursor == nil {
+			break
+		}
+		if seen >= maxCompositionProjectRegistrations {
+			return "", errors.New("authorized project registration inventory exceeds the local bound")
+		}
+		cursor = *page.NextCursor
+	}
+	return "", errors.New("execution-authorized root is not a registered project")
+}
+
+func sameLocalPath(left, right string) bool {
+	leftAbsolute, leftErr := filepath.Abs(left)
+	rightAbsolute, rightErr := filepath.Abs(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(leftAbsolute), filepath.Clean(rightAbsolute))
+}
+
+type authorizedWorkSource struct {
+	source    scheduler.WorkSource
+	projectID string
+}
+
+func (source authorizedWorkSource) Pending(ctx context.Context) ([]scheduler.DispatchRequest, error) {
+	if source.source == nil {
+		return nil, nil
+	}
+	requests, err := source.source.Pending(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]scheduler.DispatchRequest, 0, len(requests))
+	for _, request := range requests {
+		if request.Binding.Plan.ProjectID == source.projectID {
+			filtered = append(filtered, request)
+		}
+	}
+	return filtered, nil
 }
 
 func resolveRuntimeWorkspace(ctx context.Context, workspaces *workspace.GitWorktreeManager, control orchestration.ControlService, binding codexruntime.WorkspaceBinding) (string, error) {

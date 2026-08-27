@@ -210,6 +210,15 @@ type disabledOrchestrationFacade struct{}
 func unavailableOrchestration() error {
 	return &api.APIError{Status: 503, Code: "unavailable", Message: "orchestration administration is unavailable"}
 }
+func (disabledOrchestrationFacade) ListLocalProjects(context.Context, storage.PageRequest) (api.LocalProjectPage, error) {
+	return api.LocalProjectPage{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) SelectLocalProject(context.Context, api.LocalProjectSelectionInput) (api.LocalProjectItem, error) {
+	return api.LocalProjectItem{}, unavailableOrchestration()
+}
+func (disabledOrchestrationFacade) SetLocalProjectPolicy(context.Context, api.LocalProjectPolicyInput) (api.LocalProjectItem, error) {
+	return api.LocalProjectItem{}, unavailableOrchestration()
+}
 func (disabledOrchestrationFacade) ApproveTaskGraph(context.Context, api.TaskGraphApprovalInput) (api.TaskGraphApprovalResult, error) {
 	return api.TaskGraphApprovalResult{}, unavailableOrchestration()
 }

@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -21,26 +23,33 @@ import (
 )
 
 type LocalAdministrationOptions struct {
-	Scheduler *scheduler.Scheduler
-	Control   orchestration.ControlService
-	Inventory storage.OrchestrationControlStore
-	Projects  storage.ProjectRegistrationStore
-	Node      computenode.Provider
-	Gate      *integrationgate.Service
-	Now       func() time.Time
+	Scheduler           *scheduler.Scheduler
+	Control             orchestration.ControlService
+	Inventory           storage.OrchestrationControlStore
+	Projects            storage.ProjectRegistrationStore
+	Operations          storage.LocalProjectOperationsStore
+	AuthorizedProjectID string
+	MaxConcurrent       int
+	Node                computenode.Provider
+	Gate                *integrationgate.Service
+	Now                 func() time.Time
 }
 
 type LocalOrchestrationAdministration struct {
-	scheduler *scheduler.Scheduler
-	control   orchestration.ControlService
-	inventory storage.OrchestrationInventoryStore
-	projects  storage.ProjectRegistrationStore
-	node      computenode.Provider
-	gate      *integrationgate.Service
-	now       func() time.Time
+	scheduler           *scheduler.Scheduler
+	control             orchestration.ControlService
+	inventory           storage.OrchestrationInventoryStore
+	projects            storage.ProjectRegistrationStore
+	operations          storage.LocalProjectOperationsStore
+	authorizedProjectID string
+	maxConcurrent       int
+	node                computenode.Provider
+	gate                *integrationgate.Service
+	now                 func() time.Time
 
 	mu            sync.Mutex
 	schedulerKeys map[string]string
+	projectKeys   map[string]string
 	summaries     map[string]integrationgate.IntegrationSummary
 }
 
@@ -48,9 +57,100 @@ func NewLocalOrchestrationAdministration(options LocalAdministrationOptions) *Lo
 	inventory, _ := options.Inventory.(storage.OrchestrationInventoryStore)
 	return &LocalOrchestrationAdministration{
 		scheduler: options.Scheduler, control: options.Control, inventory: inventory,
-		projects: options.Projects, node: options.Node, gate: options.Gate, now: options.Now,
-		schedulerKeys: map[string]string{}, summaries: map[string]integrationgate.IntegrationSummary{},
+		projects: options.Projects, operations: options.Operations, authorizedProjectID: options.AuthorizedProjectID,
+		maxConcurrent: options.MaxConcurrent, node: options.Node, gate: options.Gate, now: options.Now,
+		schedulerKeys: map[string]string{}, projectKeys: map[string]string{}, summaries: map[string]integrationgate.IntegrationSummary{},
 	}
+}
+
+func (admin *LocalOrchestrationAdministration) ListLocalProjects(ctx context.Context, requested storage.PageRequest) (api.LocalProjectPage, error) {
+	if admin.projects == nil || admin.operations == nil {
+		return api.LocalProjectPage{}, localUnavailable("local project inventory is unavailable")
+	}
+	page, err := admin.projects.ListProjects(ctx, requested)
+	if err != nil {
+		return api.LocalProjectPage{}, err
+	}
+	selected, selectedErr := admin.operations.GetSelectedLocalProject(ctx)
+	if selectedErr != nil && !errors.Is(selectedErr, storage.ErrNotFound) {
+		return api.LocalProjectPage{}, localUnavailable("local project selection is unavailable")
+	}
+	items := make([]api.LocalProjectItem, 0, len(page.Items))
+	for _, registration := range page.Items {
+		item, err := admin.localProjectItem(ctx, registration, selected.ProjectID)
+		if err != nil {
+			return api.LocalProjectPage{}, err
+		}
+		items = append(items, item)
+	}
+	info := api.InventoryPage{Limit: requested.Limit}
+	if info.Limit == 0 {
+		info.Limit = storage.DefaultAdminPageLimit
+	}
+	if page.NextCursor != nil {
+		raw, _ := json.Marshal(page.NextCursor)
+		info.HasMore = true
+		info.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
+	}
+	return api.LocalProjectPage{Items: items, Page: info}, nil
+}
+
+func (admin *LocalOrchestrationAdministration) SelectLocalProject(ctx context.Context, input api.LocalProjectSelectionInput) (api.LocalProjectItem, error) {
+	if err := input.Validate(); err != nil {
+		return api.LocalProjectItem{}, localBadRequest("local project selection is invalid")
+	}
+	registration, err := admin.project(ctx, input.ProjectID)
+	if err != nil {
+		return api.LocalProjectItem{}, err
+	}
+	if admin.operations == nil || admin.now == nil {
+		return api.LocalProjectItem{}, localUnavailable("local project selection is unavailable")
+	}
+	if admin.scheduler != nil {
+		status := admin.scheduler.Status()
+		if status.Started && !status.Paused {
+			return api.LocalProjectItem{}, localConflict("disable the selected project scheduler before changing projects")
+		}
+	}
+	fingerprint := localHash("select-project", input.ProjectID, input.IdempotencyKey)
+	if err := admin.rememberProjectCommand(input.IdempotencyKey, fingerprint); err != nil {
+		return api.LocalProjectItem{}, err
+	}
+	if err := admin.operations.SelectLocalProject(ctx, storage.LocalProjectSelection{ProjectID: input.ProjectID, SelectedAt: admin.now().UTC()}); err != nil {
+		return api.LocalProjectItem{}, localConflict("local project selection failed")
+	}
+	return admin.localProjectItem(ctx, registration, input.ProjectID)
+}
+
+func (admin *LocalOrchestrationAdministration) SetLocalProjectPolicy(ctx context.Context, input api.LocalProjectPolicyInput) (api.LocalProjectItem, error) {
+	if err := input.Validate(); err != nil {
+		return api.LocalProjectItem{}, localBadRequest("local project policy is invalid")
+	}
+	registration, err := admin.project(ctx, input.ProjectID)
+	if err != nil {
+		return api.LocalProjectItem{}, err
+	}
+	if admin.operations == nil || admin.now == nil || admin.maxConcurrent < 1 {
+		return api.LocalProjectItem{}, localUnavailable("local project policy is unavailable")
+	}
+	if input.MaxConcurrent > admin.maxConcurrent {
+		return api.LocalProjectItem{}, localBadRequest("project concurrency exceeds the authorized node ceiling")
+	}
+	selected, _ := admin.operations.GetSelectedLocalProject(ctx)
+	if selected.ProjectID == input.ProjectID && admin.scheduler != nil {
+		status := admin.scheduler.Status()
+		if status.Started && !status.Paused {
+			return api.LocalProjectItem{}, localConflict("disable the project scheduler before changing its policy")
+		}
+	}
+	fingerprint := localHash("project-policy", input.ProjectID, boolText(*input.SchedulingEnabled), fmt.Sprintf("%d", input.MaxConcurrent), input.IdempotencyKey)
+	if err := admin.rememberProjectCommand(input.IdempotencyKey, fingerprint); err != nil {
+		return api.LocalProjectItem{}, err
+	}
+	if err := admin.operations.SetLocalProjectPolicy(ctx, storage.LocalProjectPolicy{ProjectID: input.ProjectID, SchedulingEnabled: *input.SchedulingEnabled, MaxConcurrent: input.MaxConcurrent, UpdatedAt: admin.now().UTC()}); err != nil {
+		return api.LocalProjectItem{}, localConflict("local project policy update failed")
+	}
+	return admin.localProjectItem(ctx, registration, selected.ProjectID)
 }
 
 func (admin *LocalOrchestrationAdministration) ApproveTaskGraph(context.Context, api.TaskGraphApprovalInput) (api.TaskGraphApprovalResult, error) {
@@ -70,8 +170,23 @@ func (admin *LocalOrchestrationAdministration) DisableScheduler(ctx context.Cont
 }
 
 func (admin *LocalOrchestrationAdministration) setScheduler(ctx context.Context, input api.SchedulerControlInput, enabled bool) (api.SchedulerStatus, error) {
-	if err := admin.requireProject(ctx, input.ProjectID); err != nil {
+	if admin.scheduler == nil {
+		return api.SchedulerStatus{}, localUnavailable("scheduler control is unavailable")
+	}
+	if err := admin.requireExecutionAuthority(ctx, input.ProjectID); err != nil {
 		return api.SchedulerStatus{}, err
+	}
+	if enabled {
+		policy, err := admin.operations.GetLocalProjectPolicy(ctx, input.ProjectID)
+		if errors.Is(err, storage.ErrNotFound) || err == nil && !policy.SchedulingEnabled {
+			return api.SchedulerStatus{}, localConflict("project policy does not allow scheduling")
+		}
+		if err != nil {
+			return api.SchedulerStatus{}, localUnavailable("project policy is unavailable")
+		}
+		if err := admin.scheduler.SetMaxConcurrent(ctx, policy.MaxConcurrent); err != nil {
+			return api.SchedulerStatus{}, localConflict("project concurrency policy could not be applied")
+		}
 	}
 	fingerprint := localHash(input.ProjectID, input.IdempotencyKey, boolText(enabled))
 	admin.mu.Lock()
@@ -153,6 +268,9 @@ func (admin *LocalOrchestrationAdministration) GetAssignment(ctx context.Context
 }
 
 func (admin *LocalOrchestrationAdministration) ControlAssignment(ctx context.Context, input api.AssignmentControlInput) (api.AssignmentDetail, error) {
+	if err := admin.requireExecutionAuthority(ctx, input.ProjectID); err != nil {
+		return api.AssignmentDetail{}, err
+	}
 	snapshot, err := admin.control.GetAssignment(ctx, input.AssignmentID)
 	if err != nil {
 		return api.AssignmentDetail{}, err
@@ -226,6 +344,9 @@ func (admin *LocalOrchestrationAdministration) evaluate(ctx context.Context, sna
 }
 
 func (admin *LocalOrchestrationAdministration) DecideIntegration(ctx context.Context, input api.IntegrationDecisionInput) (api.AssignmentDetail, error) {
+	if err := admin.requireExecutionAuthority(ctx, input.ProjectID); err != nil {
+		return api.AssignmentDetail{}, err
+	}
 	snapshot, err := admin.control.GetAssignment(ctx, input.AssignmentID)
 	if err != nil || snapshot.Assignment.ProjectID != input.ProjectID || snapshot.Lease == nil || admin.gate == nil {
 		return api.AssignmentDetail{}, localConflict("integration decision is unavailable")
@@ -291,6 +412,102 @@ func (admin *LocalOrchestrationAdministration) requireProject(ctx context.Contex
 		return localNotFound("project was not found")
 	}
 	return nil
+}
+
+func (admin *LocalOrchestrationAdministration) project(ctx context.Context, projectID string) (storage.ProjectRegistration, error) {
+	if err := admin.requireProject(ctx, projectID); err != nil {
+		return storage.ProjectRegistration{}, err
+	}
+	registration, err := admin.projects.GetProject(ctx, projectID)
+	if err != nil {
+		return storage.ProjectRegistration{}, localNotFound("project was not found")
+	}
+	return registration, nil
+}
+
+func (admin *LocalOrchestrationAdministration) requireExecutionAuthority(ctx context.Context, projectID string) error {
+	if err := admin.requireProject(ctx, projectID); err != nil {
+		return err
+	}
+	if admin.operations == nil || projectID != admin.authorizedProjectID {
+		return localConflict("project is not authorized for this local runtime")
+	}
+	selected, err := admin.operations.GetSelectedLocalProject(ctx)
+	if errors.Is(err, storage.ErrNotFound) {
+		return localConflict("project is not the explicit local selection")
+	}
+	if err != nil {
+		return localUnavailable("local project selection is unavailable")
+	}
+	if selected.ProjectID != projectID {
+		return localConflict("project is not the explicit local selection")
+	}
+	return nil
+}
+
+func (admin *LocalOrchestrationAdministration) rememberProjectCommand(key, fingerprint string) error {
+	admin.mu.Lock()
+	defer admin.mu.Unlock()
+	if prior, ok := admin.projectKeys[key]; ok && prior != fingerprint {
+		return localConflict("project command idempotency key was reused")
+	}
+	admin.projectKeys[key] = fingerprint
+	return nil
+}
+
+func (admin *LocalOrchestrationAdministration) localProjectItem(ctx context.Context, registration storage.ProjectRegistration, selectedProjectID string) (api.LocalProjectItem, error) {
+	policy := storage.LocalProjectPolicy{ProjectID: registration.ProjectID, MaxConcurrent: 1}
+	storedPolicy, err := admin.operations.GetLocalProjectPolicy(ctx, registration.ProjectID)
+	if err == nil {
+		policy = storedPolicy
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		return api.LocalProjectItem{}, localUnavailable("local project policy is unavailable")
+	}
+	status, err := admin.operations.GetProjectOrchestrationStatus(ctx, registration.ProjectID)
+	if err != nil {
+		return api.LocalProjectItem{}, localUnavailable("local project status is unavailable")
+	}
+	item := api.LocalProjectItem{
+		ProjectID: registration.ProjectID, DisplayName: localDisplayName(registration.Name),
+		RegisteredAt:        registration.RegisteredAt.UTC().Format(time.RFC3339Nano),
+		Selected:            selectedProjectID == registration.ProjectID,
+		ExecutionAuthorized: registration.ProjectID == admin.authorizedProjectID,
+		SchedulingEnabled:   policy.SchedulingEnabled, MaxConcurrent: policy.MaxConcurrent,
+		SchedulerState: "not_selected", AssignmentCounts: assignmentStatusCounts(status.AssignmentCounts), GateCounts: gateStatusCounts(status.GateCounts),
+	}
+	if item.Selected {
+		item.SchedulerState = "paused"
+		if admin.scheduler != nil {
+			item.SchedulerState = schedulerStatus(registration.ProjectID, admin.scheduler.Status(), false).State
+		}
+	}
+	return item, nil
+}
+
+func localDisplayName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || filepath.IsAbs(value) || strings.ContainsAny(value, `/\`) {
+		return "registered project"
+	}
+	return value
+}
+
+func assignmentStatusCounts(values map[storage.AssignmentState]int64) []api.StatusCount {
+	items := make([]api.StatusCount, 0, len(values))
+	for state, count := range values {
+		items = append(items, api.StatusCount{State: string(state), Count: count})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].State < items[j].State })
+	return items
+}
+
+func gateStatusCounts(values map[storage.GateState]int64) []api.StatusCount {
+	items := make([]api.StatusCount, 0, len(values))
+	for state, count := range values {
+		items = append(items, api.StatusCount{State: string(state), Count: count})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].State < items[j].State })
+	return items
 }
 
 func LocalAssignmentReference(snapshot storage.OrchestrationSnapshot) resultintake.AssignmentReference {

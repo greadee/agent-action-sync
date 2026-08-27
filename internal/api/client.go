@@ -259,6 +259,27 @@ func (client *Client) PreviewDispatch(ctx context.Context, input DispatchPreview
 	err := client.do(ctx, http.MethodPost, setupProjectPath(input.ProjectID, "dispatch/preview"), input, &result)
 	return result, err
 }
+func (client *Client) ListLocalProjects(ctx context.Context, limit int) (LocalProjectPage, error) {
+	var result LocalProjectPage
+	err := client.do(ctx, http.MethodGet, collectionPath("/api/v1/orchestration/projects", limit), nil, &result)
+	return result, err
+}
+func (client *Client) SelectLocalProject(ctx context.Context, input LocalProjectSelectionInput) (LocalProjectItem, error) {
+	if err := input.Validate(); err != nil {
+		return LocalProjectItem{}, errors.New("local project selection input is invalid")
+	}
+	var result LocalProjectItem
+	err := client.do(ctx, http.MethodPost, "/api/v1/orchestration/projects/"+url.PathEscape(input.ProjectID)+"/selection", input, &result)
+	return result, err
+}
+func (client *Client) SetLocalProjectPolicy(ctx context.Context, input LocalProjectPolicyInput) (LocalProjectItem, error) {
+	if err := input.Validate(); err != nil {
+		return LocalProjectItem{}, errors.New("local project policy input is invalid")
+	}
+	var result LocalProjectItem
+	err := client.do(ctx, http.MethodPut, "/api/v1/orchestration/projects/"+url.PathEscape(input.ProjectID)+"/policy", input, &result)
+	return result, err
+}
 func (client *Client) StartOrchestrationScheduler(ctx context.Context, input SchedulerControlInput) (SchedulerStatus, error) {
 	return client.controlOrchestrationScheduler(ctx, "start", input)
 }

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"syncgate/internal/api"
 	"syncgate/internal/codexruntime"
 	"syncgate/internal/contextcompiler"
 	"syncgate/internal/core"
@@ -56,6 +57,21 @@ func TestBuildLocalOrchestrationStartsPausedWithRealNodeOwnedComponents(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	shareID := core.ShareID("share-local-composition")
+	if err := store.Shares().SaveShare(ctx, storage.Share{ID: shareID, Name: "Local Composition", RootPath: projectRoot, Mode: storage.ShareOneWaySource}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ProjectRegistrations().RegisterProject(ctx, storage.ProjectRegistration{ProjectID: "project:local-composition", ShareID: shareID, RootPath: projectRoot, Name: "Local Composition", AuthorityDeviceID: deviceIdentity.DeviceID, ManifestRecordID: "manifest:local-composition", ManifestRecordHash: strings.Repeat("e", 64), ManifestPath: ".agent-project/manifest.json", RegisteredAt: now.UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	otherRoot := t.TempDir()
+	otherShareID := core.ShareID("share-local-other")
+	if err := store.Shares().SaveShare(ctx, storage.Share{ID: otherShareID, Name: "Other", RootPath: otherRoot, Mode: storage.ShareOneWaySource}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ProjectRegistrations().RegisterProject(ctx, storage.ProjectRegistration{ProjectID: "project:local-other", ShareID: otherShareID, RootPath: otherRoot, Name: otherRoot, AuthorityDeviceID: deviceIdentity.DeviceID, ManifestRecordID: "manifest:local-other", ManifestRecordHash: strings.Repeat("d", 64), ManifestPath: ".agent-project/manifest.json", RegisteredAt: now.UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	composition, err := BuildLocalOrchestration(ctx, LocalOrchestrationOptions{
 		Base: manager.Base, Config: cfg, Store: store, Identity: deviceIdentity, Credentials: manager.Credentials,
 		Now: func() time.Time { return now.UTC() },
@@ -76,6 +92,39 @@ func TestBuildLocalOrchestrationStartsPausedWithRealNodeOwnedComponents(t *testi
 	status := composition.Scheduler.Status()
 	if !status.Started || !status.Paused || status.Active != 0 {
 		t.Fatalf("safe startup status = %+v", status)
+	}
+	enabled := true
+	if _, err := composition.Administration.SetLocalProjectPolicy(ctx, api.LocalProjectPolicyInput{ProjectID: "project:local-composition", SchedulingEnabled: &enabled, MaxConcurrent: 1, IdempotencyKey: "policy-composition"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := composition.Administration.SelectLocalProject(ctx, api.LocalProjectSelectionInput{ProjectID: "project:local-composition", IdempotencyKey: "select-composition"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := composition.Administration.StartScheduler(ctx, api.SchedulerControlInput{ProjectID: "project:local-composition", IdempotencyKey: "start-composition"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := composition.Administration.SelectLocalProject(ctx, api.LocalProjectSelectionInput{ProjectID: "project:local-other", IdempotencyKey: "select-other-running"}); err == nil {
+		t.Fatal("changed project selection while scheduler was running")
+	}
+	if _, err := composition.Administration.DisableScheduler(ctx, api.SchedulerControlInput{ProjectID: "project:local-composition", IdempotencyKey: "disable-composition"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := composition.Administration.SelectLocalProject(ctx, api.LocalProjectSelectionInput{ProjectID: "project:local-other", IdempotencyKey: "select-other"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := composition.Administration.SetLocalProjectPolicy(ctx, api.LocalProjectPolicyInput{ProjectID: "project:local-other", SchedulingEnabled: &enabled, MaxConcurrent: 1, IdempotencyKey: "policy-other"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := composition.Administration.StartScheduler(ctx, api.SchedulerControlInput{ProjectID: "project:local-other", IdempotencyKey: "start-other"}); err == nil {
+		t.Fatal("unauthorized project started the shared local runtime")
+	}
+	projects, err := composition.Administration.ListLocalProjects(ctx, storage.PageRequest{Limit: 2})
+	if err != nil || len(projects.Items) != 2 {
+		t.Fatalf("local project inventory = %+v, err=%v", projects, err)
+	}
+	projectJSON, _ := json.Marshal(projects)
+	if bytes.Contains(projectJSON, []byte(projectRoot)) || bytes.Contains(projectJSON, []byte(otherRoot)) || bytes.Contains(projectJSON, []byte("share-local")) {
+		t.Fatalf("local project inventory exposed authority-local metadata: %s", projectJSON)
 	}
 	definition, err := composition.Node.Definition(ctx)
 	if err != nil {
@@ -183,6 +232,26 @@ func TestLocalOrchestrationRunsDeterministicPilotToCollecting(t *testing.T) {
 	if raw, err := os.ReadFile(filepath.Join(worktreePath, "src", "pilot.txt")); err != nil || string(raw) != "deterministic desktop pilot\n" {
 		t.Fatalf("pilot worktree output = %q, err=%v", raw, err)
 	}
+}
+
+func TestAuthorizedWorkSourceDropsOtherProjectRequests(t *testing.T) {
+	source := authorizedWorkSource{
+		projectID: "project:authorized",
+		source: staticWorkSource{requests: []scheduler.DispatchRequest{
+			{Binding: dispatchbinding.BindAndPlanRequest{Plan: orchestration.PlanRequest{ProjectID: "project:authorized"}}},
+			{Binding: dispatchbinding.BindAndPlanRequest{Plan: orchestration.PlanRequest{ProjectID: "project:other"}}},
+		}},
+	}
+	requests, err := source.Pending(context.Background())
+	if err != nil || len(requests) != 1 || requests[0].Binding.Plan.ProjectID != "project:authorized" {
+		t.Fatalf("authorized requests = %+v, err=%v", requests, err)
+	}
+}
+
+type staticWorkSource struct{ requests []scheduler.DispatchRequest }
+
+func (source staticWorkSource) Pending(context.Context) ([]scheduler.DispatchRequest, error) {
+	return append([]scheduler.DispatchRequest(nil), source.requests...), nil
 }
 
 type pilotBinder struct {

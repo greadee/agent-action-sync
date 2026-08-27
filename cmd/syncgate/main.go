@@ -136,6 +136,12 @@ func main() {
 		runOrchestrationScheduler(os.Args[2:], false)
 	case "orchestration-nodes":
 		runOrchestrationNodes(os.Args[2:])
+	case "orchestration-projects":
+		runOrchestrationProjects(os.Args[2:])
+	case "orchestration-project-select":
+		runOrchestrationProjectSelect(os.Args[2:])
+	case "orchestration-project-policy":
+		runOrchestrationProjectPolicy(os.Args[2:])
 	case "orchestration-assignments":
 		runOrchestrationAssignments(os.Args[2:])
 	case "orchestration-assignment":
@@ -802,6 +808,49 @@ func runOrchestrationNodes(args []string) {
 	result, err := client.ListOrchestrationNodes(context.Background(), *limit)
 	if err != nil {
 		exitf("list orchestration nodes: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationProjects(args []string) {
+	flags := flag.NewFlagSet("orchestration-projects", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	limit := flags.Int("limit", 50, "maximum projects to print")
+	_ = flags.Parse(args)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.ListLocalProjects(context.Background(), *limit)
+	if err != nil {
+		exitf("list local projects: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationProjectSelect(args []string) {
+	flags := flag.NewFlagSet("orchestration-project-select", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	projectID := flags.String("project", "", "registered Agent Project ID")
+	key := flags.String("idempotency-key", "", "caller idempotency key")
+	_ = flags.Parse(args)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.SelectLocalProject(context.Background(), api.LocalProjectSelectionInput{ProjectID: strings.TrimSpace(*projectID), IdempotencyKey: strings.TrimSpace(*key)})
+	if err != nil {
+		exitf("select local project: %v", err)
+	}
+	printJSON(result)
+}
+func runOrchestrationProjectPolicy(args []string) {
+	flags := flag.NewFlagSet("orchestration-project-policy", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	projectID := flags.String("project", "", "registered Agent Project ID")
+	enabled := flags.Bool("scheduling-enabled", false, "allow scheduler start for this project")
+	maxConcurrent := flags.Int("max-concurrent", 1, "per-project concurrency ceiling (1-2 and no higher than the node ceiling)")
+	key := flags.String("idempotency-key", "", "caller idempotency key")
+	_ = flags.Parse(args)
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	result, err := client.SetLocalProjectPolicy(context.Background(), api.LocalProjectPolicyInput{ProjectID: strings.TrimSpace(*projectID), SchedulingEnabled: enabled, MaxConcurrent: *maxConcurrent, IdempotencyKey: strings.TrimSpace(*key)})
+	if err != nil {
+		exitf("set local project policy: %v", err)
 	}
 	printJSON(result)
 }

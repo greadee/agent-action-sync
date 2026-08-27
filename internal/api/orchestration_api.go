@@ -12,6 +12,9 @@ import (
 // orchestration. Implementations expose only opaque IDs and sanitized evidence;
 // handlers never receive runtime sessions, worktree paths, prompts, or bytes.
 type OrchestrationAdministration interface {
+	ListLocalProjects(context.Context, storage.PageRequest) (LocalProjectPage, error)
+	SelectLocalProject(context.Context, LocalProjectSelectionInput) (LocalProjectItem, error)
+	SetLocalProjectPolicy(context.Context, LocalProjectPolicyInput) (LocalProjectItem, error)
 	ApproveTaskGraph(context.Context, TaskGraphApprovalInput) (TaskGraphApprovalResult, error)
 	PreviewDispatch(context.Context, DispatchPreviewInput) (DispatchPreviewResult, error)
 	StartScheduler(context.Context, SchedulerControlInput) (SchedulerStatus, error)
@@ -21,6 +24,55 @@ type OrchestrationAdministration interface {
 	GetAssignment(context.Context, string, string) (AssignmentDetail, error)
 	ControlAssignment(context.Context, AssignmentControlInput) (AssignmentDetail, error)
 	DecideIntegration(context.Context, IntegrationDecisionInput) (AssignmentDetail, error)
+}
+
+type StatusCount struct {
+	State string `json:"state"`
+	Count int64  `json:"count"`
+}
+
+type LocalProjectItem struct {
+	ProjectID           string        `json:"project_id"`
+	DisplayName         string        `json:"display_name"`
+	RegisteredAt        string        `json:"registered_at"`
+	Selected            bool          `json:"selected"`
+	ExecutionAuthorized bool          `json:"execution_authorized"`
+	SchedulingEnabled   bool          `json:"scheduling_enabled"`
+	MaxConcurrent       int           `json:"max_concurrent"`
+	SchedulerState      string        `json:"scheduler_state"`
+	AssignmentCounts    []StatusCount `json:"assignment_counts"`
+	GateCounts          []StatusCount `json:"gate_counts"`
+}
+
+type LocalProjectPage struct {
+	Items []LocalProjectItem `json:"items"`
+	Page  InventoryPage      `json:"page"`
+}
+
+type LocalProjectSelectionInput struct {
+	ProjectID      string `json:"project_id"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+func (v LocalProjectSelectionInput) Validate() error {
+	if !validSetupID(v.ProjectID) || !validSetupID(v.IdempotencyKey) {
+		return errBadRequest
+	}
+	return nil
+}
+
+type LocalProjectPolicyInput struct {
+	ProjectID         string `json:"project_id"`
+	SchedulingEnabled *bool  `json:"scheduling_enabled"`
+	MaxConcurrent     int    `json:"max_concurrent"`
+	IdempotencyKey    string `json:"idempotency_key"`
+}
+
+func (v LocalProjectPolicyInput) Validate() error {
+	if !validSetupID(v.ProjectID) || !validSetupID(v.IdempotencyKey) || v.SchedulingEnabled == nil || v.MaxConcurrent < 1 || v.MaxConcurrent > 2 {
+		return errBadRequest
+	}
+	return nil
 }
 
 type TaskGraphApprovalInput struct {
@@ -211,6 +263,61 @@ func NewOrchestrationHandler(commands OrchestrationAdministration) http.Handler 
 func handleOrchestration(w http.ResponseWriter, r *http.Request, commands OrchestrationAdministration) {
 	if commands == nil {
 		writeError(w, r, errUnavailable)
+		return
+	}
+	if r.URL.Path == "/api/v1/orchestration/projects" {
+		if r.Method != http.MethodGet {
+			writeError(w, r, errMethodNotAllowed)
+			return
+		}
+		page, err := parsePageRequest(r)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		result, err := commands.ListLocalProjects(r.Context(), page)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		writeJSON(w, r, http.StatusOK, result)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/orchestration/projects/") {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/orchestration/projects/"), "/")
+		if len(parts) != 2 || !validSetupID(parts[0]) || (parts[1] != "selection" && parts[1] != "policy") {
+			writeError(w, r, errNotFound)
+			return
+		}
+		if parts[1] == "selection" && r.Method != http.MethodPost || parts[1] == "policy" && r.Method != http.MethodPut {
+			writeError(w, r, errMethodNotAllowed)
+			return
+		}
+		if parts[1] == "selection" {
+			var input LocalProjectSelectionInput
+			if err := decodeJSON(r, &input); err != nil || input.ProjectID != parts[0] {
+				writeError(w, r, errBadRequest)
+				return
+			}
+			result, err := commands.SelectLocalProject(r.Context(), input)
+			if err != nil {
+				writeError(w, r, err)
+				return
+			}
+			writeJSON(w, r, http.StatusOK, result)
+			return
+		}
+		var input LocalProjectPolicyInput
+		if err := decodeJSON(r, &input); err != nil || input.ProjectID != parts[0] {
+			writeError(w, r, errBadRequest)
+			return
+		}
+		result, err := commands.SetLocalProjectPolicy(r.Context(), input)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		writeJSON(w, r, http.StatusOK, result)
 		return
 	}
 	if r.URL.Path == "/api/v1/orchestration/nodes" {

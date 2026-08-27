@@ -733,6 +733,24 @@ CREATE INDEX IF NOT EXISTS orchestration_attempt_binding_contract_idx
     ON orchestration_attempt_bindings(contract_id, contract_version, attempt_id);
 `),
 	},
+	{
+		Version: 16,
+		Name:    "local project operation authority",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS local_project_policies (
+    project_id TEXT PRIMARY KEY REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    scheduling_enabled INTEGER NOT NULL CHECK (scheduling_enabled IN (0, 1)),
+    max_concurrent INTEGER NOT NULL CHECK (max_concurrent BETWEEN 1 AND 2),
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS local_project_selection (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    selected_at TEXT NOT NULL
+);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

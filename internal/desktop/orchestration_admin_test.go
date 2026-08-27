@@ -64,7 +64,10 @@ func TestLocalAdministrationRequiresExplicitResolutionBeforeRetryingUncertainWor
 	if err != nil || len(recovered) != 1 || recovered[0].Attempt.RecoveryDisposition != storage.RecoveryNeedsOperator {
 		t.Fatalf("recovery = %+v, err=%v", recovered, err)
 	}
-	admin := NewLocalOrchestrationAdministration(LocalAdministrationOptions{Control: control, Inventory: store.OrchestrationControl(), Projects: store.ProjectRegistrations(), Now: func() time.Time { return now }})
+	if err := store.LocalProjectOperations().SelectLocalProject(ctx, storage.LocalProjectSelection{ProjectID: "project-local-recovery", SelectedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	admin := NewLocalOrchestrationAdministration(LocalAdministrationOptions{Control: control, Inventory: store.OrchestrationControl(), Projects: store.ProjectRegistrations(), Operations: store.LocalProjectOperations(), AuthorizedProjectID: "project-local-recovery", MaxConcurrent: 1, Now: func() time.Time { return now }})
 	if _, err := admin.ControlAssignment(ctx, api.AssignmentControlInput{ProjectID: "project-local-recovery", AssignmentID: "assignment:uncertain", Action: "resume", IdempotencyKey: "resume-uncertain"}); err == nil {
 		t.Fatal("uncertain work was eligible for automatic resume")
 	} else {
