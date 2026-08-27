@@ -11,12 +11,15 @@ import (
 )
 
 type contractRoute struct {
-	method, operationID, path string
-	health, paginated         bool
+	method, operationID, path  string
+	public, browser, paginated bool
 }
 
 var expectedContractRoutes = []contractRoute{
-	{method: "get", operationID: "getHealth", path: "/healthz", health: true},
+	{method: "get", operationID: "getHealth", path: "/healthz", public: true},
+	{method: "post", operationID: "createBrowserSession", path: "/api/v1/browser-sessions"},
+	{method: "post", operationID: "exchangeBrowserSession", path: "/api/v1/browser-session/bootstrap", public: true},
+	{method: "get", operationID: "getBrowserSession", path: "/api/v1/browser-session", browser: true},
 	{method: "get", operationID: "getStatus", path: "/api/v1/status"},
 	{method: "get", operationID: "getDiagnostics", path: "/api/v1/diagnostics"},
 	{method: "get", operationID: "listShares", path: "/api/v1/shares", paginated: true},
@@ -97,6 +100,9 @@ func TestLocalAdminAPIContract(t *testing.T) {
 	if _, ok := securitySchemes["bearerAuth"]; !ok {
 		t.Fatal("contract must define bearerAuth")
 	}
+	if _, ok := securitySchemes["browserSession"]; !ok {
+		t.Fatal("contract must define browserSession")
+	}
 	parameters := requiredMap(t, components, "parameters")
 	limit := requiredMap(t, parameters, "Limit")
 	limitSchema := requiredMap(t, limit, "schema")
@@ -158,10 +164,14 @@ func TestLocalAdminAPIContract(t *testing.T) {
 		if len(responses) == 0 {
 			t.Errorf("%s %s has no responses", strings.ToUpper(route.method), route.path)
 		}
-		if route.health {
+		if route.public {
 			security, ok := operation["security"].([]any)
 			if !ok || len(security) != 0 {
-				t.Errorf("health route must explicitly disable security")
+				t.Errorf("public bootstrap or health route must explicitly disable security")
+			}
+		} else if route.browser {
+			if !hasSecurityScheme(operation["security"], "browserSession") {
+				t.Errorf("%s %s must declare browserSession", strings.ToUpper(route.method), route.path)
 			}
 		} else if !hasBearerSecurity(operation["security"]) {
 			t.Errorf("%s %s must declare bearerAuth", strings.ToUpper(route.method), route.path)
@@ -200,13 +210,17 @@ func requiredSlice(t *testing.T, parent map[string]any, key string) []any {
 }
 
 func hasBearerSecurity(value any) bool {
+	return hasSecurityScheme(value, "bearerAuth")
+}
+
+func hasSecurityScheme(value any, name string) bool {
 	items, ok := value.([]any)
 	if !ok {
 		return false
 	}
 	for _, item := range items {
 		if object, ok := item.(map[string]any); ok {
-			if _, ok := object["bearerAuth"]; ok {
+			if _, ok := object[name]; ok {
 				return true
 			}
 		}

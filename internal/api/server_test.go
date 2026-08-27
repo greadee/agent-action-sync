@@ -22,6 +22,111 @@ type testAdministrationService struct {
 
 func (service *testAdministrationService) Ready() bool { return service.ready.Load() }
 
+func (service *testAdministrationService) Status(context.Context) (AdminStatus, error) {
+	return AdminStatus{Status: "running", APIVersion: APIVersion, DeviceID: "device:test", Fingerprint: "sha256:test", Lifecycle: LifecycleRunning}, nil
+}
+
+func (service *testAdministrationService) Diagnostics(context.Context, int) (AdminDiagnostics, error) {
+	return AdminDiagnostics{}, nil
+}
+
+func TestServerServesHardenedControlPlaneShell(t *testing.T) {
+	credential := testAdminCredential(0x60)
+	server := newTestServer(t, "127.0.0.1:47820", credential, http.NotFoundHandler())
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:47820/ui/", nil)
+	recorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "SyncGate Control Plane") {
+		t.Fatalf("control plane response = %d %q", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Content-Security-Policy") == "" || recorder.Header().Get("X-Frame-Options") != "DENY" || recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("security headers = %#v", recorder.Header())
+	}
+	if strings.Contains(recorder.Body.String(), string(credential)) || recorder.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("control plane disclosed a credential or enabled CORS")
+	}
+}
+
+func TestServerBrowserSessionBootstrapAndCSRFBoundary(t *testing.T) {
+	credential := testAdminCredential(0x5f)
+	called := false
+	server := newTestServer(t, "127.0.0.1:47820", credential, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		called = true
+		if !IsAdminAuthenticated(request.Context()) {
+			t.Fatal("browser request did not receive authenticated context")
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+
+	unauthenticatedIssue := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/browser-sessions", nil)
+	unauthenticatedRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(unauthenticatedRecorder, unauthenticatedIssue)
+	if unauthenticatedRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated issue status = %d", unauthenticatedRecorder.Code)
+	}
+
+	issue := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/browser-sessions", nil)
+	issue.Header.Set("Authorization", "Bearer "+string(credential))
+	issueRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(issueRecorder, issue)
+	if issueRecorder.Code != http.StatusCreated {
+		t.Fatalf("issue status = %d body=%s", issueRecorder.Code, issueRecorder.Body.String())
+	}
+	var ticket BrowserSessionTicketResponse
+	if err := json.Unmarshal(issueRecorder.Body.Bytes(), &ticket); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"bootstrap_token":%q}`, ticket.BootstrapToken)
+	badExchange := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/browser-session/bootstrap", strings.NewReader(body))
+	badExchange.Header.Set("Content-Type", "application/json")
+	badExchange.Header.Set("Origin", "http://127.0.0.1:3000")
+	badRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(badRecorder, badExchange)
+	if badRecorder.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin exchange status = %d", badRecorder.Code)
+	}
+
+	exchange := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/browser-session/bootstrap", strings.NewReader(body))
+	exchange.Header.Set("Content-Type", "application/json")
+	exchange.Header.Set("Origin", "http://127.0.0.1:47820")
+	exchange.Header.Set("Sec-Fetch-Site", "same-origin")
+	exchangeRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(exchangeRecorder, exchange)
+	if exchangeRecorder.Code != http.StatusOK {
+		t.Fatalf("exchange status = %d body=%s", exchangeRecorder.Code, exchangeRecorder.Body.String())
+	}
+	var document BrowserSessionDocument
+	if err := json.Unmarshal(exchangeRecorder.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Health != "ok" || document.Status.DeviceID != "device:test" || len(document.Capabilities) != 2 || document.CSRFToken == "" {
+		t.Fatalf("session document = %#v", document)
+	}
+	cookies := exchangeRecorder.Result().Cookies()
+	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("session cookies = %#v", cookies)
+	}
+
+	mutation := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/jobs/job-1/actions", strings.NewReader(`{}`))
+	mutation.AddCookie(cookies[0])
+	mutation.Header.Set("Origin", "http://127.0.0.1:47820")
+	missingCSRF := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(missingCSRF, mutation)
+	if missingCSRF.Code != http.StatusForbidden || called {
+		t.Fatalf("missing CSRF response = %d, called=%t", missingCSRF.Code, called)
+	}
+
+	mutation = httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/jobs/job-1/actions", strings.NewReader(`{}`))
+	mutation.AddCookie(cookies[0])
+	mutation.Header.Set("Origin", "http://127.0.0.1:47820")
+	mutation.Header.Set(browserCSRFHeader, document.CSRFToken)
+	allowed := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(allowed, mutation)
+	if allowed.Code != http.StatusNoContent || !called {
+		t.Fatalf("CSRF-authenticated response = %d, called=%t", allowed.Code, called)
+	}
+}
+
 func TestServerHealthzIsMinimalAndV1RequiresAuthentication(t *testing.T) {
 	credential := testAdminCredential(0x61)
 	called := false

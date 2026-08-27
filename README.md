@@ -8,8 +8,8 @@ authenticated loopback administration API, and the single-authority Agent
 Project history and projection foundation. It also contains the Windows desktop
 node packaging and first-run lifecycle foundation. It is still an active
 development project. Remote administration, discovery, relay/coordinator
-services, browser access, and multi-writer synchronization remain disabled or
-deferred.
+services, remote browser access, and multi-writer synchronization remain
+disabled or deferred.
 
 ## Current Status
 
@@ -44,6 +44,9 @@ The current implementation provides:
   provider credential lifecycle, disposable-project execution opt-in, and a
   sanitized diagnostics export containing only status, closed codes, counts,
   and opaque IDs.
+- An embedded loopback-only browser shell with one-use CLI bootstrap URLs,
+  opaque HttpOnly sessions, exact-origin and CSRF enforcement, and sanitized
+  health/status discovery.
 
 ## MVP Boundary
 
@@ -61,7 +64,7 @@ The current MVP boundary is local, owner-controlled transfer and one-way synchro
 - Explicit one-way change permissions and guarded deletions.
 
 Later phases add the remaining supervised-execution controls, LAN discovery,
-browser portal access, coordinator/relay services, direct remote connectivity,
+remote browser portal access, coordinator/relay services, direct connectivity,
 and separately designed multi-writer synchronization. File sync does not start
 agent runtimes or provide arbitrary remote shell access.
 
@@ -80,6 +83,7 @@ tools\check_desktop_node_slice1_release.ps1
 tools\check_desktop_node_slice2_release.ps1
 tools\check_desktop_node_slice3_release.ps1
 tools\check_desktop_node_slice4_release.ps1
+tools\check_desktop_node_slice5_release.ps1
 ```
 
 Initialize, run, and check an installed per-user node with:
@@ -88,6 +92,7 @@ Initialize, run, and check an installed per-user node with:
 syncgate node-init
 syncgate node-run
 syncgate node-health
+syncgate node-ui-session --config <node-root>\config\config.json
 ```
 
 Execution remains disabled by default. Inspect the bounded local surfaces with:

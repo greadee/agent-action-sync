@@ -4,6 +4,7 @@ This directory contains the foreground agent command. It loads local configurati
 
 Current commands:
 
+- `node-ui-session --config <node-root>/config/config.json` mints a two-minute, one-use fragment URL for the embedded loopback browser shell without exposing the durable administration bearer.
 - `check-config --config config.example.json` validates device, local API, transfer, and per-share sync settings.
 - `daemon --config config.example.json` starts the foreground local agent, initializes durable storage and its Windows Credential Manager identity, scans eligible source shares on startup and their configured intervals, and shuts down on Ctrl+C or SIGTERM.
 - `identity-migrate --config config.example.json` explicitly verifies and moves a legacy plaintext development identity into Windows Credential Manager, then removes the plaintext file.

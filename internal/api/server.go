@@ -35,6 +35,7 @@ type ServerOptions struct {
 	Address           string
 	Service           AdministrationReadiness
 	Authenticator     *AdminAuthenticator
+	BrowserSessions   *BrowserSessionManager
 	V1Handler         http.Handler
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
@@ -48,6 +49,7 @@ type Server struct {
 	httpServer      *http.Server
 	service         AdministrationReadiness
 	authenticator   *AdminAuthenticator
+	browserSessions *BrowserSessionManager
 	v1Handler       http.Handler
 	shutdownTimeout time.Duration
 	draining        atomic.Bool
@@ -67,9 +69,13 @@ func NewServer(options ServerOptions) (*Server, error) {
 		return nil, errors.New("v1 administration handler is required")
 	}
 	applyServerDefaults(&options)
+	if options.BrowserSessions == nil {
+		options.BrowserSessions = NewBrowserSessionManager(BrowserSessionManagerOptions{})
+	}
 	server := &Server{
 		service: options.Service, authenticator: options.Authenticator,
-		v1Handler: options.V1Handler, shutdownTimeout: options.ShutdownTimeout,
+		browserSessions: options.BrowserSessions, v1Handler: options.V1Handler,
+		shutdownTimeout: options.ShutdownTimeout,
 	}
 	server.httpServer = &http.Server{
 		Addr:              options.Address,
@@ -122,24 +128,69 @@ func (server *Server) Close() error {
 }
 
 func (server *Server) serveHTTP(writer http.ResponseWriter, request *http.Request) {
+	controlPlaneSecurityHeaders(writer)
 	if !validRequestHost(request.Host) {
-		writeError(writer, request, errForbidden)
-		return
-	}
-	if request.Header.Get("Origin") != "" {
 		writeError(writer, request, errForbidden)
 		return
 	}
 
 	switch {
+	case request.URL.Path == "/" || request.URL.Path == "/ui" || strings.HasPrefix(request.URL.Path, "/ui/"):
+		if request.Header.Get("Origin") != "" && !sameOriginRequest(request) {
+			writeError(writer, request, errForbidden)
+			return
+		}
+		server.serveControlPlane(writer, request)
 	case request.URL.Path == "/healthz":
+		if request.Header.Get("Origin") != "" {
+			writeError(writer, request, errForbidden)
+			return
+		}
 		methodHandler(http.MethodGet, server.health)(writer, request)
+	case request.URL.Path == "/api/v1/browser-session/bootstrap":
+		if server.draining.Load() {
+			writeError(writer, request, errUnavailable)
+			return
+		}
+		server.limitBody(http.HandlerFunc(server.exchangeBrowserSession)).ServeHTTP(writer, request)
+	case request.URL.Path == "/api/v1/browser-session":
+		if server.draining.Load() {
+			writeError(writer, request, errUnavailable)
+			return
+		}
+		if request.Header.Get("Origin") != "" && !sameOriginRequest(request) {
+			writeError(writer, request, errForbidden)
+			return
+		}
+		server.readBrowserSession(writer, request)
+	case request.URL.Path == "/api/v1/browser-sessions":
+		if server.draining.Load() {
+			writeError(writer, request, errUnavailable)
+			return
+		}
+		if request.Header.Get("Origin") != "" {
+			writeError(writer, request, errForbidden)
+			return
+		}
+		server.authenticator.Authenticate(http.HandlerFunc(server.issueBrowserSession)).ServeHTTP(writer, request)
 	case request.URL.Path == "/api/v1" || strings.HasPrefix(request.URL.Path, "/api/v1/"):
 		if server.draining.Load() {
 			writeError(writer, request, errUnavailable)
 			return
 		}
-		server.authenticator.Authenticate(server.limitBody(server.v1Handler)).ServeHTTP(writer, request)
+		if len(request.Header.Values("Authorization")) > 0 {
+			if request.Header.Get("Origin") != "" {
+				writeError(writer, request, errForbidden)
+				return
+			}
+			server.authenticator.Authenticate(server.limitBody(server.v1Handler)).ServeHTTP(writer, request)
+			return
+		}
+		authenticated, ok := server.authenticateBrowserRequest(writer, request)
+		if !ok {
+			return
+		}
+		server.limitBody(server.v1Handler).ServeHTTP(writer, authenticated)
 	default:
 		writeError(writer, request, errNotFound)
 	}

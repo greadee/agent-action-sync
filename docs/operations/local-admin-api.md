@@ -8,7 +8,7 @@ share runtimes, the job queue, pairing state, and shutdown ordering. Operator
 commands never fall back to opening the live database.
 
 The API is for local administration only. Version 1 has no remote listener,
-browser session, CORS policy, file-content route, configuration mutation,
+permissive CORS policy, file-content route, configuration mutation,
 secret-export route, process-control route, or peer transport endpoint.
 
 ## Configuration and startup
@@ -27,11 +27,14 @@ rejects new versioned requests, finishes bounded in-flight requests, then the
 daemon cancels workers and closes SQLite last.
 
 `GET /healthz` is unauthenticated and returns only process readiness. Every
-`/api/v1/*` route requires the local bearer credential. Production stores that
+`/api/v1/*` route requires the local bearer credential or a bounded browser
+session minted by that credential. Production stores the bearer credential in
 credential in Windows Credential Manager under a target derived from the data
 directory. Explicit development mode may use the insecure development file.
 The credential is not stored in configuration or SQLite and is never returned
-by the API.
+by the API. The browser receives only an opaque HttpOnly cookie, a rotating CSRF
+token, and the sanitized session document described in
+[Desktop browser control plane](desktop-browser-control-plane.md).
 
 ## Operator commands
 
@@ -49,6 +52,7 @@ syncgate pair-accept --config config.json --invite INVITATION --fingerprint FING
 syncgate pair-revoke --config config.json --device DEVICE
 syncgate project-migrate-preflight --config config.json --share SHARE --project PROJECT --name NAME
 syncgate project-migrate-apply --config config.json --share SHARE --project PROJECT --name NAME --confirmation CONFIRMATION
+syncgate node-ui-session --config config.json
 ```
 
 Agent Project inventory, bounded history and artifact metadata, versioned
@@ -70,17 +74,19 @@ process arguments or query strings.
 
 The canonical contract is
 [`docs/protocol/local-admin-api-openapi.json`](../protocol/local-admin-api-openapi.json).
-Requests must use the configured loopback host, JSON where a body is required,
-and a single bearer `Authorization` header. Browser `Origin` requests and
-non-loopback `Host` values are rejected. Responses are JSON with
-`Cache-Control: no-store`.
+Requests must use the configured loopback host and JSON where a body is
+required. CLI requests use a single bearer `Authorization` header and reject
+all browser origins. Browser-session requests use an HttpOnly cookie; unsafe
+methods additionally require the current `X-SyncGate-CSRF` token and an exact
+same-origin value. Non-loopback and rebinding-shaped `Host` values are rejected.
+Responses use `Cache-Control: no-store`, and no CORS allow headers are emitted.
 
 Common failures:
 
 - connection refused: the daemon is stopped, starting, or using another port;
 - `401 unauthorized`: the credential is absent, stale, malformed, or from a
   different data directory;
-- `403 forbidden`: the request supplied an origin or unsafe host;
+- `403 forbidden`: the request supplied an unsafe host, origin, or CSRF token;
 - `404 not_found`: the share, device, or job ID is unknown;
 - `409`: the requested job or pairing transition conflicts with current state;
 - `503 unavailable`: the daemon is starting, draining, or lacks a required
@@ -91,7 +97,7 @@ HTTP error omits internal filesystem or storage detail.
 
 ## Version 1 compatibility policy
 
-The `/api/v1` path is stable for the pre-UI implementation phase.
+The `/api/v1` path remains stable as the local browser shell is introduced.
 
 - Existing methods, paths, required response fields, authentication rules, and
   field meanings remain compatible throughout v1.
@@ -104,6 +110,6 @@ The `/api/v1` path is stable for the pre-UI implementation phase.
 - Deprecations must be documented before removal and remain supported for at
   least one released replacement cycle.
 
-The OpenAPI contract and runtime acceptance suite are release gates. UI,
-browser-session, share-reconfiguration, remote-administration, and peer-protocol
-work require separate plans and do not extend v1 implicitly.
+The OpenAPI contract and runtime acceptance suite are release gates.
+Share-reconfiguration, remote-administration, and peer-protocol work require
+separate plans and do not extend v1 implicitly.

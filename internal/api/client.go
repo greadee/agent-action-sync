@@ -78,6 +78,12 @@ func (client *Client) Status(ctx context.Context) (AdminStatus, error) {
 	return result, err
 }
 
+func (client *Client) CreateBrowserSession(ctx context.Context) (BrowserSessionTicketResponse, error) {
+	var result BrowserSessionTicketResponse
+	err := client.do(ctx, http.MethodPost, "/api/v1/browser-sessions", nil, &result)
+	return result, err
+}
+
 func (client *Client) Diagnostics(ctx context.Context, limit int) (AdminDiagnostics, error) {
 	path := "/api/v1/diagnostics"
 	if limit > 0 {

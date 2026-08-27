@@ -257,3 +257,17 @@ rejected telemetry from accepted-outcome metrics.
 ```powershell
 go test ./internal/insights
 ```
+
+## Desktop browser control-plane shell gate
+
+Desktop Slice 5 tests one-use bootstrap expiry and replay denial, bounded opaque
+sessions, rotating CSRF validation, hardened static assets, exact loopback
+origin and host enforcement, browser-cookie authentication, bearer-origin
+rejection, sanitized capability discovery, and the OpenAPI contract. The
+Windows release gate builds a real executable, starts a disposable local node,
+mints a session through the credential-backed CLI, exchanges it over HTTP, and
+proves missing credentials and a foreign loopback origin are rejected.
+
+```powershell
+tools/check_desktop_node_slice5_release.ps1
+```

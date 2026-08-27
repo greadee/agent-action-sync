@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>SyncGate Control Plane</title>
+  <link rel="stylesheet" href="/ui/app.css">
+  <script src="/ui/app.js" defer></script>
+</head>
+<body>
+  <main class="shell" aria-labelledby="page-title">
+    <header class="topbar">
+      <div class="brand" aria-label="SyncGate">
+        <span class="brand-mark" aria-hidden="true">SG</span>
+        <span>SyncGate</span>
+      </div>
+      <span class="scope">Local node</span>
+    </header>
+
+    <section class="hero">
+      <p class="eyebrow">Private orchestration control plane</p>
+      <h1 id="page-title">Your node, within reach.</h1>
+      <p class="lede">A loopback-only view of this machine’s sanitized health and administration status.</p>
+    </section>
+
+    <section id="loading" class="panel state-panel" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <div>
+        <h2>Connecting to the local node</h2>
+        <p>Establishing a protected browser session.</p>
+      </div>
+    </section>
+
+    <section id="error" class="panel state-panel hidden" role="alert">
+      <span class="status-dot danger" aria-hidden="true"></span>
+      <div>
+        <h2 id="error-title">Session required</h2>
+        <p id="error-message">Create a one-time browser session from the SyncGate CLI, then open the returned URL.</p>
+        <code>syncgate node-ui-session --config &lt;node-config.json&gt;</code>
+        <button id="retry" type="button">Try again</button>
+      </div>
+    </section>
+
+    <section id="dashboard" class="dashboard hidden" aria-live="polite">
+      <article class="panel primary-card">
+        <div class="card-heading">
+          <div>
+            <p class="label">Node status</p>
+            <h2 id="node-state">Unavailable</h2>
+          </div>
+          <span id="health-badge" class="badge"><span class="status-dot" aria-hidden="true"></span><span>Checking</span></span>
+        </div>
+        <dl class="metrics">
+          <div><dt>Lifecycle</dt><dd id="lifecycle">—</dd></div>
+          <div><dt>Active shares</dt><dd id="share-count">—</dd></div>
+          <div><dt>Queue running</dt><dd id="queue-running">—</dd></div>
+          <div><dt>Queue pending</dt><dd id="queue-pending">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="panel detail-card">
+        <p class="label">Authenticated node</p>
+        <dl class="details">
+          <div><dt>Device ID</dt><dd id="device-id">—</dd></div>
+          <div><dt>Fingerprint</dt><dd id="fingerprint">—</dd></div>
+          <div><dt>API version</dt><dd id="api-version">—</dd></div>
+          <div><dt>Session expires</dt><dd id="session-expires">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="panel capability-card">
+        <p class="label">This shell can discover</p>
+        <ul id="capabilities" class="capabilities"></ul>
+        <p class="boundary">No source, prompts, credentials, runtime sessions, shell output, absolute paths, or artifact bytes are available here.</p>
+      </article>
+    </section>
+
+    <footer>Local connection · no public listener · responses are never cached</footer>
+  </main>
+</body>
+</html>

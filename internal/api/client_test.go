@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClientSendsCredentialInHeaderAndDecodesCommands(t *testing.T) {
@@ -23,6 +24,9 @@ func TestClientSendsCredentialInHeaderAndDecodesCommands(t *testing.T) {
 		}
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
+		case "/api/v1/browser-sessions":
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(BrowserSessionTicketResponse{BootstrapToken: "bootstrap", ExpiresAt: time.Now().UTC()})
 		case "/api/v1/status":
 			_ = json.NewEncoder(writer).Encode(AdminStatus{Status: "running", APIVersion: APIVersion})
 		case "/api/v1/shares/drop/scans":
@@ -54,6 +58,10 @@ func TestClientSendsCredentialInHeaderAndDecodesCommands(t *testing.T) {
 	status, err := client.Status(context.Background())
 	if err != nil || status.APIVersion != APIVersion {
 		t.Fatalf("Status = %+v, err=%v", status, err)
+	}
+	ticket, err := client.CreateBrowserSession(context.Background())
+	if err != nil || ticket.BootstrapToken != "bootstrap" {
+		t.Fatalf("CreateBrowserSession = %+v, err=%v", ticket, err)
 	}
 	scan, err := client.RequestScan(context.Background(), "drop")
 	if err != nil || !scan.Accepted {

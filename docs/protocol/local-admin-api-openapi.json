@@ -20,6 +20,31 @@
         }
       }
     },
+    "/api/v1/browser-sessions": {
+      "post": {
+        "operationId": "createBrowserSession",
+        "summary": "Mint a short-lived one-use browser bootstrap token",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "201": { "description": "Browser bootstrap created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BrowserSessionTicket" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/browser-session/bootstrap": {
+      "post": {
+        "operationId": "exchangeBrowserSession",
+        "summary": "Exchange a one-use token for a same-origin browser session",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BrowserSessionBootstrap" } } } },
+        "responses": { "200": { "description": "Authenticated sanitized browser session document", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BrowserSessionDocument" } } } }, "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/api/v1/browser-session": {
+      "get": {
+        "operationId": "getBrowserSession",
+        "summary": "Refresh the sanitized browser session document and CSRF token",
+        "security": [{ "browserSession": [] }],
+        "responses": { "200": { "description": "Authenticated sanitized browser session document", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BrowserSessionDocument" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
     "/api/v1/status": {
       "get": {
         "operationId": "getStatus",
@@ -254,7 +279,10 @@
     }
   },
   "components": {
-    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "local-admin-token" } },
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "local-admin-token" },
+      "browserSession": { "type": "apiKey", "in": "cookie", "name": "syncgate_browser_session" }
+    },
     "parameters": {
       "Limit": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
       "Cursor": { "name": "cursor", "in": "query", "schema": { "type": "string", "maxLength": 512 } },
@@ -282,6 +310,9 @@
     "schemas": {
       "Error": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message"], "properties": { "code": { "type": "string" }, "message": { "type": "string", "maxLength": 512 }, "request_id": { "type": "string", "maxLength": 128 } } } } },
       "HealthResponse": { "type": "object", "required": ["status"], "properties": { "status": { "type": "string", "enum": ["ok"] } } },
+      "BrowserSessionTicket": { "type": "object", "additionalProperties": false, "required": ["bootstrap_token", "expires_at"], "properties": { "bootstrap_token": { "type": "string", "minLength": 32, "maxLength": 128 }, "expires_at": { "type": "string", "format": "date-time" } } },
+      "BrowserSessionBootstrap": { "type": "object", "additionalProperties": false, "required": ["bootstrap_token"], "properties": { "bootstrap_token": { "type": "string", "minLength": 32, "maxLength": 128 } } },
+      "BrowserSessionDocument": { "type": "object", "additionalProperties": false, "required": ["api_version", "health", "status", "capabilities", "csrf_token", "session_expires_at"], "properties": { "api_version": { "type": "string", "const": "v1" }, "health": { "type": "string", "enum": ["ok", "unavailable"] }, "status": { "$ref": "#/components/schemas/StatusResponse" }, "capabilities": { "type": "array", "maxItems": 8, "items": { "type": "string", "enum": ["node.health.read", "node.status.read"] } }, "csrf_token": { "type": "string", "minLength": 32, "maxLength": 128 }, "session_expires_at": { "type": "string", "format": "date-time" } } },
       "StatusResponse": { "type": "object", "required": ["status", "api_version", "device_id", "fingerprint", "started_at", "lifecycle", "active_share_count", "peer_executor_enabled", "queue"], "properties": { "status": { "type": "string", "enum": ["starting", "running", "draining"] }, "api_version": { "type": "string", "const": "v1" }, "device_id": { "type": "string" }, "fingerprint": { "type": "string" }, "started_at": { "type": "string", "format": "date-time" }, "lifecycle": { "type": "string", "enum": ["starting", "running", "draining"] }, "active_share_count": { "type": "integer", "minimum": 0 }, "peer_executor_enabled": { "type": "boolean" }, "queue": { "$ref": "#/components/schemas/QueueSummary" } } },
       "QueueSummary": { "type": "object", "required": ["pending", "running", "paused", "failed"], "properties": { "pending": { "type": "integer", "minimum": 0 }, "running": { "type": "integer", "minimum": 0 }, "paused": { "type": "integer", "minimum": 0 }, "failed": { "type": "integer", "minimum": 0 } } },
       "DiagnosticReport": { "type": "object", "required": ["generated_at", "recent_scans", "work", "ignored_paths"], "properties": { "generated_at": { "type": "string", "format": "date-time" }, "recent_scans": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/ScanDiagnostic" } }, "work": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/WorkDiagnostic" } }, "ignored_paths": { "type": "array", "maxItems": 200, "items": { "$ref": "#/components/schemas/IgnoreDiagnostic" } } } },

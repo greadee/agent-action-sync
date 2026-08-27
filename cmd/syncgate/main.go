@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"sort"
@@ -42,6 +43,8 @@ func main() {
 		runNode(os.Args[2:])
 	case "node-health":
 		runNodeHealth(os.Args[2:])
+	case "node-ui-session":
+		runNodeUISession(os.Args[2:])
 	case "node-settings-show":
 		runNodeSettingsShow(os.Args[2:])
 	case "node-settings-stage":
@@ -949,6 +952,34 @@ func openAdminClient(configPath string) *api.Client {
 		exitf("%v", err)
 	}
 	return client
+}
+
+func runNodeUISession(args []string) {
+	flags := flag.NewFlagSet("node-ui-session", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
+	jsonOutput := flags.Bool("json", false, "print the browser session URL as JSON")
+	_ = flags.Parse(args)
+
+	cfg, err := config.LoadFile(context.Background(), *configPath)
+	if err != nil {
+		exitf("load node configuration: %v", err)
+	}
+	client := openAdminClient(*configPath)
+	defer client.Close()
+	ticket, err := client.CreateBrowserSession(context.Background())
+	if err != nil {
+		exitf("create browser session: %v", err)
+	}
+	address := net.JoinHostPort(cfg.LocalAPI.Host, fmt.Sprint(cfg.LocalAPI.Port))
+	sessionURL := "http://" + address + "/ui/#bootstrap=" + url.QueryEscape(ticket.BootstrapToken)
+	if *jsonOutput {
+		printJSON(struct {
+			URL       string    `json:"url"`
+			ExpiresAt time.Time `json:"expires_at"`
+		}{URL: sessionURL, ExpiresAt: ticket.ExpiresAt})
+		return
+	}
+	fmt.Println(sessionURL)
 }
 
 func newAdminClient(configPath string) (*api.Client, error) {
