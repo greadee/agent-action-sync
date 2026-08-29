@@ -271,3 +271,17 @@ proves missing credentials and a foreign loopback origin are rejected.
 ```powershell
 tools/check_desktop_node_slice5_release.ps1
 ```
+
+## Browser project and assignment visibility gate
+
+Desktop Slice 6 tests that the browser shell contains only the established
+read-only visibility paths, supplies accessible project/task pickers and
+assignment details, and leaves all control methods absent except the session
+bootstrap. The existing API and desktop suites exercise bounded no-store
+project, readiness, assignment, worker, and node projections. The release gate
+reuses the live loopback session foundation before running the focused
+visibility suite.
+
+```powershell
+tools/check_desktop_node_slice6_release.ps1
+```

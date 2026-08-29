@@ -45,6 +45,30 @@ func TestServerServesHardenedControlPlaneShell(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), string(credential)) || recorder.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatal("control plane disclosed a credential or enabled CORS")
 	}
+	for _, marker := range []string{"project-picker", "readiness-graph", "assignment-detail", "worker-list", "node-list"} {
+		if !strings.Contains(recorder.Body.String(), marker) {
+			t.Fatalf("control plane shell missing Slice 6 marker %q", marker)
+		}
+	}
+}
+
+func TestControlPlaneVisibilityScriptRemainsReadOnly(t *testing.T) {
+	asset, err := controlPlaneAssets.ReadFile("controlplane/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(asset)
+	for _, route := range []string{"/api/v1/orchestration/projects", "/tasks", "/assignments", "/api/v1/orchestration/workers", "/api/v1/orchestration/nodes"} {
+		if !strings.Contains(script, route) {
+			t.Fatalf("visibility script is missing route marker %q", route)
+		}
+	}
+	if strings.Count(script, `method: "POST"`) != 1 || !strings.Contains(script, "/api/v1/browser-session/bootstrap") {
+		t.Fatal("visibility script added a mutation beyond the session bootstrap")
+	}
+	if strings.Contains(script, `method: "PUT"`) || strings.Contains(script, `method: "DELETE"`) {
+		t.Fatal("visibility script added an unsafe control method")
+	}
 }
 
 func TestServerBrowserSessionBootstrapAndCSRFBoundary(t *testing.T) {
@@ -99,31 +123,45 @@ func TestServerBrowserSessionBootstrapAndCSRFBoundary(t *testing.T) {
 	if err := json.Unmarshal(exchangeRecorder.Body.Bytes(), &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.Health != "ok" || document.Status.DeviceID != "device:test" || len(document.Capabilities) != 2 || document.CSRFToken == "" {
+	if document.Health != "ok" || document.Status.DeviceID != "device:test" || len(document.Capabilities) != len(browserCapabilities) || document.CSRFToken == "" {
 		t.Fatalf("session document = %#v", document)
+	}
+	for index, capability := range browserCapabilities {
+		if document.Capabilities[index] != capability {
+			t.Fatalf("capability %d = %q, want %q", index, document.Capabilities[index], capability)
+		}
 	}
 	cookies := exchangeRecorder.Result().Cookies()
 	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
 		t.Fatalf("session cookies = %#v", cookies)
 	}
 
+	called = false
+	visibility := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:47820/api/v1/orchestration/projects", nil)
+	visibility.AddCookie(cookies[0])
+	visibilityRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(visibilityRecorder, visibility)
+	if visibilityRecorder.Code != http.StatusNoContent || !called {
+		t.Fatalf("browser visibility response = %d, called=%t", visibilityRecorder.Code, called)
+	}
+
+	called = false
+	outsideScope := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:47820/api/v1/shares", nil)
+	outsideScope.AddCookie(cookies[0])
+	outsideScopeRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(outsideScopeRecorder, outsideScope)
+	if outsideScopeRecorder.Code != http.StatusForbidden || called {
+		t.Fatalf("out-of-scope browser response = %d, called=%t", outsideScopeRecorder.Code, called)
+	}
+
 	mutation := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/jobs/job-1/actions", strings.NewReader(`{}`))
 	mutation.AddCookie(cookies[0])
 	mutation.Header.Set("Origin", "http://127.0.0.1:47820")
-	missingCSRF := httptest.NewRecorder()
-	server.httpServer.Handler.ServeHTTP(missingCSRF, mutation)
-	if missingCSRF.Code != http.StatusForbidden || called {
-		t.Fatalf("missing CSRF response = %d, called=%t", missingCSRF.Code, called)
-	}
-
-	mutation = httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/jobs/job-1/actions", strings.NewReader(`{}`))
-	mutation.AddCookie(cookies[0])
-	mutation.Header.Set("Origin", "http://127.0.0.1:47820")
 	mutation.Header.Set(browserCSRFHeader, document.CSRFToken)
-	allowed := httptest.NewRecorder()
-	server.httpServer.Handler.ServeHTTP(allowed, mutation)
-	if allowed.Code != http.StatusNoContent || !called {
-		t.Fatalf("CSRF-authenticated response = %d, called=%t", allowed.Code, called)
+	mutationRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(mutationRecorder, mutation)
+	if mutationRecorder.Code != http.StatusForbidden || called {
+		t.Fatalf("out-of-scope browser mutation = %d, called=%t", mutationRecorder.Code, called)
 	}
 }
 

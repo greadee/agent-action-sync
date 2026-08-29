@@ -12,7 +12,14 @@ import (
 
 const browserCSRFHeader = "X-SyncGate-CSRF"
 
-var browserCapabilities = []string{"node.health.read", "node.status.read"}
+var browserCapabilities = []string{
+	"node.health.read",
+	"node.status.read",
+	"project.visibility.read",
+	"task.readiness.read",
+	"assignment.visibility.read",
+	"worker-node.inventory.read",
+}
 
 //go:embed controlplane/*
 var controlPlaneAssets embed.FS
@@ -167,6 +174,10 @@ func (server *Server) authenticateBrowserRequest(writer http.ResponseWriter, req
 		writeError(writer, request, errUnauthorized)
 		return nil, false
 	}
+	if !browserSessionAllows(request) {
+		writeError(writer, request, errForbidden)
+		return nil, false
+	}
 	if unsafeBrowserMethod(request.Method) {
 		if !sameOriginRequest(request) || server.browserSessions.ValidateCSRF(request) != nil {
 			writeError(writer, request, errForbidden)
@@ -174,6 +185,32 @@ func (server *Server) authenticateBrowserRequest(writer http.ResponseWriter, req
 		}
 	}
 	return request.WithContext(context), true
+}
+
+func browserSessionAllows(request *http.Request) bool {
+	if request == nil || request.Method != http.MethodGet {
+		return false
+	}
+	switch request.URL.Path {
+	case "/api/v1/status", "/api/v1/orchestration/projects", "/api/v1/orchestration/workers", "/api/v1/orchestration/nodes":
+		return true
+	}
+	parts := strings.Split(strings.TrimPrefix(request.URL.Path, "/api/v1/projects/"), "/")
+	if len(parts) < 2 || !validSetupID(parts[0]) {
+		return false
+	}
+	switch {
+	case len(parts) == 2 && parts[1] == "tasks":
+		return true
+	case len(parts) == 4 && parts[1] == "tasks" && namespacedSetup(parts[2], "task:") && parts[3] == "readiness":
+		return true
+	case len(parts) == 2 && parts[1] == "assignments":
+		return true
+	case len(parts) == 3 && parts[1] == "assignments" && namespacedSetup(parts[2], "assignment:"):
+		return true
+	default:
+		return false
+	}
 }
 
 func unsafeBrowserMethod(method string) bool {

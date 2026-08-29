@@ -8,7 +8,7 @@ Accepted for desktop browser control plane Slice 5.
 
 The desktop node embeds and serves a dependency-free HTML/CSS/JavaScript shell on its existing loopback-only administration listener. A bearer-authenticated local CLI operation mints a bounded, two-minute, one-use bootstrap token. The CLI returns that token only in the URL fragment. The browser removes the fragment before exchanging the token from the exact local origin for an opaque in-memory session represented by an `HttpOnly`, `SameSite=Strict` cookie.
 
-The session bootstrap returns a sanitized capability/status document, not an API index. Its fixed capabilities cover only health and node-status reads. The browser session may authenticate the existing local API, but unsafe methods require both exact-origin validation and a rotating CSRF token. Bearer requests remain non-browser requests and reject any `Origin` header. No endpoint emits permissive CORS headers.
+The session bootstrap returns a sanitized capability/status document, not an API index. Its fixed capabilities cover health/status plus bounded project, readiness, assignment, worker, and node visibility reads. The browser session may authenticate the existing local API, but unsafe methods require both exact-origin validation and a rotating CSRF token. Bearer requests remain non-browser requests and reject any `Origin` header. No endpoint emits permissive CORS headers.
 
 ## Rationale
 

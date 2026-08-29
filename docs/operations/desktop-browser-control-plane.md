@@ -12,8 +12,14 @@ The initial session document is deliberately narrow. It contains process health,
 
 - `node.health.read`
 - `node.status.read`
+- `project.visibility.read`
+- `task.readiness.read`
+- `assignment.visibility.read`
+- `worker-node.inventory.read`
 
-It does not expose source, prompt content, credentials, provider sessions, shell output, absolute paths, artifact bytes, or arbitrary discovery routes. Closing the node invalidates all in-memory bootstrap and browser-session state.
+These visibility capabilities disclose bounded, sanitized records and closed reason/evidence identifiers only. They do not expose source, prompt content, credentials, provider sessions, shell output, absolute paths, artifact bytes, or arbitrary discovery routes. Closing the node invalidates all in-memory bootstrap and browser-session state.
+
+The cookie is restricted to this explicit read allowlist: node status, local-project pages, task and readiness pages, assignment pages/details, worker inventory, and node inventory. Other API reads remain bearer-only. Browser mutations are not enabled in this slice; later controls must extend the allowlist deliberately and retain the exact-origin plus CSRF checks.
 
 ## Security boundary
 
