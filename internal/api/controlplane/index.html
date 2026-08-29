@@ -33,11 +33,13 @@
         <header class="section-title"><div><p class="label">Supervised work visibility</p><h2 id="visibility-heading">Project readiness and assignment state</h2></div><p id="refresh-status" class="muted" role="status">Loading sanitized inventories…</p></header>
         <div id="visibility-error" class="inline-state hidden" role="alert"></div>
         <div class="visibility-grid">
-          <article class="panel project-card"><div class="card-heading"><div><p class="label">Project picker</p><h3>Local projects</h3></div><span id="project-count" class="count">0</span></div><label class="sr-only" for="project-picker">Select project</label><select id="project-picker" disabled><option>Loading projects…</option></select><div id="project-summary" class="summary-list"></div><div id="project-load-more"></div></article>
-          <article class="panel project-card"><div class="card-heading"><div><p class="label">Task graph</p><h3>Readiness</h3></div><span id="task-count" class="count">0</span></div><label class="sr-only" for="task-picker">Select task graph</label><select id="task-picker" disabled><option>Select a project first</option></select><div id="task-summary" class="summary-list"></div><div id="task-load-more"></div></article>
+          <article class="panel project-card"><div class="card-heading"><div><p class="label">Project picker</p><h3>Local projects</h3></div><span id="project-count" class="count">0</span></div><label class="sr-only" for="project-picker">Select project</label><select id="project-picker" disabled><option>Loading projects…</option></select><div id="project-summary" class="summary-list"></div><div class="control-actions"><button id="scheduler-start" type="button" disabled>Start scheduler</button><button id="scheduler-disable" type="button" class="danger-action" disabled>Disable scheduler</button></div><div id="project-load-more"></div></article>
+          <article class="panel project-card"><div class="card-heading"><div><p class="label">Task graph</p><h3>Readiness</h3></div><span id="task-count" class="count">0</span></div><label class="sr-only" for="task-picker">Select task graph</label><select id="task-picker" disabled><option>Select a project first</option></select><div id="task-summary" class="summary-list"></div><div class="control-actions"><button id="task-preview" type="button" disabled>Preview dispatch</button><button id="task-approve" type="button" class="primary-action" disabled>Approve graph</button></div><div id="task-load-more"></div></article>
         </div>
 
         <section class="panel readiness-panel" aria-labelledby="readiness-heading"><div class="card-heading"><div><p class="label">Explainable DAG</p><h3 id="readiness-heading">Work-package readiness</h3></div><span id="readiness-status" class="badge">Waiting for a task</span></div><div id="readiness-meta" class="explanation"></div><div id="readiness-graph" class="readiness-graph" aria-live="polite"></div><div id="readiness-load-more"></div></section>
+
+        <section class="panel preview-panel" aria-labelledby="dispatch-heading"><div class="card-heading"><div><p class="label">Pre-submission check</p><h3 id="dispatch-heading">Dispatch preview</h3></div><span id="dispatch-status" class="badge">Not requested</span></div><div id="dispatch-preview" class="preview-list" aria-live="polite"><div class="empty-state"><strong>No preview yet</strong><p>Select a task graph and request a bounded preview before approval or scheduler start.</p></div></div></section>
 
         <div class="visibility-grid split-wide">
           <section class="panel assignment-panel" aria-labelledby="assignment-heading"><div class="card-heading"><div><p class="label">Assignment timeline</p><h3 id="assignment-heading">Attempts, gates, and blockers</h3></div><span id="assignment-count" class="count">0</span></div><div id="assignment-list" class="assignment-list" aria-live="polite"></div><div id="assignment-load-more"></div><div id="assignment-detail" class="assignment-detail"></div></section>
@@ -45,6 +47,16 @@
         </div>
       </section>
     </section>
+    <dialog id="control-dialog" aria-labelledby="control-title" aria-describedby="control-description">
+      <form method="dialog" class="control-dialog-card">
+        <div><p class="label">Explicit operator confirmation</p><h2 id="control-title">Confirm control</h2><p id="control-description" class="muted">Review the bounded contract, budget, and gate summary before submission.</p></div>
+        <div id="control-summary" class="control-summary"></div>
+        <label id="control-worker-label" class="hidden" for="control-worker">Reassign to worker<select id="control-worker"></select></label>
+        <div id="control-error" class="inline-state hidden" role="alert"></div>
+        <p class="idempotency-note">This confirmation keeps one idempotency key. A conflict is shown here and is never retried silently.</p>
+        <div class="dialog-actions"><button id="control-cancel" type="button">Cancel</button><button id="control-submit" type="button" class="primary-action">Confirm and submit</button></div>
+      </form>
+    </dialog>
     <footer>Local connection · no public listener · responses are never cached</footer>
   </main>
 </body>

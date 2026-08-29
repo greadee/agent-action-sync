@@ -55,3 +55,32 @@ func TestProjectOrchestrationStatusIsProjectScoped(t *testing.T) {
 		t.Fatalf("other status = %+v, err=%v", otherStatus, err)
 	}
 }
+
+func TestLocalOperatorOperationLedgerReplaysAndRejectsKeyReuse(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	saveProjectRegistration(t, store, "project-operator-ledger")
+	operations := store.LocalProjectOperations()
+	operation := storage.LocalOperatorOperation{
+		IdempotencyKey: "browser-control-one", Fingerprint: projectionHash("a"), Action: "disable_scheduler",
+		ProjectID: "project-operator-ledger", SubjectID: "project-operator-ledger", ResultJSON: []byte(`{"state":"paused"}`),
+		OccurredAt: time.Date(2026, 8, 29, 9, 0, 0, 0, time.UTC),
+	}
+	first, err := operations.SaveLocalOperatorOperation(ctx, operation)
+	if err != nil || first.AlreadyPresent {
+		t.Fatalf("first operation = %+v, err=%v", first, err)
+	}
+	replay, err := operations.SaveLocalOperatorOperation(ctx, operation)
+	if err != nil || !replay.AlreadyPresent || string(replay.Operation.ResultJSON) != string(operation.ResultJSON) {
+		t.Fatalf("replay = %+v, err=%v", replay, err)
+	}
+	conflict := operation
+	conflict.Fingerprint = projectionHash("b")
+	if _, err := operations.SaveLocalOperatorOperation(ctx, conflict); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("conflicting reuse error = %v", err)
+	}
+	loaded, err := operations.GetLocalOperatorOperation(ctx, operation.IdempotencyKey)
+	if err != nil || loaded.Action != operation.Action || string(loaded.ResultJSON) != string(operation.ResultJSON) {
+		t.Fatalf("loaded operation = %+v, err=%v", loaded, err)
+	}
+}

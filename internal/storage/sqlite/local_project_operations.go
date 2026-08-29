@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"syncgate/internal/storage"
 )
@@ -130,6 +131,65 @@ WHERE a.project_id = ? GROUP BY g.status`, projectID)
 		return storage.ProjectOrchestrationStatus{}, err
 	}
 	return status, nil
+}
+
+func (store localProjectOperationsStore) SaveLocalOperatorOperation(ctx context.Context, operation storage.LocalOperatorOperation) (storage.LocalOperatorOperationResult, error) {
+	if err := validateLocalOperatorOperation(operation); err != nil {
+		return storage.LocalOperatorOperationResult{}, err
+	}
+	result, err := store.db.ExecContext(ctx, `
+INSERT OR IGNORE INTO local_operator_operations(idempotency_key, fingerprint, action, project_id, subject_id, result_json, occurred_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)`, operation.IdempotencyKey, operation.Fingerprint, operation.Action, operation.ProjectID, operation.SubjectID, operation.ResultJSON, formatTime(operation.OccurredAt))
+	if err != nil {
+		return storage.LocalOperatorOperationResult{}, fmt.Errorf("save local operator operation: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return storage.LocalOperatorOperationResult{}, err
+	}
+	if changed == 1 {
+		operation.ResultJSON = append([]byte(nil), operation.ResultJSON...)
+		return storage.LocalOperatorOperationResult{Operation: operation}, nil
+	}
+	existing, err := store.GetLocalOperatorOperation(ctx, operation.IdempotencyKey)
+	if err != nil {
+		return storage.LocalOperatorOperationResult{}, err
+	}
+	if existing.Fingerprint != operation.Fingerprint || existing.Action != operation.Action || existing.ProjectID != operation.ProjectID || existing.SubjectID != operation.SubjectID {
+		return storage.LocalOperatorOperationResult{}, storage.ErrConflict
+	}
+	return storage.LocalOperatorOperationResult{AlreadyPresent: true, Operation: existing}, nil
+}
+
+func (store localProjectOperationsStore) GetLocalOperatorOperation(ctx context.Context, key string) (storage.LocalOperatorOperation, error) {
+	if strings.TrimSpace(key) == "" || len(key) > 128 {
+		return storage.LocalOperatorOperation{}, errors.New("local operator idempotency key is invalid")
+	}
+	var operation storage.LocalOperatorOperation
+	var occurredAt string
+	err := store.db.QueryRowContext(ctx, `
+SELECT idempotency_key, fingerprint, action, project_id, subject_id, result_json, occurred_at
+FROM local_operator_operations WHERE idempotency_key = ?`, key).Scan(
+		&operation.IdempotencyKey, &operation.Fingerprint, &operation.Action, &operation.ProjectID,
+		&operation.SubjectID, &operation.ResultJSON, &occurredAt,
+	)
+	if err != nil {
+		return storage.LocalOperatorOperation{}, mapNotFound(err, "local operator operation", key)
+	}
+	operation.OccurredAt = parseStoredTime(occurredAt)
+	operation.ResultJSON = append([]byte(nil), operation.ResultJSON...)
+	return operation, nil
+}
+
+func validateLocalOperatorOperation(operation storage.LocalOperatorOperation) error {
+	if strings.TrimSpace(operation.IdempotencyKey) == "" || len(operation.IdempotencyKey) > 128 ||
+		len(operation.Fingerprint) != 64 || strings.Trim(operation.Fingerprint, "0123456789abcdef") != "" ||
+		strings.TrimSpace(operation.Action) == "" || len(operation.Action) > 64 ||
+		storage.ValidateProjectProjectionID(operation.ProjectID) != nil || strings.TrimSpace(operation.SubjectID) == "" || len(operation.SubjectID) > 128 ||
+		len(operation.ResultJSON) == 0 || len(operation.ResultJSON) > storage.MaxLocalOperatorResultBytes || operation.OccurredAt.IsZero() {
+		return errors.New("local operator operation is invalid")
+	}
+	return nil
 }
 
 var _ storage.LocalProjectOperationsStore = localProjectOperationsStore{}

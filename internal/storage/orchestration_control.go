@@ -242,6 +242,7 @@ type OrchestrationHeartbeatRequest struct {
 type OrchestrationRetryRequest struct {
 	AssignmentID      string
 	PreviousAttemptID string
+	WorkerID          string
 	Attempt           OrchestrationAttempt
 	OperationID       string
 	OperationDigest   string

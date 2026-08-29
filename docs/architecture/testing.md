@@ -285,3 +285,19 @@ visibility suite.
 ```powershell
 tools/check_desktop_node_slice6_release.ps1
 ```
+
+## Browser explicit operator-control gate
+
+Desktop Slice 7 tests the exact browser POST allowlist, same-origin CSRF denial,
+native confirmation markers, stable API conflict rendering, and absence of PUT,
+DELETE, arbitrary routes, or silent retries. SQLite coverage proves durable
+sanitized result replay and conflicting idempotency-key rejection. Desktop and
+orchestration suites cover task approval, bounded dispatch preview, scheduler
+replay, retry/reassignment attempt creation, worker replacement, and the local
+assignment audit timeline. The Windows gate reuses the live Slice 5 session and
+Slice 6 visibility gates before checking the browser script and focused control
+suites.
+
+```powershell
+tools/check_desktop_node_slice7_release.ps1
+```

@@ -17,7 +17,7 @@ body {
     #080b10;
 }
 
-button, code { font: inherit; }
+button, code, dialog { font: inherit; }
 
 .shell {
   width: min(1120px, calc(100% - 40px));
@@ -95,7 +95,7 @@ footer { padding: 28px 4px 0; color: #68758a; font-size: 11px; letter-spacing: .
 .muted { color: #91a0b5; font-size: 13px; line-height: 1.55; }
 .inline-state { border: 1px solid rgba(251, 113, 133, .48); border-radius: 12px; padding: 13px 15px; color: #fecdd3; background: rgba(136, 19, 55, .18); font-size: 13px; }
 .visibility-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-.project-card, .readiness-panel, .assignment-panel, .inventory-panel { padding: 24px; }
+.project-card, .readiness-panel, .preview-panel, .assignment-panel, .inventory-panel { padding: 24px; }
 .count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; color: #c4d0e9; background: #1a2435; font-size: 12px; font-weight: 720; }
 select { width: 100%; min-height: 42px; margin-top: 22px; border: 1px solid #3a475d; border-radius: 10px; padding: 9px 12px; color: #ebeff7; background: #111927; font: inherit; }
 select:focus-visible, button:focus-visible { outline: 2px solid #94a9ff; outline-offset: 3px; }
@@ -107,7 +107,17 @@ select:focus-visible, button:focus-visible { outline: 2px solid #94a9ff; outline
 .load-more { margin-top: 18px; border: 1px solid #405379; border-radius: 9px; padding: 8px 11px; color: #dce6ff; background: #17243f; font: inherit; font-size: 13px; cursor: pointer; }
 .load-more:hover:not(:disabled) { background: #23355a; }
 .load-more:disabled { cursor: wait; opacity: .68; }
+.control-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+.control-actions button, .dialog-actions button { min-height: 38px; border: 1px solid #405379; border-radius: 9px; padding: 8px 12px; color: #dce6ff; background: #17243f; cursor: pointer; }
+.control-actions button:hover:not(:disabled), .dialog-actions button:hover:not(:disabled) { background: #23355a; }
+.control-actions button:disabled { cursor: not-allowed; opacity: .44; }
+.control-actions .primary-action, .dialog-actions .primary-action { border-color: #6780cb; background: #2b4180; }
+.control-actions .danger-action { border-color: rgba(248, 113, 113, .52); color: #fecaca; background: rgba(127, 29, 29, .28); }
 .readiness-panel { display: grid; gap: 18px; }
+.preview-panel { display: grid; gap: 18px; }
+.preview-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.preview-item { display: grid; gap: 9px; border: 1px solid rgba(59, 76, 104, .8); border-radius: 12px; padding: 14px; background: rgba(15, 22, 33, .62); }
+.preview-item strong { overflow-wrap: anywhere; }
 .explanation { display: flex; flex-wrap: wrap; gap: 10px 22px; }
 .explanation-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #8f9caf; font-size: 12px; }
 .explanation-row code { color: #d6e0f6; overflow-wrap: anywhere; font-size: 11px; text-align: right; }
@@ -130,9 +140,11 @@ select:focus-visible, button:focus-visible { outline: 2px solid #94a9ff; outline
 .assignment-row p { margin: 0; color: #9eabbd; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .assignment-detail { display: grid; gap: 17px; margin-top: 20px; border-top: 1px solid rgba(62, 72, 89, .54); padding-top: 20px; }
 .detail-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 16px; }
-.timeline, .gates { display: grid; gap: 9px; }
-.timeline h5, .gates h5, .inventory-section h4 { margin: 0; color: #c9d3e5; font-size: 13px; letter-spacing: .02em; }
+.timeline, .gates, .audit-timeline { display: grid; gap: 9px; }
+.timeline h5, .gates h5, .audit-timeline h5, .inventory-section h4 { margin: 0; color: #c9d3e5; font-size: 13px; letter-spacing: .02em; }
 .timeline-item, .gate-item, .inventory-item { display: grid; gap: 8px; border-left: 2px solid #5266a1; padding: 9px 0 9px 12px; }
+.audit-item { display: grid; grid-template-columns: minmax(90px, .4fr) minmax(0, 1fr); gap: 7px 12px; border-left: 2px solid #4b8e7a; padding: 9px 0 9px 12px; }
+.audit-item time { grid-column: 1 / -1; color: #8d9ab0; font-size: 11px; }
 .timeline-item time { color: #8d9ab0; font-size: 11px; }
 .inventory-panel { display: grid; align-content: start; gap: 24px; }
 .inventory-section { display: grid; gap: 12px; }
@@ -143,6 +155,19 @@ select:focus-visible, button:focus-visible { outline: 2px solid #94a9ff; outline
 .empty-state strong { color: #dbe3f1; font-size: 14px; }
 .empty-state p { margin: 0; color: #93a0b4; font-size: 13px; line-height: 1.55; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+dialog { width: min(620px, calc(100% - 28px)); max-height: calc(100vh - 32px); border: 1px solid #4b5e82; border-radius: 18px; padding: 0; color: #edf2fa; background: #101722; box-shadow: 0 30px 100px rgba(0, 0, 0, .7); }
+dialog::backdrop { background: rgba(3, 6, 12, .78); backdrop-filter: blur(5px); }
+.control-dialog-card { display: grid; gap: 20px; padding: 26px; overflow: auto; }
+.control-dialog-card h2 { margin: 0 0 8px; font-size: 26px; letter-spacing: -.035em; }
+.control-dialog-card p { margin-bottom: 0; }
+.control-summary { display: grid; gap: 9px; border: 1px solid rgba(69, 84, 111, .8); border-radius: 13px; padding: 15px; background: rgba(8, 12, 19, .58); }
+.control-summary .explanation-row { border-bottom: 1px solid rgba(61, 73, 94, .5); padding-bottom: 8px; }
+.control-summary .explanation-row:last-child { border-bottom: 0; padding-bottom: 0; }
+#control-worker-label { display: grid; gap: 8px; color: #b9c5d8; font-size: 13px; }
+#control-worker-label select { margin-top: 0; }
+.idempotency-note { color: #8f9cb0; font-size: 12px; line-height: 1.5; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
 @media (max-width: 760px) {
   .shell { width: min(100% - 24px, 1120px); padding-top: 18px; }

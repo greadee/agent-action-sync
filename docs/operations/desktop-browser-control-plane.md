@@ -1,6 +1,6 @@
 # Desktop browser control plane
 
-SyncGate serves a read-only control-plane shell from the desktop node's configured loopback listener. Start the node, then ask the authenticated CLI for a one-time URL:
+SyncGate serves a bounded control-plane shell from the desktop node's configured loopback listener. Start the node, then ask the authenticated CLI for a one-time URL:
 
 ```text
 syncgate node-ui-session --config <node-root>/config/config.json
@@ -16,10 +16,17 @@ The initial session document is deliberately narrow. It contains process health,
 - `task.readiness.read`
 - `assignment.visibility.read`
 - `worker-node.inventory.read`
+- `operator.controls.write`
 
 These visibility capabilities disclose bounded, sanitized records and closed reason/evidence identifiers only. They do not expose source, prompt content, credentials, provider sessions, shell output, absolute paths, artifact bytes, or arbitrary discovery routes. Closing the node invalidates all in-memory bootstrap and browser-session state.
 
-The cookie is restricted to this explicit read allowlist: node status, local-project pages, task and readiness pages, assignment pages/details, worker inventory, and node inventory. Other API reads remain bearer-only. Browser mutations are not enabled in this slice; later controls must extend the allowlist deliberately and retain the exact-origin plus CSRF checks.
+The cookie is restricted to an explicit method-and-path allowlist. Reads cover node status, local-project pages, task/readiness pages, assignment pages/details, worker inventory, and node inventory. POST controls cover only task approval, dispatch preview, scheduler start/disable, assignment controls, and integration decisions. Project selection, project policy, unrelated inventory, and every other mutation remain bearer-only.
+
+## Operator controls
+
+State-changing buttons open a native confirmation dialog. Review the selected project authority, scheduler and concurrency state, task/graph digest, dispatch preview, assignment state, budget completeness, gate summary, and result digest before submitting. Reassignment additionally requires a different active worker. Canceling the dialog performs no request.
+
+Each confirmation creates one opaque idempotency key and retains it while the dialog stays open. The node stores the sanitized result in its authority-local replay ledger. A repeated submission of the same command reports a safe replay; key reuse with different inputs reports `409 state_conflict`. The shell does not retry conflicts or unavailable operations automatically and displays the response code plus request ID. Disabling the scheduler pauses new dispatch without deleting assignments, history, worktrees, or audit evidence.
 
 ## Security boundary
 

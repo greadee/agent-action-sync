@@ -5,8 +5,13 @@ const byId = (id) => document.getElementById(id);
 const state = {
   selectedProjectID: "", selectedTaskID: "", selectedAssignmentID: "",
   projects: {items: [], page: {}}, tasks: {items: [], page: {}}, readiness: {items: [], page: {}},
-  assignments: {items: [], page: {}}, workers: {items: [], page: {}}, nodes: {items: [], page: {}}
+  assignments: {items: [], page: {}}, workers: {items: [], page: {}}, nodes: {items: [], page: {}},
+  csrfToken: "", assignmentDetail: null, dispatchPreview: null, pendingControl: null
 };
+
+class LocalNodeError extends Error {
+  constructor(status, body) { super(body?.error?.message || `Local node returned ${status}`); this.name = "LocalNodeError"; this.status = status; this.code = body?.error?.code || "request_failed"; this.requestID = body?.error?.request_id || "not_reported"; }
+}
 
 function text(id, value) { byId(id).textContent = value === undefined || value === null || value === "" ? "—" : String(value); }
 function clear(element) { element.replaceChildren(); }
@@ -17,11 +22,12 @@ function compact(value) { const string = value ? String(value) : ""; return stri
 
 async function responseJSON(response) {
   const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(value?.error?.message || `Local node returned ${response.status}`);
+  if (!response.ok) throw new LocalNodeError(response.status, value);
   return value;
 }
 
 async function getJSON(path) { return responseJSON(await fetch(path, {credentials: "same-origin", cache: "no-store", headers: {Accept: "application/json"}})); }
+async function postJSON(path, body) { return responseJSON(await fetch(path, {method: "POST", credentials: "same-origin", cache: "no-store", headers: {Accept: "application/json", "Content-Type": "application/json", "X-SyncGate-CSRF": state.csrfToken}, body: JSON.stringify(body)})); }
 function pagePath(path, cursor) { const url = new URL(path, window.location.origin); url.searchParams.set("limit", String(pageSize)); if (cursor) url.searchParams.set("cursor", cursor); return url.pathname + url.search; }
 
 async function establishSession() {
@@ -34,6 +40,7 @@ async function establishSession() {
 
 function renderSession(documentValue) {
   const status = documentValue.status || {}; const queue = status.queue || {};
+  state.csrfToken = documentValue.csrf_token || "";
   text("node-state", status.status || "unavailable"); text("lifecycle", status.lifecycle); text("share-count", status.active_share_count);
   text("queue-running", queue.running); text("queue-pending", queue.pending); text("device-id", status.device_id); text("fingerprint", status.fingerprint);
   text("api-version", documentValue.api_version); text("session-expires", new Date(documentValue.session_expires_at).toLocaleString());
@@ -63,6 +70,7 @@ async function loadCollection(key, path, append = false) {
 
 function currentProject() { return state.projects.items.find((item) => item.project_id === state.selectedProjectID); }
 function currentTask() { return state.tasks.items.find((item) => item.task_id === state.selectedTaskID); }
+function currentAssignment() { return state.assignments.items.find((item) => item.assignment_id === state.selectedAssignmentID); }
 
 async function loadProjects(append = false) {
   await loadCollection("projects", "/api/v1/orchestration/projects", append);
@@ -73,11 +81,14 @@ async function loadProjects(append = false) {
 
 function renderProjects() {
   const picker = byId("project-picker"); clear(picker);
-  if (!state.projects.items.length) { picker.append(node("option", "", "No local projects available")); picker.disabled = true; empty(byId("project-summary"), "No projects yet", "Register a project through the existing local workflow to view its readiness here."); text("project-count", 0); return; }
+  if (!state.projects.items.length) { picker.append(node("option", "", "No local projects available")); picker.disabled = true; byId("scheduler-start").disabled = true; byId("scheduler-disable").disabled = true; empty(byId("project-summary"), "No projects yet", "Register a project through the existing local workflow to view its readiness here."); text("project-count", 0); return; }
   picker.disabled = false;
   for (const project of state.projects.items) { const option = node("option", "", project.display_name || project.project_id); option.value = project.project_id; option.selected = project.project_id === state.selectedProjectID; picker.append(option); }
   const selected = currentProject(); const summary = byId("project-summary"); clear(summary); text("project-count", state.projects.items.length);
   if (selected) { const counts = node("div", "status-counts"); for (const count of [...(selected.assignment_counts || []), ...(selected.gate_counts || [])]) counts.append(node("span", "", `${count.state}: ${count.count}`)); summary.append(node("strong", "", selected.display_name || selected.project_id), node("p", "", `Scheduler ${selected.scheduler_state || "unknown"} · concurrency ${selected.max_concurrent || "—"}`), counts); }
+  const canControl = Boolean(selected?.selected && selected?.execution_authorized);
+  byId("scheduler-start").disabled = !canControl || !selected?.scheduling_enabled || selected?.scheduler_state === "running";
+  byId("scheduler-disable").disabled = !canControl || !["running", "draining"].includes(selected?.scheduler_state);
 }
 
 async function loadTasks(append = false) {
@@ -90,11 +101,14 @@ async function loadTasks(append = false) {
 
 function renderTasks() {
   const picker = byId("task-picker"); clear(picker);
-  if (!state.selectedProjectID) { picker.disabled = true; picker.append(node("option", "", "Select a project first")); return; }
-  if (!state.tasks.items.length) { picker.disabled = true; picker.append(node("option", "", "No task graphs recorded")); empty(byId("task-summary"), "No task graph", "This project has no sanitized task graph projection yet."); text("task-count", 0); return; }
+  if (!state.selectedProjectID) { picker.disabled = true; byId("task-preview").disabled = true; byId("task-approve").disabled = true; picker.append(node("option", "", "Select a project first")); return; }
+  if (!state.tasks.items.length) { picker.disabled = true; byId("task-preview").disabled = true; byId("task-approve").disabled = true; picker.append(node("option", "", "No task graphs recorded")); empty(byId("task-summary"), "No task graph", "This project has no sanitized task graph projection yet."); text("task-count", 0); return; }
   picker.disabled = false; for (const task of state.tasks.items) { const option = node("option", "", `${task.task_id} · ${task.state}`); option.value = task.task_id; option.selected = task.task_id === state.selectedTaskID; picker.append(option); }
   const task = currentTask(); const summary = byId("task-summary"); clear(summary); text("task-count", state.tasks.items.length);
   if (task) summary.append(statusChip(task.state), explanation("Reason code", task.explanation_code), explanation("Task evidence", task.task_record_id), explanation("Graph evidence", task.graph_record_id));
+  const canControl = Boolean(task && currentProject()?.selected && currentProject()?.execution_authorized);
+  byId("task-preview").disabled = !canControl;
+  byId("task-approve").disabled = !canControl || !task?.graph_digest;
 }
 
 async function loadReadiness(append = false) {
@@ -144,8 +158,8 @@ function renderAssignments() {
 async function loadAssignmentDetail(assignmentID) {
   const container = byId("assignment-detail"); if (!state.selectedProjectID || !assignmentID) { clear(container); return; }
   empty(container, "Loading assignment detail", "Reading attempts, gates, and closed reason codes.");
-  try { renderAssignmentDetail(await getJSON(`/api/v1/projects/${encodeURIComponent(state.selectedProjectID)}/assignments/${encodeURIComponent(assignmentID)}`)); }
-  catch (error) { empty(container, "Assignment detail unavailable", error instanceof Error ? error.message : "The assignment could not be read."); }
+  try { state.assignmentDetail = await getJSON(`/api/v1/projects/${encodeURIComponent(state.selectedProjectID)}/assignments/${encodeURIComponent(assignmentID)}`); renderAssignmentDetail(state.assignmentDetail); }
+  catch (error) { state.assignmentDetail = null; empty(container, "Assignment detail unavailable", error instanceof Error ? error.message : "The assignment could not be read."); }
 }
 
 function renderAssignmentDetail(detail) {
@@ -155,7 +169,68 @@ function renderAssignmentDetail(detail) {
   for (const attempt of detail.attempts || []) { const item = node("div", "timeline-item"); item.append(node("strong", "", `Attempt ${attempt.attempt_number}`), statusChip(attempt.state), explanation("Recovery", attempt.recovery_disposition), explanation("Failure code", attempt.failure_code), node("time", "", attempt.updated_at || attempt.created_at || "—")); timeline.append(item); }
   const gates = node("section", "gates"); gates.append(node("h5", "", "Gates and decisions")); if (!(detail.gates || []).length) gates.append(node("p", "muted", "No gate records are available."));
   for (const gate of detail.gates || []) { const item = node("div", "gate-item"); item.append(node("strong", "", gate.gate_id), statusChip(gate.status), explanation("Reason code", gate.reason_code), explanation("Evidence digest", compact(gate.digest))); gates.append(item); }
-  container.append(timeline, gates);
+  const audit = node("section", "audit-timeline"); audit.append(node("h5", "", "Local audit timeline")); if (!(detail.audit || []).length) audit.append(node("p", "muted", "No operator or runtime actions are recorded."));
+  for (const event of detail.audit || []) { const item = node("div", "audit-item"); item.append(node("strong", "", event.action), explanation("Reason", event.reason_code), node("span", "muted", `${event.from_state || "initial"} → ${event.to_state}`), node("time", "", event.occurred_at || "—")); audit.append(item); }
+  const controls = node("div", "control-actions");
+  const actionStates = {pause: ["running", "preparing"], resume: ["paused"], cancel: ["planned", "leased", "preparing", "running", "paused", "collecting", "awaiting_gates"], retry: ["failed", "canceled", "expired"], reassign: ["failed", "canceled", "expired"], evaluate: ["collecting"]};
+  for (const [action, label] of Object.entries({pause: "Pause", resume: "Resume", cancel: "Cancel", retry: "Retry", reassign: "Reassign", evaluate: "Evaluate result"})) { const button = node("button", action === "cancel" ? "danger-action" : "", label); button.type = "button"; button.disabled = !actionStates[action].includes(detail.state); button.addEventListener("click", () => openControl(action)); controls.append(button); }
+  if (detail.result) { for (const [action, label] of [["approve", "Approve result"], ["reject", "Reject result"]]) { const button = node("button", action === "approve" ? "primary-action" : "danger-action", label); button.type = "button"; button.addEventListener("click", () => openControl(action)); controls.append(button); } }
+  container.append(timeline, gates, audit, controls);
+}
+
+function renderDispatchPreview(value) {
+  state.dispatchPreview = value; const container = byId("dispatch-preview"); clear(container); text("dispatch-status", value?.already_present ? "Replayed" : "Current");
+  if (!(value?.items || []).length) { empty(container, "No dispatch candidates", "The selected graph has no bounded work-package candidates."); return; }
+  for (const itemValue of value.items) { const item = node("article", "preview-item"); item.append(node("strong", "", itemValue.work_package_id), statusChip(itemValue.state)); const reasons = node("ul", "mini-tags"); for (const reason of itemValue.reason_codes || []) reasons.append(node("li", "", code(reason))); item.append(reasons); container.append(item); }
+}
+
+async function previewDispatch() {
+  const task = currentTask(); if (!task || !state.selectedProjectID) return;
+  byId("task-preview").disabled = true; text("dispatch-status", "Loading"); clearInlineError();
+  const input = {project_id: state.selectedProjectID, task_id: task.task_id, task_revision: task.task_revision, graph_revision: task.graph_revision, idempotency_key: operationKey("preview")};
+  try { renderDispatchPreview(await postJSON(`/api/v1/projects/${encodeURIComponent(state.selectedProjectID)}/dispatch/preview`, input)); }
+  catch (error) { text("dispatch-status", "Unavailable"); empty(byId("dispatch-preview"), "Preview unavailable", error instanceof Error ? error.message : "Dispatch preview failed."); }
+  finally { renderTasks(); }
+}
+
+function operationKey(action) { return `ui-${action}-${crypto.randomUUID()}`; }
+function controlLabel(action) { return ({start_scheduler: "Start scheduler", disable_scheduler: "Disable scheduler", approve_task: "Approve task graph", pause: "Pause assignment", resume: "Resume assignment", cancel: "Cancel assignment", retry: "Retry assignment", reassign: "Reassign assignment", evaluate: "Evaluate result", approve: "Approve result", reject: "Reject result"})[action] || action; }
+
+function openControl(action) {
+  const project = currentProject(); const task = currentTask(); const detail = state.assignmentDetail;
+  if (!project) return;
+  state.pendingControl = {action, idempotencyKey: operationKey(action)}; text("control-title", controlLabel(action));
+  const summary = byId("control-summary"); clear(summary); summary.append(explanation("Project", project.project_id), explanation("Execution authority", project.execution_authorized ? "authorized" : "not_authorized"), explanation("Scheduler", project.scheduler_state), explanation("Concurrency ceiling", project.max_concurrent));
+  if (action === "approve_task") summary.append(explanation("Task", task?.task_id), explanation("Task revision", task?.task_revision), explanation("Graph revision", task?.graph_revision), explanation("Approval digest", compact(task?.graph_digest)), explanation("Dispatch preview", state.dispatchPreview ? `${state.dispatchPreview.items?.length || 0} bounded candidates` : "not_requested"));
+  if (action === "start_scheduler" && task) summary.append(explanation("Selected task", task.task_id), explanation("Task / graph revision", `${task.task_revision}/${task.graph_revision}`), explanation("Graph digest", compact(task.graph_digest)), explanation("Dispatch preview", state.dispatchPreview ? `${state.dispatchPreview.items?.length || 0} bounded candidates` : "not_requested"));
+  if (!["start_scheduler", "disable_scheduler", "approve_task"].includes(action) && detail) {
+    summary.append(explanation("Assignment", detail.assignment_id), explanation("Current state", detail.state), explanation("Worker", detail.worker_id), explanation("Budget evidence", detail.observed_budget?.completeness || "unknown"), explanation("Gate summary", (detail.gates || []).map((gate) => `${gate.gate_id}:${gate.status}`).join(", ") || "none"));
+    if (["approve", "reject"].includes(action)) summary.append(explanation("Result digest", compact(detail.result?.summary_digest)), explanation("Review outcome", detail.result?.review_outcome));
+  }
+  summary.append(explanation("Idempotency key", state.pendingControl.idempotencyKey));
+  const workerLabel = byId("control-worker-label"); workerLabel.classList.toggle("hidden", action !== "reassign");
+  if (action === "reassign") { const picker = byId("control-worker"); clear(picker); for (const worker of state.workers.items.filter((item) => item.lifecycle === "active" && item.worker_id !== detail?.worker_id)) { const option = node("option", "", worker.worker_id); option.value = worker.worker_id; picker.append(option); } byId("control-submit").disabled = !picker.options.length; } else byId("control-submit").disabled = false;
+  const error = byId("control-error"); error.classList.add("hidden"); error.textContent = ""; byId("control-submit").textContent = "Confirm and submit"; byId("control-dialog").showModal();
+}
+
+async function submitControl() {
+  const pending = state.pendingControl; const project = currentProject(); const task = currentTask(); const detail = state.assignmentDetail; if (!pending || !project) return;
+  const button = byId("control-submit"); button.disabled = true; button.textContent = "Submitting…"; const errorBox = byId("control-error"); errorBox.classList.add("hidden");
+  try {
+    let result;
+    if (pending.action === "start_scheduler" || pending.action === "disable_scheduler") {
+      const action = pending.action === "start_scheduler" ? "start" : "disable"; result = await postJSON(`/api/v1/projects/${encodeURIComponent(project.project_id)}/scheduler/${action}`, {project_id: project.project_id, idempotency_key: pending.idempotencyKey});
+    } else if (pending.action === "approve_task") {
+      result = await postJSON(`/api/v1/projects/${encodeURIComponent(project.project_id)}/tasks/${encodeURIComponent(task.task_id)}/approve`, {project_id: project.project_id, task_id: task.task_id, task_revision: task.task_revision, graph_revision: task.graph_revision, approval_digest: task.graph_digest, idempotency_key: pending.idempotencyKey});
+    } else if (pending.action === "approve" || pending.action === "reject") {
+      const attempt = detail.attempts?.[detail.attempts.length - 1]; result = await postJSON(`/api/v1/projects/${encodeURIComponent(project.project_id)}/assignments/${encodeURIComponent(detail.assignment_id)}/integration`, {project_id: project.project_id, assignment_id: detail.assignment_id, attempt_id: attempt?.attempt_id, decision: pending.action, summary_digest: detail.result?.summary_digest, reason_code: `operator_${pending.action}d`, idempotency_key: pending.idempotencyKey});
+    } else {
+      const body = {project_id: project.project_id, assignment_id: detail.assignment_id, action: pending.action, idempotency_key: pending.idempotencyKey}; if (pending.action === "reassign") body.worker_id = byId("control-worker").value; result = await postJSON(`/api/v1/projects/${encodeURIComponent(project.project_id)}/assignments/${encodeURIComponent(detail.assignment_id)}/controls`, body);
+    }
+    byId("control-dialog").close(); state.pendingControl = null; setRefresh(result?.already_present ? "Control replayed safely from the existing idempotency key." : `${controlLabel(pending.action)} recorded.`); await loadVisibility();
+  } catch (error) {
+    const codeValue = error instanceof LocalNodeError ? error.code : "request_failed"; const requestValue = error instanceof LocalNodeError ? error.requestID : "not_reported"; errorBox.textContent = `${error instanceof Error ? error.message : "Control failed."} · code ${codeValue} · request ${requestValue}`; errorBox.classList.remove("hidden"); button.disabled = false; button.textContent = "Submit same key again";
+  }
 }
 
 async function loadWorkers(append = false) { await loadCollection("workers", "/api/v1/orchestration/workers", append); renderWorkers(); renderLoadMore(byId("worker-load-more"), state.workers, "Load more workers", loadWorkers); }
@@ -168,10 +243,12 @@ function renderVisibilityUnavailable(message) {
   empty(byId("project-summary"), "Project visibility unavailable", message); empty(byId("task-summary"), "Task visibility unavailable", message);
   empty(byId("readiness-graph"), "Readiness unavailable", message); empty(byId("assignment-list"), "Assignment visibility unavailable", message); clear(byId("assignment-detail"));
   empty(byId("worker-list"), "Worker inventory unavailable", message); empty(byId("node-list"), "Node inventory unavailable", message); text("readiness-status", "Unavailable");
+  for (const id of ["scheduler-start", "scheduler-disable", "task-preview", "task-approve"]) byId(id).disabled = true;
+  text("dispatch-status", "Unavailable"); empty(byId("dispatch-preview"), "Dispatch controls unavailable", message);
 }
 
 async function selectProject(projectID) {
-  state.selectedProjectID = projectID; state.selectedTaskID = ""; state.selectedAssignmentID = ""; state.tasks = {items: [], page: {}}; state.readiness = {items: [], page: {}, summary: null}; state.assignments = {items: [], page: {}};
+  state.selectedProjectID = projectID; state.selectedTaskID = ""; state.selectedAssignmentID = ""; state.assignmentDetail = null; state.dispatchPreview = null; state.tasks = {items: [], page: {}}; state.readiness = {items: [], page: {}, summary: null}; state.assignments = {items: [], page: {}};
   renderProjects(); renderTasks(); renderReadiness(); renderAssignments(); setRefresh("Loading project visibility…");
   try { await Promise.all([loadTasks(), loadAssignments()]); await loadReadiness(); setRefresh("Sanitized project visibility is current."); } catch (error) { renderInlineError(error instanceof Error ? error.message : "Could not load project visibility."); setRefresh("Project visibility could not be refreshed."); }
 }
@@ -190,5 +267,12 @@ async function connect() {
 
 byId("retry").addEventListener("click", connect);
 byId("project-picker").addEventListener("change", (event) => selectProject(event.target.value));
-byId("task-picker").addEventListener("change", async (event) => { state.selectedTaskID = event.target.value; state.readiness = {items: [], page: {}, summary: null}; renderTasks(); renderReadiness(); try { await loadReadiness(); } catch (error) { renderInlineError(error instanceof Error ? error.message : "Could not load task readiness."); } });
+byId("task-picker").addEventListener("change", async (event) => { state.selectedTaskID = event.target.value; state.dispatchPreview = null; text("dispatch-status", "Not requested"); empty(byId("dispatch-preview"), "No preview yet", "Request a bounded preview for this task graph before approval or scheduler start."); state.readiness = {items: [], page: {}, summary: null}; renderTasks(); renderReadiness(); try { await loadReadiness(); } catch (error) { renderInlineError(error instanceof Error ? error.message : "Could not load task readiness."); } });
+byId("task-preview").addEventListener("click", previewDispatch);
+byId("task-approve").addEventListener("click", () => openControl("approve_task"));
+byId("scheduler-start").addEventListener("click", () => openControl("start_scheduler"));
+byId("scheduler-disable").addEventListener("click", () => openControl("disable_scheduler"));
+byId("control-cancel").addEventListener("click", () => byId("control-dialog").close());
+byId("control-submit").addEventListener("click", submitControl);
+byId("control-dialog").addEventListener("close", () => { state.pendingControl = null; });
 connect();

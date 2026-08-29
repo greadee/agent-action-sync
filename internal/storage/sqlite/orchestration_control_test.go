@@ -432,13 +432,27 @@ func TestOrchestrationTimeoutRetryAndCanonicalProjectionIsolation(t *testing.T) 
 		t.Fatalf("reused retry idempotency error = %v", err)
 	}
 
-	retry, err := fixture.service.Retry(ctx, orchestration.RetryRequest{
+	reassignRequest := orchestration.RetryRequest{
 		AssignmentID: firstClaim.AssignmentID, PreviousAttemptID: firstClaim.AttemptID, AttemptID: "attempt-retry-2",
+		WorkerID: "worker:replacement", Action: "reassign", ReasonCode: "operator_reassign",
 		IdempotencyDigest: controlDigest("retry-attempt-2"), OperationID: "operation-retry-2", OperationDigest: controlDigest("operation-retry-2"),
 		AuditID: "audit-retry-2", ActorID: "operator-1",
-	})
-	if err != nil || retry.Snapshot.Attempt.AttemptNumber != 2 || retry.Snapshot.Attempt.SupersedesAttemptID != firstClaim.AttemptID {
-		t.Fatalf("Retry = %#v, err=%v", retry, err)
+	}
+	retry, err := fixture.service.Retry(ctx, reassignRequest)
+	if err != nil || retry.Snapshot.Attempt.AttemptNumber != 2 || retry.Snapshot.Attempt.SupersedesAttemptID != firstClaim.AttemptID || retry.Snapshot.Assignment.WorkerID != "worker:replacement" {
+		t.Fatalf("Reassign = %#v, err=%v", retry, err)
+	}
+	replayed, err := fixture.service.Retry(ctx, reassignRequest)
+	if err != nil || !replayed.AlreadyPresent || replayed.Snapshot.Assignment.WorkerID != "worker:replacement" {
+		t.Fatalf("reassignment replay = %#v, err=%v", replayed, err)
+	}
+	events, err := fixture.store.OrchestrationControl().ListOrchestrationAudit(ctx, firstClaim.AssignmentID)
+	foundReassign := false
+	for _, event := range events {
+		foundReassign = foundReassign || event.Action == "reassign" && event.ReasonCode == "operator_reassign"
+	}
+	if err != nil || !foundReassign {
+		t.Fatalf("reassignment audit = %#v, err=%v", events, err)
 	}
 	var activeAttempts int
 	if err := fixture.store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM orchestration_attempts WHERE project_id = ? AND work_package_id = ? AND state IN ('planned','leased','preparing','running','paused','collecting','awaiting_gates')`, fixture.project, "work-retry").Scan(&activeAttempts); err != nil || activeAttempts != 1 {
@@ -467,7 +481,7 @@ func TestOrchestrationTimeoutRetryAndCanonicalProjectionIsolation(t *testing.T) 
 		t.Fatalf("canonical/local separation failed: events=%d leases=%d", canonicalEvents, leases)
 	}
 
-	events, err := fixture.store.OrchestrationControl().ListOrchestrationAudit(ctx, firstClaim.AssignmentID)
+	events, err = fixture.store.OrchestrationControl().ListOrchestrationAudit(ctx, firstClaim.AssignmentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +489,7 @@ func TestOrchestrationTimeoutRetryAndCanonicalProjectionIsolation(t *testing.T) 
 	for _, event := range events {
 		actions[event.Action] = true
 	}
-	for _, action := range []string{"timeout", "retry", "recovery", "release"} {
+	for _, action := range []string{"timeout", "reassign", "recovery", "release"} {
 		if !actions[action] {
 			t.Errorf("audit trail is missing %q: %#v", action, events)
 		}

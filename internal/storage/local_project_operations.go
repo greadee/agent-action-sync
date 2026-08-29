@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const MaxLocalOperatorResultBytes = 64 << 10
+
 // LocalProjectPolicy is authority-local control state. It is deliberately not
 // part of portable project history and contains no paths or project content.
 type LocalProjectPolicy struct {
@@ -24,6 +26,24 @@ type ProjectOrchestrationStatus struct {
 	GateCounts       map[GateState]int64
 }
 
+// LocalOperatorOperation is the authority-local replay ledger for explicit
+// browser and CLI controls. ResultJSON contains only the sanitized API result;
+// it never contains runtime handles, paths, prompts, logs, or artifact bytes.
+type LocalOperatorOperation struct {
+	IdempotencyKey string
+	Fingerprint    string
+	Action         string
+	ProjectID      string
+	SubjectID      string
+	ResultJSON     []byte
+	OccurredAt     time.Time
+}
+
+type LocalOperatorOperationResult struct {
+	AlreadyPresent bool
+	Operation      LocalOperatorOperation
+}
+
 // LocalProjectOperationsStore owns machine-local selection and policy. A
 // single-row selection prevents multiple projects from sharing scheduler
 // authority on one desktop node.
@@ -33,4 +53,6 @@ type LocalProjectOperationsStore interface {
 	SelectLocalProject(context.Context, LocalProjectSelection) error
 	GetSelectedLocalProject(context.Context) (LocalProjectSelection, error)
 	GetProjectOrchestrationStatus(context.Context, string) (ProjectOrchestrationStatus, error)
+	SaveLocalOperatorOperation(context.Context, LocalOperatorOperation) (LocalOperatorOperationResult, error)
+	GetLocalOperatorOperation(context.Context, string) (LocalOperatorOperation, error)
 }

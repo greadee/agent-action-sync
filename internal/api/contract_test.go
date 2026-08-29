@@ -11,8 +11,8 @@ import (
 )
 
 type contractRoute struct {
-	method, operationID, path               string
-	public, browser, browserRead, paginated bool
+	method, operationID, path                               string
+	public, browser, browserRead, browserControl, paginated bool
 }
 
 var expectedContractRoutes = []contractRoute{
@@ -52,14 +52,14 @@ var expectedContractRoutes = []contractRoute{
 	{method: "post", operationID: "selectLocalProject", path: "/api/v1/orchestration/projects/{project_id}/selection"},
 	{method: "put", operationID: "setLocalProjectPolicy", path: "/api/v1/orchestration/projects/{project_id}/policy"},
 	{method: "get", operationID: "listOrchestrationNodes", path: "/api/v1/orchestration/nodes", browserRead: true, paginated: true},
-	{method: "post", operationID: "approveTaskGraph", path: "/api/v1/projects/{project_id}/tasks/{task_id}/approve"},
-	{method: "post", operationID: "previewDispatch", path: "/api/v1/projects/{project_id}/dispatch/preview"},
-	{method: "post", operationID: "startOrchestrationScheduler", path: "/api/v1/projects/{project_id}/scheduler/start"},
-	{method: "post", operationID: "disableOrchestrationScheduler", path: "/api/v1/projects/{project_id}/scheduler/disable"},
+	{method: "post", operationID: "approveTaskGraph", path: "/api/v1/projects/{project_id}/tasks/{task_id}/approve", browserControl: true},
+	{method: "post", operationID: "previewDispatch", path: "/api/v1/projects/{project_id}/dispatch/preview", browserControl: true},
+	{method: "post", operationID: "startOrchestrationScheduler", path: "/api/v1/projects/{project_id}/scheduler/start", browserControl: true},
+	{method: "post", operationID: "disableOrchestrationScheduler", path: "/api/v1/projects/{project_id}/scheduler/disable", browserControl: true},
 	{method: "get", operationID: "listAssignments", path: "/api/v1/projects/{project_id}/assignments", browserRead: true, paginated: true},
 	{method: "get", operationID: "getAssignment", path: "/api/v1/projects/{project_id}/assignments/{assignment_id}", browserRead: true},
-	{method: "post", operationID: "controlAssignment", path: "/api/v1/projects/{project_id}/assignments/{assignment_id}/controls"},
-	{method: "post", operationID: "decideIntegration", path: "/api/v1/projects/{project_id}/assignments/{assignment_id}/integration"},
+	{method: "post", operationID: "controlAssignment", path: "/api/v1/projects/{project_id}/assignments/{assignment_id}/controls", browserControl: true},
+	{method: "post", operationID: "decideIntegration", path: "/api/v1/projects/{project_id}/assignments/{assignment_id}/integration", browserControl: true},
 	{method: "post", operationID: "startShareScan", path: "/api/v1/shares/{share_id}/scans"},
 	{method: "post", operationID: "actOnJob", path: "/api/v1/jobs/{job_id}/actions"},
 	{method: "post", operationID: "createPairingInvitation", path: "/api/v1/pairing/invitations"},
@@ -178,6 +178,9 @@ func TestLocalAdminAPIContract(t *testing.T) {
 		}
 		if route.browserRead && !hasSecurityScheme(operation["security"], "browserSession") {
 			t.Errorf("%s %s must declare browserSession for the bounded visibility shell", strings.ToUpper(route.method), route.path)
+		}
+		if route.browserControl && !hasSecurityScheme(operation["security"], "browserSession") {
+			t.Errorf("%s %s must declare browserSession for the explicit control shell", strings.ToUpper(route.method), route.path)
 		}
 		if route.paginated && !hasParameterRefs(operation, "Limit", "Cursor") {
 			t.Errorf("%s %s must expose bounded limit and cursor pagination", strings.ToUpper(route.method), route.path)

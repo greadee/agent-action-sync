@@ -220,3 +220,17 @@ func TestLocalProjectAuthorityMigrationIsExclusiveAndAuthorityLocal(t *testing.T
 		}
 	}
 }
+
+func TestLocalOperatorControlLedgerStoresOnlySanitizedReplayResults(t *testing.T) {
+	sql := strings.ToLower(Migrations[16].SQL)
+	for _, required := range []string{"local_operator_operations", "idempotency_key text primary key", "fingerprint", "result_json", "length(result_json) <= 65536"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("local operator replay migration is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"root_path", "workspace", "credential", "prompt", "runtime_session", "shell_output", "artifact_bytes"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("local operator replay migration contains forbidden field %q", forbidden)
+		}
+	}
+}

@@ -166,6 +166,7 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 	administration := NewLocalOrchestrationAdministration(LocalAdministrationOptions{
 		Scheduler: schedulerValue, Control: control, Inventory: options.Store.OrchestrationControl(),
 		Projects: options.Store.ProjectRegistrations(), Operations: options.Store.LocalProjectOperations(),
+		Tasks: options.Store.ProjectTasks(), TaskNodes: options.Store.ProjectTaskNodes(), Registry: options.Store.Registry(),
 		AuthorizedProjectID: authorizedProjectID, MaxConcurrent: options.Config.Node.Execution.MaxConcurrent,
 		Node: node, Gate: gate, Now: options.Now,
 	})

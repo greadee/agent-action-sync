@@ -45,26 +45,34 @@ func TestServerServesHardenedControlPlaneShell(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), string(credential)) || recorder.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatal("control plane disclosed a credential or enabled CORS")
 	}
-	for _, marker := range []string{"project-picker", "readiness-graph", "assignment-detail", "worker-list", "node-list"} {
+	for _, marker := range []string{"project-picker", "readiness-graph", "assignment-detail", "worker-list", "node-list", "control-dialog", "dispatch-preview"} {
 		if !strings.Contains(recorder.Body.String(), marker) {
 			t.Fatalf("control plane shell missing Slice 6 marker %q", marker)
 		}
 	}
 }
 
-func TestControlPlaneVisibilityScriptRemainsReadOnly(t *testing.T) {
+func TestControlPlaneScriptUsesOnlyBoundedExplicitControls(t *testing.T) {
 	asset, err := controlPlaneAssets.ReadFile("controlplane/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := string(asset)
-	for _, route := range []string{"/api/v1/orchestration/projects", "/tasks", "/assignments", "/api/v1/orchestration/workers", "/api/v1/orchestration/nodes"} {
+	for _, route := range []string{"/api/v1/orchestration/projects", "/tasks", "/assignments", "/api/v1/orchestration/workers", "/api/v1/orchestration/nodes", "/approve", "/dispatch/preview", "/scheduler/", "/controls", "/integration"} {
 		if !strings.Contains(script, route) {
 			t.Fatalf("visibility script is missing route marker %q", route)
 		}
 	}
-	if strings.Count(script, `method: "POST"`) != 1 || !strings.Contains(script, "/api/v1/browser-session/bootstrap") {
-		t.Fatal("visibility script added a mutation beyond the session bootstrap")
+	if !strings.Contains(script, "/api/v1/browser-session/bootstrap") || !strings.Contains(script, browserCSRFHeader) {
+		t.Fatal("control script is missing protected bootstrap or CSRF submission")
+	}
+	for _, marker := range []string{"showModal()", "crypto.randomUUID()", "Submit same key again", "already_present", "observed_budget", "Gate summary"} {
+		if !strings.Contains(script, marker) {
+			t.Fatalf("control script is missing confirmation or replay marker %q", marker)
+		}
+	}
+	if strings.Contains(script, "localStorage") || strings.Contains(script, "sessionStorage") {
+		t.Fatal("control script persisted browser-session control state")
 	}
 	if strings.Contains(script, `method: "PUT"`) || strings.Contains(script, `method: "DELETE"`) {
 		t.Fatal("visibility script added an unsafe control method")
@@ -154,6 +162,29 @@ func TestServerBrowserSessionBootstrapAndCSRFBoundary(t *testing.T) {
 		t.Fatalf("out-of-scope browser response = %d, called=%t", outsideScopeRecorder.Code, called)
 	}
 
+	called = false
+	missingCSRF := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/projects/project-one/scheduler/disable", strings.NewReader(`{}`))
+	missingCSRF.AddCookie(cookies[0])
+	missingCSRF.Header.Set("Origin", "http://127.0.0.1:47820")
+	missingCSRFRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(missingCSRFRecorder, missingCSRF)
+	if missingCSRFRecorder.Code != http.StatusForbidden || called {
+		t.Fatalf("missing-CSRF control response = %d, called=%t", missingCSRFRecorder.Code, called)
+	}
+
+	called = false
+	control := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/projects/project-one/scheduler/disable", strings.NewReader(`{}`))
+	control.AddCookie(cookies[0])
+	control.Header.Set("Origin", "http://127.0.0.1:47820")
+	control.Header.Set("Sec-Fetch-Site", "same-origin")
+	control.Header.Set(browserCSRFHeader, document.CSRFToken)
+	controlRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(controlRecorder, control)
+	if controlRecorder.Code != http.StatusNoContent || !called {
+		t.Fatalf("CSRF-authenticated control response = %d, called=%t", controlRecorder.Code, called)
+	}
+
+	called = false
 	mutation := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/jobs/job-1/actions", strings.NewReader(`{}`))
 	mutation.AddCookie(cookies[0])
 	mutation.Header.Set("Origin", "http://127.0.0.1:47820")

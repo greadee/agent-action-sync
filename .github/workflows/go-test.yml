@@ -85,3 +85,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: tools/check_desktop_node_slice6_release.ps1 -SkipTests
+
+      - name: Run desktop node Slice 7 release gate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: tools/check_desktop_node_slice7_release.ps1 -SkipTests

@@ -46,7 +46,9 @@ The current implementation provides:
   and opaque IDs.
 - An embedded loopback-only browser shell with one-use CLI bootstrap URLs,
   opaque HttpOnly sessions, exact-origin and CSRF enforcement, and sanitized
-  health/status, project-readiness, assignment, worker, and node discovery.
+  health/status, project-readiness, assignment, worker, and node discovery,
+  plus confirmation-bound task, scheduler, assignment, and integration controls
+  with durable idempotent replay and stable conflict reporting.
 
 ## MVP Boundary
 
@@ -63,7 +65,7 @@ The current MVP boundary is local, owner-controlled transfer and one-way synchro
 - Receiver-authoritative writes with temporary files, verification, and atomic commit.
 - Explicit one-way change permissions and guarded deletions.
 
-Later phases add the remaining supervised-execution controls, LAN discovery,
+Later phases add the remaining supervised-execution incident views, LAN discovery,
 remote browser portal access, coordinator/relay services, direct connectivity,
 and separately designed multi-writer synchronization. File sync does not start
 agent runtimes or provide arbitrary remote shell access.
@@ -85,6 +87,7 @@ tools\check_desktop_node_slice3_release.ps1
 tools\check_desktop_node_slice4_release.ps1
 tools\check_desktop_node_slice5_release.ps1
 tools\check_desktop_node_slice6_release.ps1
+tools\check_desktop_node_slice7_release.ps1
 ```
 
 Initialize, run, and check an installed per-user node with:

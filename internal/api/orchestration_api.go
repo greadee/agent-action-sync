@@ -123,9 +123,10 @@ type DispatchPreviewItem struct {
 	NodeID        string   `json:"node_id,omitempty"`
 }
 type DispatchPreviewResult struct {
-	ProjectID string                `json:"project_id"`
-	TaskID    string                `json:"task_id"`
-	Items     []DispatchPreviewItem `json:"items"`
+	ProjectID      string                `json:"project_id"`
+	TaskID         string                `json:"task_id"`
+	Items          []DispatchPreviewItem `json:"items"`
+	AlreadyPresent bool                  `json:"already_present"`
 }
 
 type SchedulerControlInput struct {
@@ -211,16 +212,29 @@ type AssignmentPage struct {
 }
 type AssignmentDetail struct {
 	AssignmentItem
-	Attempts       []AttemptItem     `json:"attempts"`
-	Gates          []GateItem        `json:"gates"`
-	ObservedBudget BudgetObservation `json:"observed_budget"`
-	Result         *ResultSummary    `json:"result,omitempty"`
+	Attempts       []AttemptItem       `json:"attempts"`
+	Gates          []GateItem          `json:"gates"`
+	Audit          []AuditTimelineItem `json:"audit"`
+	ObservedBudget BudgetObservation   `json:"observed_budget"`
+	Result         *ResultSummary      `json:"result,omitempty"`
+	AlreadyPresent bool                `json:"already_present"`
+}
+
+type AuditTimelineItem struct {
+	AuditID    string `json:"audit_id"`
+	AttemptID  string `json:"attempt_id"`
+	Action     string `json:"action"`
+	FromState  string `json:"from_state,omitempty"`
+	ToState    string `json:"to_state"`
+	ReasonCode string `json:"reason_code"`
+	OccurredAt string `json:"occurred_at"`
 }
 
 type AssignmentControlInput struct {
 	ProjectID      string `json:"project_id"`
 	AssignmentID   string `json:"assignment_id"`
 	Action         string `json:"action"`
+	WorkerID       string `json:"worker_id,omitempty"`
 	IdempotencyKey string `json:"idempotency_key"`
 }
 
@@ -229,7 +243,15 @@ func (v AssignmentControlInput) Validate() error {
 		return errBadRequest
 	}
 	switch v.Action {
-	case "pause", "resume", "cancel", "retry", "reassign", "fail", "evaluate":
+	case "reassign":
+		if !namespacedSetup(v.WorkerID, "worker:") {
+			return errBadRequest
+		}
+		return nil
+	case "pause", "resume", "cancel", "retry", "fail", "evaluate":
+		if v.WorkerID != "" {
+			return errBadRequest
+		}
 		return nil
 	default:
 		return errBadRequest

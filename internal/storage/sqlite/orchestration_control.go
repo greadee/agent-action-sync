@@ -264,14 +264,14 @@ func (store orchestrationControlStore) RetryAssignment(ctx context.Context, requ
 	if err != nil {
 		return result, err
 	}
-	if snapshot.Attempt.AttemptID != request.PreviousAttemptID || !retryableTerminalState(snapshot.Attempt.State) || request.Attempt.AttemptNumber != snapshot.Attempt.AttemptNumber+1 || request.Attempt.SupersedesAttemptID != snapshot.Attempt.AttemptID {
+	if snapshot.Attempt.AttemptID != request.PreviousAttemptID || !retryableTerminalState(snapshot.Attempt.State) || request.Attempt.AttemptNumber != snapshot.Attempt.AttemptNumber+1 || request.Attempt.SupersedesAttemptID != snapshot.Attempt.AttemptID || request.WorkerID == "" {
 		return result, fmt.Errorf("%w: orchestration attempt cannot be retried", storage.ErrConflict)
 	}
 	if err := insertOrchestrationAttempt(ctx, tx, request.Attempt); err != nil {
 		return result, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE orchestration_assignments SET state = ?, current_attempt_id = ?, current_attempt_number = ?, idempotency_digest = ?, recovery_disposition = ?, failure_code = NULL, updated_at = ? WHERE assignment_id = ? AND current_attempt_id = ?`,
-		storage.AssignmentPlanned, request.Attempt.AttemptID, request.Attempt.AttemptNumber, request.Attempt.IdempotencyDigest, storage.RecoveryNone, formatTime(request.Attempt.UpdatedAt), request.AssignmentID, request.PreviousAttemptID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE orchestration_assignments SET state = ?, current_attempt_id = ?, current_attempt_number = ?, worker_id = ?, idempotency_digest = ?, recovery_disposition = ?, failure_code = NULL, updated_at = ? WHERE assignment_id = ? AND current_attempt_id = ?`,
+		storage.AssignmentPlanned, request.Attempt.AttemptID, request.Attempt.AttemptNumber, request.WorkerID, request.Attempt.IdempotencyDigest, storage.RecoveryNone, formatTime(request.Attempt.UpdatedAt), request.AssignmentID, request.PreviousAttemptID); err != nil {
 		return result, err
 	}
 	if err := recordOrchestrationOperation(ctx, tx, request.OperationID, request.OperationDigest, request.AssignmentID, request.Attempt.AttemptID, storage.AssignmentPlanned, request.Attempt.CreatedAt); err != nil {

@@ -28,6 +28,9 @@ type LocalAdministrationOptions struct {
 	Inventory           storage.OrchestrationControlStore
 	Projects            storage.ProjectRegistrationStore
 	Operations          storage.LocalProjectOperationsStore
+	Tasks               storage.ProjectTaskStore
+	TaskNodes           storage.ProjectTaskNodeStore
+	Registry            storage.RegistryStore
 	AuthorizedProjectID string
 	MaxConcurrent       int
 	Node                computenode.Provider
@@ -41,16 +44,18 @@ type LocalOrchestrationAdministration struct {
 	inventory           storage.OrchestrationInventoryStore
 	projects            storage.ProjectRegistrationStore
 	operations          storage.LocalProjectOperationsStore
+	tasks               storage.ProjectTaskStore
+	taskNodes           storage.ProjectTaskNodeStore
+	registry            storage.RegistryStore
 	authorizedProjectID string
 	maxConcurrent       int
 	node                computenode.Provider
 	gate                *integrationgate.Service
 	now                 func() time.Time
 
-	mu            sync.Mutex
-	schedulerKeys map[string]string
-	projectKeys   map[string]string
-	summaries     map[string]integrationgate.IntegrationSummary
+	mu          sync.Mutex
+	projectKeys map[string]string
+	summaries   map[string]integrationgate.IntegrationSummary
 }
 
 func NewLocalOrchestrationAdministration(options LocalAdministrationOptions) *LocalOrchestrationAdministration {
@@ -58,8 +63,9 @@ func NewLocalOrchestrationAdministration(options LocalAdministrationOptions) *Lo
 	return &LocalOrchestrationAdministration{
 		scheduler: options.Scheduler, control: options.Control, inventory: inventory,
 		projects: options.Projects, operations: options.Operations, authorizedProjectID: options.AuthorizedProjectID,
+		tasks: options.Tasks, taskNodes: options.TaskNodes, registry: options.Registry,
 		maxConcurrent: options.MaxConcurrent, node: options.Node, gate: options.Gate, now: options.Now,
-		schedulerKeys: map[string]string{}, projectKeys: map[string]string{}, summaries: map[string]integrationgate.IntegrationSummary{},
+		projectKeys: map[string]string{}, summaries: map[string]integrationgate.IntegrationSummary{},
 	}
 }
 
@@ -153,12 +159,94 @@ func (admin *LocalOrchestrationAdministration) SetLocalProjectPolicy(ctx context
 	return admin.localProjectItem(ctx, registration, selected.ProjectID)
 }
 
-func (admin *LocalOrchestrationAdministration) ApproveTaskGraph(context.Context, api.TaskGraphApprovalInput) (api.TaskGraphApprovalResult, error) {
-	return api.TaskGraphApprovalResult{}, localUnavailable("task graph approval is not composed in Slice 3")
+func (admin *LocalOrchestrationAdministration) ApproveTaskGraph(ctx context.Context, input api.TaskGraphApprovalInput) (api.TaskGraphApprovalResult, error) {
+	if err := input.Validate(); err != nil {
+		return api.TaskGraphApprovalResult{}, localBadRequest("task graph approval is invalid")
+	}
+	if err := admin.requireExecutionAuthority(ctx, input.ProjectID); err != nil {
+		return api.TaskGraphApprovalResult{}, err
+	}
+	if admin.tasks == nil {
+		return api.TaskGraphApprovalResult{}, localUnavailable("task graph approval is unavailable")
+	}
+	task, err := admin.tasks.GetProjectTask(ctx, input.ProjectID, input.TaskID, input.TaskRevision)
+	if err != nil {
+		return api.TaskGraphApprovalResult{}, localNotFound("task graph was not found")
+	}
+	if task.GraphRevision != input.GraphRevision || task.GraphRecordHash != input.ApprovalDigest {
+		return api.TaskGraphApprovalResult{}, localConflict("task graph approval targets a stale revision")
+	}
+	fingerprint := localHash("approve-task", input.ProjectID, input.TaskID, fmt.Sprint(input.TaskRevision), fmt.Sprint(input.GraphRevision), input.ApprovalDigest)
+	var result api.TaskGraphApprovalResult
+	if replay, err := admin.replayOperatorResult(ctx, input.IdempotencyKey, fingerprint, &result); err != nil {
+		return api.TaskGraphApprovalResult{}, err
+	} else if replay {
+		result.AlreadyPresent = true
+		return result, nil
+	}
+	result = api.TaskGraphApprovalResult{ProjectID: input.ProjectID, TaskID: input.TaskID, TaskRevision: input.TaskRevision, GraphRevision: input.GraphRevision, ApprovalDigest: input.ApprovalDigest}
+	stored, err := admin.rememberOperatorResult(ctx, input.IdempotencyKey, fingerprint, "approve_task_graph", input.ProjectID, input.TaskID, result)
+	if err != nil {
+		return api.TaskGraphApprovalResult{}, err
+	}
+	if stored.AlreadyPresent {
+		if err := json.Unmarshal(stored.Operation.ResultJSON, &result); err != nil {
+			return api.TaskGraphApprovalResult{}, localUnavailable("task graph approval replay is unreadable")
+		}
+		result.AlreadyPresent = true
+	}
+	return result, nil
 }
 
-func (admin *LocalOrchestrationAdministration) PreviewDispatch(context.Context, api.DispatchPreviewInput) (api.DispatchPreviewResult, error) {
-	return api.DispatchPreviewResult{}, localUnavailable("dispatch preview is not composed in Slice 3")
+func (admin *LocalOrchestrationAdministration) PreviewDispatch(ctx context.Context, input api.DispatchPreviewInput) (api.DispatchPreviewResult, error) {
+	if err := input.Validate(); err != nil {
+		return api.DispatchPreviewResult{}, localBadRequest("dispatch preview is invalid")
+	}
+	if err := admin.requireExecutionAuthority(ctx, input.ProjectID); err != nil {
+		return api.DispatchPreviewResult{}, err
+	}
+	if admin.tasks == nil || admin.taskNodes == nil {
+		return api.DispatchPreviewResult{}, localUnavailable("dispatch preview is unavailable")
+	}
+	task, err := admin.tasks.GetProjectTask(ctx, input.ProjectID, input.TaskID, input.TaskRevision)
+	if err != nil || task.GraphRevision != input.GraphRevision {
+		return api.DispatchPreviewResult{}, localConflict("dispatch preview targets a stale task graph")
+	}
+	fingerprint := localHash("preview-dispatch", input.ProjectID, input.TaskID, fmt.Sprint(input.TaskRevision), fmt.Sprint(input.GraphRevision))
+	var result api.DispatchPreviewResult
+	if replay, err := admin.replayOperatorResult(ctx, input.IdempotencyKey, fingerprint, &result); err != nil {
+		return api.DispatchPreviewResult{}, err
+	} else if replay {
+		result.AlreadyPresent = true
+		return result, nil
+	}
+	page, err := admin.taskNodes.ListProjectTaskNodes(ctx, storage.ProjectTaskNodeQuery{
+		ProjectID: input.ProjectID, TaskID: input.TaskID, TaskRevision: input.TaskRevision, GraphRevision: input.GraphRevision,
+		Page: storage.PageRequest{Limit: storage.MaxAdminPageLimit},
+	})
+	if err != nil {
+		return api.DispatchPreviewResult{}, localUnavailable("dispatch readiness is unavailable")
+	}
+	items := make([]api.DispatchPreviewItem, 0, len(page.Items))
+	for _, item := range page.Items {
+		state := "blocked"
+		if item.Readiness == "ready" {
+			state = "eligible"
+		}
+		items = append(items, api.DispatchPreviewItem{WorkPackageID: item.WorkPackageID, State: state, ReasonCodes: []string{item.ExplanationCode}})
+	}
+	result = api.DispatchPreviewResult{ProjectID: input.ProjectID, TaskID: input.TaskID, Items: items}
+	stored, err := admin.rememberOperatorResult(ctx, input.IdempotencyKey, fingerprint, "preview_dispatch", input.ProjectID, input.TaskID, result)
+	if err != nil {
+		return api.DispatchPreviewResult{}, err
+	}
+	if stored.AlreadyPresent {
+		if err := json.Unmarshal(stored.Operation.ResultJSON, &result); err != nil {
+			return api.DispatchPreviewResult{}, localUnavailable("dispatch preview replay is unreadable")
+		}
+		result.AlreadyPresent = true
+	}
+	return result, nil
 }
 
 func (admin *LocalOrchestrationAdministration) StartScheduler(ctx context.Context, input api.SchedulerControlInput) (api.SchedulerStatus, error) {
@@ -170,11 +258,22 @@ func (admin *LocalOrchestrationAdministration) DisableScheduler(ctx context.Cont
 }
 
 func (admin *LocalOrchestrationAdministration) setScheduler(ctx context.Context, input api.SchedulerControlInput, enabled bool) (api.SchedulerStatus, error) {
+	if err := input.Validate(); err != nil {
+		return api.SchedulerStatus{}, localBadRequest("scheduler control is invalid")
+	}
 	if admin.scheduler == nil {
 		return api.SchedulerStatus{}, localUnavailable("scheduler control is unavailable")
 	}
 	if err := admin.requireExecutionAuthority(ctx, input.ProjectID); err != nil {
 		return api.SchedulerStatus{}, err
+	}
+	fingerprint := localHash("scheduler", input.ProjectID, boolText(enabled))
+	var replay api.SchedulerStatus
+	if present, err := admin.replayOperatorResult(ctx, input.IdempotencyKey, fingerprint, &replay); err != nil {
+		return api.SchedulerStatus{}, err
+	} else if present {
+		replay.AlreadyPresent = true
+		return replay, nil
 	}
 	if enabled {
 		policy, err := admin.operations.GetLocalProjectPolicy(ctx, input.ProjectID)
@@ -188,17 +287,6 @@ func (admin *LocalOrchestrationAdministration) setScheduler(ctx context.Context,
 			return api.SchedulerStatus{}, localConflict("project concurrency policy could not be applied")
 		}
 	}
-	fingerprint := localHash(input.ProjectID, input.IdempotencyKey, boolText(enabled))
-	admin.mu.Lock()
-	if prior, ok := admin.schedulerKeys[input.IdempotencyKey]; ok {
-		admin.mu.Unlock()
-		if prior != fingerprint {
-			return api.SchedulerStatus{}, localConflict("scheduler idempotency key was reused")
-		}
-		status := admin.scheduler.Status()
-		return schedulerStatus(input.ProjectID, status, true), nil
-	}
-	admin.mu.Unlock()
 	var err error
 	if enabled {
 		err = admin.scheduler.Resume(ctx)
@@ -208,10 +296,22 @@ func (admin *LocalOrchestrationAdministration) setScheduler(ctx context.Context,
 	if err != nil {
 		return api.SchedulerStatus{}, localConflict("scheduler control failed")
 	}
-	admin.mu.Lock()
-	admin.schedulerKeys[input.IdempotencyKey] = fingerprint
-	admin.mu.Unlock()
-	return schedulerStatus(input.ProjectID, admin.scheduler.Status(), false), nil
+	result := schedulerStatus(input.ProjectID, admin.scheduler.Status(), false)
+	action := "disable_scheduler"
+	if enabled {
+		action = "start_scheduler"
+	}
+	stored, err := admin.rememberOperatorResult(ctx, input.IdempotencyKey, fingerprint, action, input.ProjectID, input.ProjectID, result)
+	if err != nil {
+		return api.SchedulerStatus{}, err
+	}
+	if stored.AlreadyPresent {
+		if err := json.Unmarshal(stored.Operation.ResultJSON, &result); err != nil {
+			return api.SchedulerStatus{}, localUnavailable("scheduler control replay is unreadable")
+		}
+		result.AlreadyPresent = true
+	}
+	return result, nil
 }
 
 func (admin *LocalOrchestrationAdministration) ListNodes(ctx context.Context, page storage.PageRequest) (api.NodePage, error) {
@@ -264,12 +364,27 @@ func (admin *LocalOrchestrationAdministration) GetAssignment(ctx context.Context
 	if snapshot.Assignment.ProjectID != projectID {
 		return api.AssignmentDetail{}, localNotFound("assignment was not found")
 	}
-	return admin.detail(snapshot), nil
+	audit, err := admin.control.ListAudit(ctx, assignmentID)
+	if err != nil {
+		return api.AssignmentDetail{}, localUnavailable("assignment audit timeline is unavailable")
+	}
+	return admin.detail(snapshot, audit), nil
 }
 
 func (admin *LocalOrchestrationAdministration) ControlAssignment(ctx context.Context, input api.AssignmentControlInput) (api.AssignmentDetail, error) {
+	if err := input.Validate(); err != nil {
+		return api.AssignmentDetail{}, localBadRequest("assignment control is invalid")
+	}
 	if err := admin.requireExecutionAuthority(ctx, input.ProjectID); err != nil {
 		return api.AssignmentDetail{}, err
+	}
+	fingerprint := localHash("assignment-control", input.ProjectID, input.AssignmentID, input.Action, input.WorkerID)
+	var replay api.AssignmentDetail
+	if present, err := admin.replayOperatorResult(ctx, input.IdempotencyKey, fingerprint, &replay); err != nil {
+		return api.AssignmentDetail{}, err
+	} else if present {
+		replay.AlreadyPresent = true
+		return replay, nil
 	}
 	snapshot, err := admin.control.GetAssignment(ctx, input.AssignmentID)
 	if err != nil {
@@ -296,28 +411,63 @@ func (admin *LocalOrchestrationAdministration) ControlAssignment(ctx context.Con
 		}
 	case "fail":
 		_, err = admin.recoveryTransition(ctx, snapshot, storage.AssignmentFailed, "operator_failed_recovery", input.IdempotencyKey)
-	case "retry":
+	case "retry", "reassign":
 		if snapshot.Attempt.State != storage.AssignmentFailed && snapshot.Attempt.State != storage.AssignmentCanceled && snapshot.Attempt.State != storage.AssignmentExpired {
-			return api.AssignmentDetail{}, localConflict("only failed, canceled, or expired attempts can be retried")
+			return api.AssignmentDetail{}, localConflict("only failed, canceled, or expired attempts can be retried or reassigned")
 		}
-		keyDigest := localHash("retry", input.ProjectID, input.AssignmentID, input.IdempotencyKey)
-		attemptID := "attempt:retry-" + keyDigest[:24]
+		workerID := snapshot.Assignment.WorkerID
+		reasonCode := "operator_retry"
+		if input.Action == "reassign" {
+			if input.WorkerID == workerID || !admin.activeWorker(ctx, input.WorkerID) {
+				return api.AssignmentDetail{}, localConflict("reassignment requires a different active worker")
+			}
+			workerID, reasonCode = input.WorkerID, "operator_reassign"
+		}
+		keyDigest := localHash(input.Action, input.ProjectID, input.AssignmentID, input.WorkerID, input.IdempotencyKey)
+		attemptID := "attempt:" + input.Action + "-" + keyDigest[:24]
 		_, err = admin.control.Retry(ctx, orchestration.RetryRequest{
 			AssignmentID: input.AssignmentID, PreviousAttemptID: snapshot.Attempt.AttemptID, AttemptID: attemptID,
+			WorkerID: workerID, Action: input.Action, ReasonCode: reasonCode,
 			IdempotencyDigest: keyDigest, OperationID: "operation:retry:" + keyDigest[:24],
 			OperationDigest: localHash("retry-operation", keyDigest), AuditID: "audit:retry:" + keyDigest[:24], ActorID: "actor:desktop-operator",
 		})
 	case "evaluate":
-		return admin.evaluate(ctx, snapshot, input.IdempotencyKey)
-	case "reassign":
-		return api.AssignmentDetail{}, localUnavailable("reassignment is not composed in Slice 3")
+		result, evaluateErr := admin.evaluate(ctx, snapshot, input.IdempotencyKey)
+		if evaluateErr != nil {
+			return api.AssignmentDetail{}, evaluateErr
+		}
+		stored, storeErr := admin.rememberOperatorResult(ctx, input.IdempotencyKey, fingerprint, "assignment_evaluate", input.ProjectID, input.AssignmentID, result)
+		if storeErr != nil {
+			return api.AssignmentDetail{}, storeErr
+		}
+		if stored.AlreadyPresent {
+			if err := json.Unmarshal(stored.Operation.ResultJSON, &result); err != nil {
+				return api.AssignmentDetail{}, localUnavailable("assignment control replay is unreadable")
+			}
+			result.AlreadyPresent = true
+		}
+		return result, nil
 	default:
 		return api.AssignmentDetail{}, localBadRequest("assignment action is invalid")
 	}
 	if err != nil {
 		return api.AssignmentDetail{}, localConflict("assignment recovery action failed")
 	}
-	return admin.GetAssignment(ctx, input.ProjectID, input.AssignmentID)
+	result, err := admin.GetAssignment(ctx, input.ProjectID, input.AssignmentID)
+	if err != nil {
+		return api.AssignmentDetail{}, err
+	}
+	stored, err := admin.rememberOperatorResult(ctx, input.IdempotencyKey, fingerprint, "assignment_"+input.Action, input.ProjectID, input.AssignmentID, result)
+	if err != nil {
+		return api.AssignmentDetail{}, err
+	}
+	if stored.AlreadyPresent {
+		if err := json.Unmarshal(stored.Operation.ResultJSON, &result); err != nil {
+			return api.AssignmentDetail{}, localUnavailable("assignment control replay is unreadable")
+		}
+		result.AlreadyPresent = true
+	}
+	return result, nil
 }
 
 func (admin *LocalOrchestrationAdministration) evaluate(ctx context.Context, snapshot storage.OrchestrationSnapshot, key string) (api.AssignmentDetail, error) {
@@ -340,12 +490,27 @@ func (admin *LocalOrchestrationAdministration) evaluate(ctx context.Context, sna
 	if loadErr != nil {
 		return api.AssignmentDetail{}, loadErr
 	}
-	return admin.detail(updated), nil
+	audit, auditErr := admin.control.ListAudit(ctx, snapshot.Assignment.AssignmentID)
+	if auditErr != nil {
+		return api.AssignmentDetail{}, localUnavailable("assignment audit timeline is unavailable")
+	}
+	return admin.detail(updated, audit), nil
 }
 
 func (admin *LocalOrchestrationAdministration) DecideIntegration(ctx context.Context, input api.IntegrationDecisionInput) (api.AssignmentDetail, error) {
+	if err := input.Validate(); err != nil {
+		return api.AssignmentDetail{}, localBadRequest("integration decision is invalid")
+	}
 	if err := admin.requireExecutionAuthority(ctx, input.ProjectID); err != nil {
 		return api.AssignmentDetail{}, err
+	}
+	fingerprint := localHash("integration-decision", input.ProjectID, input.AssignmentID, input.AttemptID, input.Decision, input.SummaryDigest, input.ReasonCode)
+	var replay api.AssignmentDetail
+	if present, err := admin.replayOperatorResult(ctx, input.IdempotencyKey, fingerprint, &replay); err != nil {
+		return api.AssignmentDetail{}, err
+	} else if present {
+		replay.AlreadyPresent = true
+		return replay, nil
 	}
 	snapshot, err := admin.control.GetAssignment(ctx, input.AssignmentID)
 	if err != nil || snapshot.Assignment.ProjectID != input.ProjectID || snapshot.Lease == nil || admin.gate == nil {
@@ -368,7 +533,21 @@ func (admin *LocalOrchestrationAdministration) DecideIntegration(ctx context.Con
 	if err != nil {
 		return api.AssignmentDetail{}, localConflict("integration decision failed")
 	}
-	return admin.GetAssignment(ctx, input.ProjectID, input.AssignmentID)
+	result, err := admin.GetAssignment(ctx, input.ProjectID, input.AssignmentID)
+	if err != nil {
+		return api.AssignmentDetail{}, err
+	}
+	stored, err := admin.rememberOperatorResult(ctx, input.IdempotencyKey, fingerprint, "integration_"+input.Decision, input.ProjectID, input.AssignmentID, result)
+	if err != nil {
+		return api.AssignmentDetail{}, err
+	}
+	if stored.AlreadyPresent {
+		if err := json.Unmarshal(stored.Operation.ResultJSON, &result); err != nil {
+			return api.AssignmentDetail{}, localUnavailable("integration decision replay is unreadable")
+		}
+		result.AlreadyPresent = true
+	}
+	return result, nil
 }
 
 func (admin *LocalOrchestrationAdministration) recoveryTransition(ctx context.Context, snapshot storage.OrchestrationSnapshot, target storage.AssignmentState, code, key string) (storage.OrchestrationWriteResult, error) {
@@ -384,7 +563,7 @@ func (admin *LocalOrchestrationAdministration) recoveryTransition(ctx context.Co
 	})
 }
 
-func (admin *LocalOrchestrationAdministration) detail(snapshot storage.OrchestrationSnapshot) api.AssignmentDetail {
+func (admin *LocalOrchestrationAdministration) detail(snapshot storage.OrchestrationSnapshot, auditEvents []storage.OrchestrationAuditEvent) api.AssignmentDetail {
 	attempt := api.AttemptItem{
 		AttemptID: snapshot.Attempt.AttemptID, AttemptNumber: snapshot.Attempt.AttemptNumber,
 		State: string(snapshot.Attempt.State), RecoveryDisposition: string(snapshot.Attempt.RecoveryDisposition),
@@ -395,13 +574,74 @@ func (admin *LocalOrchestrationAdministration) detail(snapshot storage.Orchestra
 		gates = append(gates, api.GateItem{GateID: gate.GateID, Version: gate.GateVersion, Digest: gate.GateDigest, Status: string(gate.Status), ReasonCode: gate.ReasonCode})
 	}
 	sort.Slice(gates, func(i, j int) bool { return gates[i].GateID < gates[j].GateID })
-	detail := api.AssignmentDetail{AssignmentItem: assignmentItem(snapshot.Assignment), Attempts: []api.AttemptItem{attempt}, Gates: gates, ObservedBudget: api.BudgetObservation{Completeness: "unknown"}}
+	audit := make([]api.AuditTimelineItem, 0, len(auditEvents))
+	for _, event := range auditEvents {
+		audit = append(audit, api.AuditTimelineItem{AuditID: event.AuditID, AttemptID: event.AttemptID, Action: event.Action, FromState: string(event.FromState), ToState: string(event.ToState), ReasonCode: event.ReasonCode, OccurredAt: event.OccurredAt.UTC().Format(time.RFC3339Nano)})
+	}
+	detail := api.AssignmentDetail{AssignmentItem: assignmentItem(snapshot.Assignment), Attempts: []api.AttemptItem{attempt}, Gates: gates, Audit: audit, ObservedBudget: api.BudgetObservation{Completeness: "unknown"}}
 	admin.mu.Lock()
 	if summary, ok := admin.summaries[snapshot.Assignment.AssignmentID]; ok {
 		detail.Result = resultSummary(summary)
 	}
 	admin.mu.Unlock()
 	return detail
+}
+
+func (admin *LocalOrchestrationAdministration) activeWorker(ctx context.Context, workerID string) bool {
+	if admin.registry == nil || !strings.HasPrefix(workerID, "worker:") {
+		return false
+	}
+	page, err := admin.registry.ListWorkerProfiles(ctx, storage.WorkerQuery{Page: storage.PageRequest{Limit: storage.MaxAdminPageLimit}, WorkerID: workerID, Lifecycle: storage.RegistryActive})
+	if err != nil {
+		return false
+	}
+	for _, worker := range page.Items {
+		if worker.WorkerID == workerID && worker.Lifecycle == storage.RegistryActive {
+			return true
+		}
+	}
+	return false
+}
+
+func (admin *LocalOrchestrationAdministration) replayOperatorResult(ctx context.Context, key, fingerprint string, destination any) (bool, error) {
+	if admin.operations == nil {
+		return false, localUnavailable("operator replay ledger is unavailable")
+	}
+	operation, err := admin.operations.GetLocalOperatorOperation(ctx, key)
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, localUnavailable("operator replay ledger is unavailable")
+	}
+	if operation.Fingerprint != fingerprint {
+		return false, localConflict("operator idempotency key was reused for a different command")
+	}
+	if err := json.Unmarshal(operation.ResultJSON, destination); err != nil {
+		return false, localUnavailable("operator replay result is unreadable")
+	}
+	return true, nil
+}
+
+func (admin *LocalOrchestrationAdministration) rememberOperatorResult(ctx context.Context, key, fingerprint, action, projectID, subjectID string, value any) (storage.LocalOperatorOperationResult, error) {
+	if admin.operations == nil || admin.now == nil {
+		return storage.LocalOperatorOperationResult{}, localUnavailable("operator replay ledger is unavailable")
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil || len(encoded) > storage.MaxLocalOperatorResultBytes {
+		return storage.LocalOperatorOperationResult{}, localUnavailable("operator replay result is unavailable")
+	}
+	result, err := admin.operations.SaveLocalOperatorOperation(ctx, storage.LocalOperatorOperation{
+		IdempotencyKey: key, Fingerprint: fingerprint, Action: action, ProjectID: projectID, SubjectID: subjectID,
+		ResultJSON: encoded, OccurredAt: admin.now().UTC(),
+	})
+	if errors.Is(err, storage.ErrConflict) {
+		return storage.LocalOperatorOperationResult{}, localConflict("operator idempotency key was reused for a different command")
+	}
+	if err != nil {
+		return storage.LocalOperatorOperationResult{}, localUnavailable("operator replay result could not be recorded")
+	}
+	return result, nil
 }
 
 func (admin *LocalOrchestrationAdministration) requireProject(ctx context.Context, projectID string) error {

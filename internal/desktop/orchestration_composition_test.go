@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,8 +101,47 @@ func TestBuildLocalOrchestrationStartsPausedWithRealNodeOwnedComponents(t *testi
 	if _, err := composition.Administration.SelectLocalProject(ctx, api.LocalProjectSelectionInput{ProjectID: "project:local-composition", IdempotencyKey: "select-composition"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := composition.Administration.StartScheduler(ctx, api.SchedulerControlInput{ProjectID: "project:local-composition", IdempotencyKey: "start-composition"}); err != nil {
+	taskDigest, graphDigest := strings.Repeat("7", 64), strings.Repeat("8", 64)
+	if _, err := store.ProjectTasks().SaveProjectTask(ctx, storage.ProjectTaskProjection{
+		ProjectID: "project:local-composition", TaskID: "task:browser-control", TaskRevision: 1, GraphRevision: 1,
+		TaskRecordID: "record:task-browser-control", TaskRecordHash: taskDigest, TaskRecordPath: ".agent-project/tasks/task-browser-control.json",
+		GraphRecordID: "record:graph-browser-control", GraphRecordHash: graphDigest, GraphRecordPath: ".agent-project/tasks/graph-browser-control.json",
+		Objective: "exercise explicit controls", Priority: "normal", State: "ready", ExplanationCode: "task_has_ready_work", EventWatermark: strings.Repeat("9", 64), ParallelReady: []string{"work:browser-control"}, CreatedAt: *now,
+	}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := store.ProjectTaskNodes().SaveProjectTaskNode(ctx, storage.ProjectTaskNodeProjection{
+		ProjectID: "project:local-composition", TaskID: "task:browser-control", TaskRevision: 1, GraphRevision: 1,
+		WorkPackageID: "work:browser-control", DefinitionRecordID: "record:work-browser-control", DefinitionHash: strings.Repeat("a", 64), DefinitionPath: ".agent-project/work/browser-control.json",
+		CanonicalState: "planned", Readiness: "ready", ExplanationCode: "dependencies_satisfied", Dependencies: []string{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	approvalInput := api.TaskGraphApprovalInput{ProjectID: "project:local-composition", TaskID: "task:browser-control", TaskRevision: 1, GraphRevision: 1, ApprovalDigest: graphDigest, IdempotencyKey: "approve-browser-control"}
+	if approval, err := composition.Administration.ApproveTaskGraph(ctx, approvalInput); err != nil || approval.AlreadyPresent {
+		t.Fatalf("first approval = %+v, err=%v", approval, err)
+	}
+	if approval, err := composition.Administration.ApproveTaskGraph(ctx, approvalInput); err != nil || !approval.AlreadyPresent {
+		t.Fatalf("approval replay = %+v, err=%v", approval, err)
+	}
+	previewInput := api.DispatchPreviewInput{ProjectID: "project:local-composition", TaskID: "task:browser-control", TaskRevision: 1, GraphRevision: 1, IdempotencyKey: "preview-browser-control"}
+	if preview, err := composition.Administration.PreviewDispatch(ctx, previewInput); err != nil || len(preview.Items) != 1 || preview.Items[0].State != "eligible" {
+		t.Fatalf("dispatch preview = %+v, err=%v", preview, err)
+	}
+	startInput := api.SchedulerControlInput{ProjectID: "project:local-composition", IdempotencyKey: "start-composition"}
+	if _, err := composition.Administration.StartScheduler(ctx, startInput); err != nil {
+		t.Fatal(err)
+	}
+	if replay, err := composition.Administration.StartScheduler(ctx, startInput); err != nil || !replay.AlreadyPresent {
+		t.Fatalf("scheduler replay = %+v, err=%v", replay, err)
+	}
+	if _, err := composition.Administration.DisableScheduler(ctx, startInput); err == nil {
+		t.Fatal("scheduler idempotency key was reused for a different command")
+	} else {
+		var apiErr *api.APIError
+		if !errors.As(err, &apiErr) || apiErr.Status != 409 {
+			t.Fatalf("scheduler key-reuse error = %v", err)
+		}
 	}
 	if _, err := composition.Administration.SelectLocalProject(ctx, api.LocalProjectSelectionInput{ProjectID: "project:local-other", IdempotencyKey: "select-other-running"}); err == nil {
 		t.Fatal("changed project selection while scheduler was running")

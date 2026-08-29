@@ -108,6 +108,9 @@ type RetryRequest struct {
 	AssignmentID      string
 	PreviousAttemptID string
 	AttemptID         string
+	WorkerID          string
+	Action            string
+	ReasonCode        string
 	IdempotencyDigest string
 	OperationID       string
 	OperationDigest   string
@@ -315,23 +318,55 @@ func (service ControlService) Retry(ctx context.Context, request RetryRequest) (
 	if err != nil {
 		return storage.OrchestrationWriteResult{}, err
 	}
-	if current.Attempt.AttemptID != request.PreviousAttemptID || (current.Attempt.State != storage.AssignmentFailed && current.Attempt.State != storage.AssignmentCanceled && current.Attempt.State != storage.AssignmentExpired) {
+	replayCandidate := current.Attempt.AttemptID == request.AttemptID
+	if !replayCandidate && (current.Attempt.AttemptID != request.PreviousAttemptID || (current.Attempt.State != storage.AssignmentFailed && current.Attempt.State != storage.AssignmentCanceled && current.Attempt.State != storage.AssignmentExpired)) {
 		return storage.OrchestrationWriteResult{}, ErrInvalidTransition
 	}
-	if current.Attempt.IdempotencyDigest == request.IdempotencyDigest {
+	if !replayCandidate && current.Attempt.IdempotencyDigest == request.IdempotencyDigest {
 		return storage.OrchestrationWriteResult{}, fmt.Errorf("%w: retry must use a new idempotency digest", storage.ErrConflict)
+	}
+	workerID := request.WorkerID
+	if workerID == "" {
+		workerID = current.Assignment.WorkerID
+	}
+	if !validID(workerID) {
+		return storage.OrchestrationWriteResult{}, ErrInvalidControl
+	}
+	action, reason := request.Action, request.ReasonCode
+	if action == "" {
+		action = "retry"
+	}
+	if reason == "" {
+		reason = "operator_retry"
+	}
+	if (action != "retry" && action != "reassign") || !validID(reason) {
+		return storage.OrchestrationWriteResult{}, ErrInvalidControl
+	}
+	attemptNumber := current.Attempt.AttemptNumber + 1
+	if replayCandidate {
+		attemptNumber = current.Attempt.AttemptNumber
 	}
 	attempt := storage.OrchestrationAttempt{
 		AttemptID: request.AttemptID, AssignmentID: request.AssignmentID, ProjectID: current.Assignment.ProjectID,
-		WorkPackageID: current.Assignment.WorkPackageID, ExecutionID: current.Assignment.ExecutionID, AttemptNumber: current.Attempt.AttemptNumber + 1,
-		SupersedesAttemptID: current.Attempt.AttemptID, State: storage.AssignmentPlanned, IdempotencyDigest: request.IdempotencyDigest,
+		WorkPackageID: current.Assignment.WorkPackageID, ExecutionID: current.Assignment.ExecutionID, AttemptNumber: attemptNumber,
+		SupersedesAttemptID: request.PreviousAttemptID, State: storage.AssignmentPlanned, IdempotencyDigest: request.IdempotencyDigest,
 		RecoveryDisposition: storage.RecoveryNone, CreatedAt: now, UpdatedAt: now,
 	}
 	return service.Store.RetryAssignment(ctx, storage.OrchestrationRetryRequest{
-		AssignmentID: request.AssignmentID, PreviousAttemptID: request.PreviousAttemptID, Attempt: attempt,
+		AssignmentID: request.AssignmentID, PreviousAttemptID: request.PreviousAttemptID, WorkerID: workerID, Attempt: attempt,
 		OperationID: request.OperationID, OperationDigest: request.OperationDigest,
-		Audit: audit(request.AuditID, request.AssignmentID, request.AttemptID, "retry", current.Attempt.State, storage.AssignmentPlanned, "operator_retry", request.ActorID, 0, now),
+		Audit: audit(request.AuditID, request.AssignmentID, request.AttemptID, action, current.Attempt.State, storage.AssignmentPlanned, reason, request.ActorID, 0, now),
 	})
+}
+
+func (service ControlService) ListAudit(ctx context.Context, assignmentID string) ([]storage.OrchestrationAuditEvent, error) {
+	if _, err := service.ready(ctx); err != nil || !validID(assignmentID) {
+		if err != nil {
+			return nil, err
+		}
+		return nil, ErrInvalidControl
+	}
+	return service.Store.ListOrchestrationAudit(ctx, assignmentID)
 }
 
 func (service ControlService) Reconcile(ctx context.Context, actorID string) ([]storage.OrchestrationSnapshot, error) {

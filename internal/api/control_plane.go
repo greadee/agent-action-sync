@@ -19,6 +19,7 @@ var browserCapabilities = []string{
 	"task.readiness.read",
 	"assignment.visibility.read",
 	"worker-node.inventory.read",
+	"operator.controls.write",
 }
 
 //go:embed controlplane/*
@@ -188,25 +189,35 @@ func (server *Server) authenticateBrowserRequest(writer http.ResponseWriter, req
 }
 
 func browserSessionAllows(request *http.Request) bool {
-	if request == nil || request.Method != http.MethodGet {
+	if request == nil {
 		return false
 	}
-	switch request.URL.Path {
-	case "/api/v1/status", "/api/v1/orchestration/projects", "/api/v1/orchestration/workers", "/api/v1/orchestration/nodes":
-		return true
+	if request.Method == http.MethodGet {
+		switch request.URL.Path {
+		case "/api/v1/status", "/api/v1/orchestration/projects", "/api/v1/orchestration/workers", "/api/v1/orchestration/nodes":
+			return true
+		}
 	}
 	parts := strings.Split(strings.TrimPrefix(request.URL.Path, "/api/v1/projects/"), "/")
 	if len(parts) < 2 || !validSetupID(parts[0]) {
 		return false
 	}
 	switch {
-	case len(parts) == 2 && parts[1] == "tasks":
+	case request.Method == http.MethodGet && len(parts) == 2 && parts[1] == "tasks":
 		return true
-	case len(parts) == 4 && parts[1] == "tasks" && namespacedSetup(parts[2], "task:") && parts[3] == "readiness":
+	case request.Method == http.MethodGet && len(parts) == 4 && parts[1] == "tasks" && namespacedSetup(parts[2], "task:") && parts[3] == "readiness":
 		return true
-	case len(parts) == 2 && parts[1] == "assignments":
+	case request.Method == http.MethodGet && len(parts) == 2 && parts[1] == "assignments":
 		return true
-	case len(parts) == 3 && parts[1] == "assignments" && namespacedSetup(parts[2], "assignment:"):
+	case request.Method == http.MethodGet && len(parts) == 3 && parts[1] == "assignments" && namespacedSetup(parts[2], "assignment:"):
+		return true
+	case request.Method == http.MethodPost && len(parts) == 4 && parts[1] == "tasks" && namespacedSetup(parts[2], "task:") && parts[3] == "approve":
+		return true
+	case request.Method == http.MethodPost && len(parts) == 3 && parts[1] == "dispatch" && parts[2] == "preview":
+		return true
+	case request.Method == http.MethodPost && len(parts) == 3 && parts[1] == "scheduler" && (parts[2] == "start" || parts[2] == "disable"):
+		return true
+	case request.Method == http.MethodPost && len(parts) == 4 && parts[1] == "assignments" && namespacedSetup(parts[2], "assignment:") && (parts[3] == "controls" || parts[3] == "integration"):
 		return true
 	default:
 		return false

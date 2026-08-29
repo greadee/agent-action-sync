@@ -751,6 +751,23 @@ CREATE TABLE IF NOT EXISTS local_project_selection (
 );
 `),
 	},
+	{
+		Version: 17,
+		Name:    "local operator control replay ledger",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS local_operator_operations (
+    idempotency_key TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    action TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    subject_id TEXT NOT NULL,
+    result_json BLOB NOT NULL CHECK (length(result_json) > 0 AND length(result_json) <= 65536),
+    occurred_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS local_operator_operations_project_idx
+    ON local_operator_operations(project_id, occurred_at, idempotency_key);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {
