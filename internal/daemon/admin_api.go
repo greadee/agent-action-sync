@@ -126,6 +126,8 @@ func (daemon *Daemon) ConfigureLocalAPI(options Options) error {
 		ProjectStore:  daemon.Store,
 		Setup:         disabledSetupFacade{},
 		Orchestration: orchestration,
+		NodeStatus:    daemon.Store.NodeStatus(),
+		Now:           daemon.currentTime,
 		ProjectMigrationPreflight: func(ctx context.Context, input api.ProjectMigrationInput) (api.ProjectMigrationPreflight, error) {
 			request, err := daemon.projectMigrationRequest(input)
 			if err != nil {

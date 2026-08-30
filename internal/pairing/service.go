@@ -40,12 +40,18 @@ type Grant struct {
 	LANOnly      bool
 }
 
+type ControlPlaneGrant struct {
+	ReadStatus bool
+	TTL        time.Duration
+}
+
 type AcceptRequest struct {
 	LocalDeviceID       core.DeviceID
 	EncodedInvite       string
 	ExpectedFingerprint string
 	OneTimeCode         string
 	Grants              []Grant
+	ControlPlaneGrant   *ControlPlaneGrant
 }
 
 type AcceptResult struct {
@@ -130,6 +136,10 @@ func (service Service) Accept(ctx context.Context, request AcceptRequest) (Accep
 	if err != nil {
 		return AcceptResult{}, err
 	}
+	controlPlaneGrant, err := controlPlaneGrantForPeer(peer.DeviceID, request.ControlPlaneGrant, now)
+	if err != nil {
+		return AcceptResult{}, err
+	}
 	auditID, err := service.newAuditID()
 	if err != nil {
 		return AcceptResult{}, err
@@ -140,13 +150,13 @@ func (service Service) Accept(ctx context.Context, request AcceptRequest) (Accep
 			ID: peer.DeviceID, DisplayName: peer.DisplayName, PublicKey: peer.PublicKey,
 			Fingerprint: peer.Fingerprint, TrustState: storage.TrustTrusted,
 		},
-		Permissions: permissions,
+		Permissions: permissions, ControlPlaneGrant: controlPlaneGrant,
 		AuditEvent: storage.AuditEvent{
 			ID: auditID, EventName: AuditPairingAccepted, DeviceID: request.LocalDeviceID,
 			PeerDeviceID: peer.DeviceID, Severity: "info",
 			Metadata: map[string]string{
 				"invite_id": invite.InviteID,
-				"grants":    grantSummary(request.Grants),
+				"grants":    grantSummary(request.Grants, request.ControlPlaneGrant),
 			},
 			OccurredAt: now,
 		},
@@ -156,6 +166,19 @@ func (service Service) Accept(ctx context.Context, request AcceptRequest) (Accep
 		return AcceptResult{}, fmt.Errorf("accept pairing invitation: %w", err)
 	}
 	return AcceptResult{Peer: peer, AlreadyAccepted: result.AlreadyAccepted}, nil
+}
+
+func controlPlaneGrantForPeer(deviceID core.DeviceID, requested *ControlPlaneGrant, now time.Time) (*storage.ControlPlaneGrant, error) {
+	if requested == nil {
+		return nil, nil
+	}
+	if !requested.ReadStatus {
+		return nil, errors.New("control-plane grant must explicitly allow read_status")
+	}
+	if requested.TTL < time.Minute || requested.TTL > 30*24*time.Hour {
+		return nil, errors.New("control-plane grant ttl must be between one minute and 30 days")
+	}
+	return &storage.ControlPlaneGrant{DeviceID: deviceID, ReadStatus: true, GrantedAt: now, ExpiresAt: now.Add(requested.TTL)}, nil
 }
 
 func (service Service) Revoke(ctx context.Context, localDeviceID, peerDeviceID core.DeviceID) (RevokeResult, error) {
@@ -255,7 +278,7 @@ func capabilityList(capabilities []core.Capability) string {
 	return strings.Join(values, ",")
 }
 
-func grantSummary(grants []Grant) string {
+func grantSummary(grants []Grant, controlPlane *ControlPlaneGrant) string {
 	values := make([]string, 0, len(grants))
 	for _, grant := range grants {
 		scope := "remote_allowed"
@@ -265,5 +288,8 @@ func grantSummary(grants []Grant) string {
 		values = append(values, string(grant.ShareID)+"="+capabilityList(grant.Capabilities)+"@"+scope)
 	}
 	sort.Strings(values)
+	if controlPlane != nil && controlPlane.ReadStatus {
+		values = append(values, "control_plane=read_status")
+	}
 	return strings.Join(values, ";")
 }

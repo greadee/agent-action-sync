@@ -23,6 +23,7 @@ type Store interface {
 	OneWayJobs() OneWayJobStore
 	OneWayWork() OneWayWorkStore
 	Pairings() PairingStore
+	NodeStatus() NodeStatusStore
 	Audit() AuditStore
 	ProjectRegistrations() ProjectRegistrationStore
 	ProjectEvents() ProjectEventStore

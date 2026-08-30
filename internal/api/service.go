@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"syncgate/internal/core"
 	"syncgate/internal/storage"
@@ -36,6 +37,8 @@ type AdministrationServiceOptions struct {
 	ProjectMigrationApply     ProjectMigrationApplyFunc
 	Setup                     SetupAdministration
 	Orchestration             OrchestrationAdministration
+	NodeStatus                storage.NodeStatusStore
+	Now                       func() time.Time
 }
 
 type LocalAdministrationService struct {
@@ -52,6 +55,8 @@ type LocalAdministrationService struct {
 	projectMigrationApply     ProjectMigrationApplyFunc
 	setup                     SetupAdministration
 	orchestration             OrchestrationAdministration
+	nodeStatus                storage.NodeStatusStore
+	now                       func() time.Time
 	projectMu                 sync.Mutex
 	rebuilding                map[string]bool
 	migrating                 map[string]bool
@@ -69,7 +74,7 @@ func NewAdministrationService(options AdministrationServiceOptions) (*LocalAdmin
 		scan: options.Scan, control: options.Control, pairing: options.Pairing, projectStore: options.ProjectStore,
 		projectRebuild: options.ProjectRebuild, projectMigrationPreflight: options.ProjectMigrationPreflight,
 		projectMigrationApply: options.ProjectMigrationApply, rebuilding: map[string]bool{}, migrating: map[string]bool{},
-		setup: options.Setup, orchestration: options.Orchestration,
+		setup: options.Setup, orchestration: options.Orchestration, nodeStatus: options.NodeStatus, now: options.Now,
 	}, nil
 }
 

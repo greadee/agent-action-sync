@@ -149,6 +149,15 @@ func NewAdminV1Handler(service AdministrationService) http.Handler {
 			handleInventoryAudit(writer, request, service)
 			return
 		}
+		if request.URL.Path == "/api/v1/federation/nodes" {
+			setup, ok := service.(*LocalAdministrationService)
+			if !ok {
+				writeError(writer, request, errUnavailable)
+			} else {
+				NewNodeFederationHandler(setup).ServeHTTP(writer, request)
+			}
+			return
+		}
 		if request.URL.Path == "/api/v1/orchestration/nodes" || strings.HasPrefix(request.URL.Path, "/api/v1/orchestration/projects") || strings.HasPrefix(request.URL.Path, "/api/v1/projects/") && (strings.Contains(request.URL.Path, "/assignments") || strings.Contains(request.URL.Path, "/dispatch/") || strings.Contains(request.URL.Path, "/scheduler/") || strings.HasSuffix(request.URL.Path, "/approve")) {
 			setup, ok := service.(*LocalAdministrationService)
 			if !ok {

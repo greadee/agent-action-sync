@@ -325,6 +325,7 @@ func runPairAccept(args []string) {
 	fingerprint := flags.String("fingerprint", "", "independently confirmed peer fingerprint")
 	code := flags.String("code", "", "independently confirmed one-time code")
 	lanOnly := flags.Bool("lan-only", true, "restrict all grants to LAN sessions")
+	controlPlaneReadTTL := flags.Duration("control-plane-read", 0, "explicit read-only paired node status grant TTL (for example 24h)")
 	var grantValues repeatedFlag
 	flags.Var(&grantValues, "grant", "explicit SHARE=capability,capability grant; repeat per share")
 	_ = flags.Parse(args)
@@ -349,10 +350,14 @@ func runPairAccept(args []string) {
 		lanOnlyValue := grant.LANOnly
 		requestedGrants[index] = api.PairingGrantRequest{ShareID: string(grant.ShareID), Capabilities: capabilities, LANOnly: &lanOnlyValue}
 	}
+	var controlPlaneGrant *api.ControlPlaneGrantRequest
+	if *controlPlaneReadTTL != 0 {
+		controlPlaneGrant = &api.ControlPlaneGrantRequest{ReadStatus: true, TTLSeconds: int(controlPlaneReadTTL.Seconds())}
+	}
 	client := openAdminClient(*configPath)
 	defer client.Close()
 	result, err := client.AcceptPairingInvitation(context.Background(), api.AcceptanceRequest{
-		Invitation: *encoded, ExpectedFingerprint: *fingerprint, OneTimeCode: *code, Grants: requestedGrants,
+		Invitation: *encoded, ExpectedFingerprint: *fingerprint, OneTimeCode: *code, Grants: requestedGrants, ControlPlaneGrant: controlPlaneGrant,
 	})
 	if err != nil {
 		exitf("accept pairing invitation: %v", err)

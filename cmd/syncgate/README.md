@@ -10,7 +10,7 @@ Current commands:
 - `identity-migrate --config config.example.json` explicitly verifies and moves a legacy plaintext development identity into Windows Credential Manager, then removes the plaintext file.
 - `pair-create --config config.example.json --ttl 10m --request read` creates a signed, short-lived invitation and prints its separate one-time code.
 - `pair-inspect --invite TOKEN` validates an invitation and shows the peer identity and advisory requested capabilities without changing local state.
-- `pair-accept --config config.example.json --invite TOKEN --fingerprint FINGERPRINT --code CODE --grant drop=upload,sync` confirms both out-of-band values and grants only the repeated, explicit share capabilities.
+- `pair-accept --config config.example.json --invite TOKEN --fingerprint FINGERPRINT --code CODE --grant drop=upload,sync --control-plane-read 24h` confirms both out-of-band values and grants only the repeated share capabilities plus an optional, expiring, read-only paired-node status grant.
 - `pair-revoke --config config.example.json --device DEVICE-ID` revokes a peer and removes all of its share permissions.
 - `daemon-status --config config.example.json` reads local SQLite job state and prints sanitized pending or blocked work without opening a listener.
 - `scan --config config.example.json --share share-id` runs one authoritative local scan for an eligible source share.

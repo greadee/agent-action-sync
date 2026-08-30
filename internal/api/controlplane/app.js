@@ -5,7 +5,7 @@ const byId = (id) => document.getElementById(id);
 const state = {
   selectedProjectID: "", selectedTaskID: "", selectedAssignmentID: "",
   projects: {items: [], page: {}}, tasks: {items: [], page: {}}, readiness: {items: [], page: {}},
-  assignments: {items: [], page: {}}, workers: {items: [], page: {}}, nodes: {items: [], page: {}},
+  assignments: {items: [], page: {}}, workers: {items: [], page: {}}, nodes: {items: [], page: {}}, federatedNodes: [],
   csrfToken: "", assignmentDetail: null, dispatchPreview: null, pendingControl: null
 };
 
@@ -278,6 +278,18 @@ async function loadNodes(append = false) { await loadCollection("nodes", "/api/v
 function renderWorkers() { const list = byId("worker-list"); clear(list); if (!state.workers.items.length) { empty(list, "No workers", "No sanitized worker definitions are registered."); return; } for (const worker of state.workers.items) { const item = node("article", "inventory-item"); item.append(node("strong", "", worker.worker_id), statusChip(worker.lifecycle), node("p", "", `${worker.provider || "provider unknown"} · ${worker.model || "model unknown"}`), explanation("Trade", worker.trade_id), explanation("Runtime", worker.runtime_id)); list.append(item); } }
 function renderNodes() { const list = byId("node-list"); clear(list); if (!state.nodes.items.length) { empty(list, "No nodes", "No sanitized node definitions are available."); return; } for (const itemValue of state.nodes.items) { const item = node("article", "inventory-item"); item.append(node("strong", "", itemValue.node_id), statusChip(itemValue.lifecycle), explanation("Version", itemValue.version), explanation("Definition", compact(itemValue.digest))); const capabilities = node("ul", "mini-tags"); for (const capability of itemValue.capability_ids || []) capabilities.append(node("li", "", capability)); item.append(capabilities); list.append(item); } }
 
+async function loadFederatedNodes() { const value = await getJSON("/api/v1/federation/nodes"); state.federatedNodes = value.items || []; renderFederatedNodes(); }
+function renderFederatedNodes() {
+  const list = byId("federated-node-list"); clear(list); text("federation-count", state.federatedNodes.length);
+  if (!state.federatedNodes.length) { empty(list, "No visible paired nodes", "A trusted peer needs an active read-only status grant and a verified status replica before it appears here."); return; }
+  for (const itemValue of state.federatedNodes) {
+    const item = node("article", "federated-node-item"); const heading = node("div", "detail-heading"); heading.append(node("h3", "", itemValue.display_name || itemValue.device_id), statusChip(itemValue.connectivity)); item.append(heading, explanation("Device", itemValue.device_id), explanation("Health", itemValue.health), explanation("Lifecycle", itemValue.lifecycle), explanation("Revision", itemValue.revision), explanation("Watermark", compact(itemValue.watermark)), explanation("Observed", itemValue.observed_at), explanation("Status expiry", itemValue.expires_at));
+    const projects = node("div", "federated-projects"); if (!(itemValue.projects || []).length) projects.append(node("p", "muted", "No sanitized project summaries were replicated."));
+    for (const project of itemValue.projects || []) { const projectItem = node("section", "federated-project"); projectItem.append(node("strong", "", project.display_name || project.project_id), statusChip(project.scheduler_state), explanation("Project", project.project_id), explanation("Accepted watermark", compact(project.accepted_history_watermark))); const counts = node("div", "status-counts"); for (const count of [...(project.assignment_counts || []), ...(project.gate_counts || [])]) counts.append(node("span", "", `${count.state}: ${count.count}`)); projectItem.append(counts); projects.append(projectItem); }
+    item.append(projects); list.append(item);
+  }
+}
+
 function renderVisibilityUnavailable(message) {
   for (const [pickerID, label] of [["project-picker", "Project inventory unavailable"], ["task-picker", "Task inventory unavailable"]]) { const picker = byId(pickerID); clear(picker); picker.append(node("option", "", label)); picker.disabled = true; }
   empty(byId("project-summary"), "Project visibility unavailable", message); empty(byId("task-summary"), "Task visibility unavailable", message);
@@ -300,9 +312,14 @@ async function loadVisibility() {
   catch (error) { const message = error instanceof Error ? error.message : "Could not load local project visibility."; renderInlineError(message); renderVisibilityUnavailable(message); setRefresh("Visibility data is unavailable."); }
 }
 
+async function loadFederationVisibility() {
+  try { await loadFederatedNodes(); }
+  catch (error) { state.federatedNodes = []; text("federation-count", 0); empty(byId("federated-node-list"), "Paired-node visibility unavailable", error instanceof Error ? error.message : "Could not load paired-node status."); }
+}
+
 async function connect() {
   show("loading");
-  try { renderSession(await establishSession()); show("dashboard"); await loadVisibility(); }
+  try { renderSession(await establishSession()); show("dashboard"); await Promise.all([loadVisibility(), loadFederationVisibility()]); }
   catch (error) { text("error-title", "Protected session required"); text("error-message", error instanceof Error ? error.message : "The local node could not establish a browser session."); show("error"); }
 }
 

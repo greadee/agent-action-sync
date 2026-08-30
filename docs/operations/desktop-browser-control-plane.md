@@ -16,6 +16,7 @@ The initial session document is deliberately narrow. It contains process health,
 - `task.readiness.read`
 - `assignment.visibility.read`
 - `result-budget-incident.read`
+- `paired-node-status.read`
 - `worker-node.inventory.read`
 - `operator.controls.write`
 
@@ -34,6 +35,12 @@ Each confirmation creates one opaque idempotency key and retains it while the di
 Selecting an assignment shows only its bounded integration summary, test-gate outcomes, review outcome, acceptance audit event, observed token/cost/tool counters, and recent allowlisted telemetry summaries. Missing or weak telemetry is labeled `unknown` or `partial` with closed warning codes; it is never displayed as zero or extrapolated. The browser has no endpoint for result bytes, changed-file lists, shell output, runtime sessions, prompts, credentials, logs, or paths.
 
 Incident panels classify stale leases, uncertain runtime recovery, leaked-context reports, unsafe output, and runaway processes from closed local state and failure codes. Buttons reuse the confirmed cancel, mark-failed, retry, or reassign controls. An expired lease permits only local scheduler reconciliation, because the browser cannot override a stale fence.
+
+## Paired-node status
+
+The paired-node panel compares the local status cards with verified replicas from trusted devices that have an active, explicit `read_status` grant. Each card identifies its revision and watermark, observation and expiry, online/offline state, closed health/lifecycle values, and bounded project counts. An expired observation is labeled offline; an expired grant removes the card. Pairing revocation disables the grant and deletes the stored replica transactionally, so a refresh immediately removes it.
+
+The federation endpoint is GET-only. It cannot start, stop, schedule, cancel, retry, reassign, transfer, browse, or otherwise command the remote node. Its project summaries do not carry paths, prompts, logs, artifacts, runtime sessions, worker/provider details, or execution ownership.
 
 ## Security boundary
 

@@ -29,6 +29,8 @@
       <article class="panel detail-card"><p class="label">Authenticated node</p><dl class="details"><div><dt>Device ID</dt><dd id="device-id">—</dd></div><div><dt>Fingerprint</dt><dd id="fingerprint">—</dd></div><div><dt>API version</dt><dd id="api-version">—</dd></div><div><dt>Session expires</dt><dd id="session-expires">—</dd></div></dl></article>
       <article class="panel capability-card"><p class="label">This shell can discover</p><ul id="capabilities" class="capabilities"></ul><p class="boundary">No source, prompts, credentials, runtime sessions, shell output, absolute paths, or artifact bytes are available here.</p></article>
 
+      <section class="panel federation-panel" aria-labelledby="federation-heading"><div class="card-heading"><div><p class="label">Paired-node visibility</p><h2 id="federation-heading">Trusted node health and project summaries</h2></div><span id="federation-count" class="count">0</span></div><p class="boundary">Read-only replicas are signed, revisioned, expiring, and removed from view when their pairing grant is revoked. Execution commands remain local to each node.</p><div id="federated-node-list" class="federated-node-list" aria-live="polite"><div class="empty-state"><strong>Loading paired nodes</strong><p>Checking active read-only grants and bounded status replicas.</p></div></div></section>
+
       <section class="control-plane" aria-labelledby="visibility-heading">
         <header class="section-title"><div><p class="label">Supervised work visibility</p><h2 id="visibility-heading">Project readiness and assignment state</h2></div><p id="refresh-status" class="muted" role="status">Loading sanitized inventories…</p></header>
         <div id="visibility-error" class="inline-state hidden" role="alert"></div>

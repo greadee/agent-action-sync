@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncgate.local/schemas/node-status-replication-v1.schema.json",
+  "title": "SyncGate paired node status replication v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["snapshot", "digest", "signature"],
+  "properties": {
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "source_device_id", "revision", "watermark", "health", "lifecycle", "observed_at", "expires_at"],
+      "properties": {
+        "protocol": { "const": "syncgate-node-status-v1" },
+        "source_device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "watermark": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "health": { "enum": ["healthy", "degraded", "unhealthy", "unknown"] },
+        "lifecycle": { "enum": ["starting", "running", "draining", "stopped", "error"] },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "projects": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["project_id", "display_name", "scheduler_state"],
+            "properties": {
+              "project_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "scheduler_state": { "enum": ["running", "paused", "disabled", "draining", "not_selected", "unknown"] },
+              "assignment_counts": { "$ref": "#/$defs/counts" },
+              "gate_counts": { "$ref": "#/$defs/counts" },
+              "accepted_history_watermark": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        }
+      }
+    },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "signature": { "type": "string", "minLength": 86, "maxLength": 86 }
+  },
+  "$defs": {
+    "counts": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state", "count"],
+        "properties": {
+          "state": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

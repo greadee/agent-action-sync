@@ -45,7 +45,7 @@ func TestServerServesHardenedControlPlaneShell(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), string(credential)) || recorder.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatal("control plane disclosed a credential or enabled CORS")
 	}
-	for _, marker := range []string{"project-picker", "readiness-graph", "assignment-detail", "worker-list", "node-list", "control-dialog", "dispatch-preview", "assignment-evidence", "incident-list"} {
+	for _, marker := range []string{"project-picker", "readiness-graph", "assignment-detail", "worker-list", "node-list", "control-dialog", "dispatch-preview", "assignment-evidence", "incident-list", "federated-node-list"} {
 		if !strings.Contains(recorder.Body.String(), marker) {
 			t.Fatalf("control plane shell missing Slice 6 marker %q", marker)
 		}
@@ -66,7 +66,7 @@ func TestControlPlaneScriptUsesOnlyBoundedExplicitControls(t *testing.T) {
 	if !strings.Contains(script, "/api/v1/browser-session/bootstrap") || !strings.Contains(script, browserCSRFHeader) {
 		t.Fatal("control script is missing protected bootstrap or CSRF submission")
 	}
-	for _, marker := range []string{"showModal()", "crypto.randomUUID()", "Submit same key again", "already_present", "observed_budget", "Gate summary", "result-evidence", "telemetry-evidence", "incident-item", "await_reconciliation"} {
+	for _, marker := range []string{"showModal()", "crypto.randomUUID()", "Submit same key again", "already_present", "observed_budget", "Gate summary", "result-evidence", "telemetry-evidence", "incident-item", "await_reconciliation", "/api/v1/federation/nodes", "federated-node-item"} {
 		if !strings.Contains(script, marker) {
 			t.Fatalf("control script is missing confirmation or replay marker %q", marker)
 		}
@@ -151,6 +151,27 @@ func TestServerBrowserSessionBootstrapAndCSRFBoundary(t *testing.T) {
 	server.httpServer.Handler.ServeHTTP(visibilityRecorder, visibility)
 	if visibilityRecorder.Code != http.StatusNoContent || !called {
 		t.Fatalf("browser visibility response = %d, called=%t", visibilityRecorder.Code, called)
+	}
+
+	called = false
+	federation := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:47820/api/v1/federation/nodes", nil)
+	federation.AddCookie(cookies[0])
+	federationRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(federationRecorder, federation)
+	if federationRecorder.Code != http.StatusNoContent || !called {
+		t.Fatalf("browser federation response = %d, called=%t", federationRecorder.Code, called)
+	}
+
+	called = false
+	remoteMutation := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:47820/api/v1/federation/nodes", strings.NewReader(`{}`))
+	remoteMutation.AddCookie(cookies[0])
+	remoteMutation.Header.Set("Origin", "http://127.0.0.1:47820")
+	remoteMutation.Header.Set("Sec-Fetch-Site", "same-origin")
+	remoteMutation.Header.Set(browserCSRFHeader, document.CSRFToken)
+	remoteMutationRecorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(remoteMutationRecorder, remoteMutation)
+	if remoteMutationRecorder.Code != http.StatusForbidden || called {
+		t.Fatalf("browser remote mutation response = %d, called=%t", remoteMutationRecorder.Code, called)
 	}
 
 	called = false

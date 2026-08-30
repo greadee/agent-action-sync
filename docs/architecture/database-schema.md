@@ -321,3 +321,9 @@ CREATE TABLE project_projection_rejections (
   notices; it has no source contents, raw prompt, secret, credential,
   terminal-output, provider-session, or absolute-path column. See
   [Context, contract, and attempt binding](context-contract-attempt-binding.md).
+- Migration 19 adds `control_plane_grants` and `node_status_replicas`. The
+  grant is an explicit, expiring `read_status` permission bound to an existing
+  paired device. The replica table retains only the newest signed, bounded
+  status snapshot for that peer. Pairing revocation disables the grant and
+  deletes the replica in the same transaction. Neither table contains command,
+  runtime-session, transfer, shell, prompt, path, or artifact authority.

@@ -92,6 +92,7 @@ tools\check_desktop_node_slice5_release.ps1
 tools\check_desktop_node_slice6_release.ps1
 tools\check_desktop_node_slice7_release.ps1
 tools\check_desktop_node_slice8_release.ps1
+tools\check_desktop_node_slice9_release.ps1
 ```
 
 Initialize, run, and check an installed per-user node with:
@@ -128,6 +129,8 @@ Useful docs:
 - [Phase 3 local administration API decision](docs/adr/phase-3-local-admin-api.md)
 - [Phase 4 Agent Project Sync foundation decision](docs/adr/phase-4-agent-project-foundation.md)
 - [Local administration API contract](docs/protocol/local-admin-api-openapi.json)
+- [Paired node status replication v1](docs/protocol/node-status-replication-v1.schema.json)
+- [Paired node status federation decision](docs/adr/phase-15-paired-node-status-federation.md)
 - [Agent Project portable records v1](docs/protocol/agent-project-records-v1.md)
 - [Agent Project domain and filesystem safety](docs/architecture/agent-project-domain.md)
 - [Agent Project ingestion and recovery](docs/architecture/project-ingestion.md)

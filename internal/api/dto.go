@@ -156,10 +156,11 @@ type InvitationInspection struct {
 }
 
 type AcceptanceRequest struct {
-	Invitation          string                `json:"invitation"`
-	ExpectedFingerprint string                `json:"expected_fingerprint"`
-	OneTimeCode         string                `json:"one_time_code"`
-	Grants              []PairingGrantRequest `json:"grants"`
+	Invitation          string                    `json:"invitation"`
+	ExpectedFingerprint string                    `json:"expected_fingerprint"`
+	OneTimeCode         string                    `json:"one_time_code"`
+	Grants              []PairingGrantRequest     `json:"grants"`
+	ControlPlaneGrant   *ControlPlaneGrantRequest `json:"control_plane_grant,omitempty"`
 }
 
 func (request AcceptanceRequest) Validate() error {
@@ -184,6 +185,26 @@ func (request AcceptanceRequest) Validate() error {
 			return fmt.Errorf("duplicate grant for share %q", grant.ShareID)
 		}
 		seenShares[grant.ShareID] = true
+	}
+	if request.ControlPlaneGrant != nil {
+		if err := request.ControlPlaneGrant.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type ControlPlaneGrantRequest struct {
+	ReadStatus bool `json:"read_status"`
+	TTLSeconds int  `json:"ttl_seconds"`
+}
+
+func (request ControlPlaneGrantRequest) Validate() error {
+	if !request.ReadStatus {
+		return fmt.Errorf("control_plane_grant.read_status must be true")
+	}
+	if request.TTLSeconds < 60 || request.TTLSeconds > 2592000 {
+		return fmt.Errorf("control_plane_grant.ttl_seconds must be between 60 and 2592000")
 	}
 	return nil
 }

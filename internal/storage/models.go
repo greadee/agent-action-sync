@@ -77,11 +77,12 @@ type AuditEvent struct {
 }
 
 type PairingAcceptance struct {
-	InviteID    string
-	Device      Device
-	Permissions []core.SharePermission
-	AuditEvent  AuditEvent
-	AcceptedAt  time.Time
+	InviteID          string
+	Device            Device
+	Permissions       []core.SharePermission
+	ControlPlaneGrant *ControlPlaneGrant
+	AuditEvent        AuditEvent
+	AcceptedAt        time.Time
 }
 
 type PairingAcceptanceResult struct {

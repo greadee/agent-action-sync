@@ -784,6 +784,33 @@ CREATE INDEX IF NOT EXISTS local_integration_summaries_project_idx
     ON local_integration_summaries(project_id, recorded_at, assignment_id);
 `),
 	},
+	{
+		Version: 19,
+		Name:    "paired node status federation",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS control_plane_grants (
+    device_id TEXT PRIMARY KEY REFERENCES devices(device_id) ON DELETE CASCADE,
+    can_read_status INTEGER NOT NULL CHECK (can_read_status IN (0, 1)),
+    granted_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS node_status_replicas (
+    device_id TEXT PRIMARY KEY REFERENCES devices(device_id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    watermark TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    snapshot_json BLOB NOT NULL CHECK (length(snapshot_json) > 0 AND length(snapshot_json) <= 65536),
+    snapshot_digest TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    received_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS node_status_replicas_visibility_idx
+    ON node_status_replicas(expires_at, device_id);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

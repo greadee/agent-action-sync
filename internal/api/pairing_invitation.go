@@ -105,12 +105,17 @@ func (coordinator *PairingCoordinator) AcceptPairingInvitation(ctx context.Conte
 		}
 		grants[index] = pairing.Grant{ShareID: core.ShareID(requested.ShareID), Capabilities: capabilities, LANOnly: lanOnly}
 	}
+	var controlPlaneGrant *pairing.ControlPlaneGrant
+	if request.ControlPlaneGrant != nil {
+		controlPlaneGrant = &pairing.ControlPlaneGrant{ReadStatus: request.ControlPlaneGrant.ReadStatus, TTL: time.Duration(request.ControlPlaneGrant.TTLSeconds) * time.Second}
+	}
 
 	coordinator.mutationMu.Lock()
 	defer coordinator.mutationMu.Unlock()
 	result, err := coordinator.Service.Accept(ctx, pairing.AcceptRequest{
 		LocalDeviceID: localIdentity.DeviceID, EncodedInvite: request.Invitation,
 		ExpectedFingerprint: request.ExpectedFingerprint, OneTimeCode: request.OneTimeCode, Grants: grants,
+		ControlPlaneGrant: controlPlaneGrant,
 	})
 	if err != nil {
 		return Acceptance{}, mapPairingFailure(err)

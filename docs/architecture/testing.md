@@ -309,3 +309,11 @@ Desktop Slice 8 proves durable local integration-summary evidence, bounded lates
 ```powershell
 tools/check_desktop_node_slice8_release.ps1
 ```
+
+## Paired-node status federation gate
+
+Desktop Slice 9 uses two generated paired identities and a real migrated SQLite store to prove signed status receipt, an explicit expiring `read_status` grant, monotonic revisions, changing watermarks, bounded snapshot expiry, offline display, and transactional visibility removal on pairing revocation. API and static-shell tests prove the browser receives only sanitized health and project summaries through one GET route; the release gate rejects a federation mutation method and re-runs the earlier browser gates.
+
+```powershell
+tools/check_desktop_node_slice9_release.ps1
+```

@@ -46,6 +46,20 @@ func TestPairingMigrationContainsAcceptanceLedger(t *testing.T) {
 	}
 }
 
+func TestNodeStatusFederationMigrationIsReadOnlyAndBounded(t *testing.T) {
+	sql := strings.ToLower(Migrations[18].SQL)
+	for _, required := range []string{"control_plane_grants", "can_read_status", "node_status_replicas", "revision", "watermark", "expires_at", "length(snapshot_json) <= 65536"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("node status migration is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"command", "runtime_session", "shell", "transfer_id", "root_path", "raw_log"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("node status migration contains forbidden authority field %q", forbidden)
+		}
+	}
+}
+
 func TestAuthenticatedWorkMigrationBindsJobsToPeers(t *testing.T) {
 	sql := Migrations[3].SQL
 	for _, column := range []string{"peer_device_id", "required_capability"} {

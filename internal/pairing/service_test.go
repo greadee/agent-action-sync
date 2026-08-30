@@ -33,7 +33,8 @@ func TestPairingAcceptanceIsExplicitAuditedAndIdempotent(t *testing.T) {
 	request := AcceptRequest{
 		LocalDeviceID: local.DeviceID, EncodedInvite: encoded,
 		ExpectedFingerprint: peer.Fingerprint, OneTimeCode: invite.OneTimeCode,
-		Grants: []Grant{{ShareID: shareID, Capabilities: []core.Capability{core.CapabilityUpload}, LANOnly: true}},
+		Grants:            []Grant{{ShareID: shareID, Capabilities: []core.Capability{core.CapabilityUpload}, LANOnly: true}},
+		ControlPlaneGrant: &ControlPlaneGrant{ReadStatus: true, TTL: 24 * time.Hour},
 	}
 
 	accepted, err := service.Accept(ctx, request)
@@ -54,6 +55,10 @@ func TestPairingAcceptanceIsExplicitAuditedAndIdempotent(t *testing.T) {
 	if err := store.Shares().Authorize(ctx, peer.DeviceID, shareID, core.CapabilityUpload, true); err == nil {
 		t.Fatal("LAN-only grant allowed remote authorization")
 	}
+	statusGrant, err := store.NodeStatus().GetControlPlaneGrant(ctx, peer.DeviceID)
+	if err != nil || !statusGrant.ReadStatus || !statusGrant.ExpiresAt.Equal(now.Add(24*time.Hour)) {
+		t.Fatalf("control-plane status grant = %+v, err=%v", statusGrant, err)
+	}
 
 	request.Grants = []Grant{{ShareID: shareID, Capabilities: []core.Capability{core.CapabilityRead}}}
 	repeated, err := service.Accept(ctx, request)
@@ -70,7 +75,7 @@ func TestPairingAcceptanceIsExplicitAuditedAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRecent: %v", err)
 	}
-	if len(events) != 1 || events[0].EventName != AuditPairingAccepted || strings.Contains(events[0].Metadata["grants"], "read") {
+	if len(events) != 1 || events[0].EventName != AuditPairingAccepted || strings.Contains(events[0].Metadata["grants"], "drop=read") || !strings.Contains(events[0].Metadata["grants"], "control_plane=read_status") {
 		t.Fatalf("pairing audit events = %+v", events)
 	}
 }

@@ -105,6 +105,10 @@ func (store *Store) Pairings() storage.PairingStore {
 	return pairingStore{db: store.db}
 }
 
+func (store *Store) NodeStatus() storage.NodeStatusStore {
+	return nodeStatusStore{db: store.db}
+}
+
 func (store *Store) Audit() storage.AuditStore {
 	return auditStore{db: store.db}
 }
@@ -1701,6 +1705,22 @@ ON CONFLICT(device_id) DO UPDATE SET
 			return storage.PairingAcceptanceResult{}, err
 		}
 	}
+	if acceptance.ControlPlaneGrant != nil {
+		grant := *acceptance.ControlPlaneGrant
+		if grant.DeviceID != acceptance.Device.ID || !grant.ReadStatus || grant.GrantedAt.IsZero() || !grant.ExpiresAt.After(grant.GrantedAt) || !grant.RevokedAt.IsZero() {
+			return storage.PairingAcceptanceResult{}, errors.New("pairing control-plane grant is invalid")
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO control_plane_grants(device_id, can_read_status, granted_at, expires_at, revoked_at)
+VALUES (?, 1, ?, ?, NULL)
+ON CONFLICT(device_id) DO UPDATE SET
+    can_read_status = 1,
+    granted_at = excluded.granted_at,
+    expires_at = excluded.expires_at,
+    revoked_at = NULL`, grant.DeviceID, formatTime(grant.GrantedAt.UTC()), formatTime(grant.ExpiresAt.UTC())); err != nil {
+			return storage.PairingAcceptanceResult{}, fmt.Errorf("persist control-plane grant: %w", err)
+		}
+	}
 	if err := recordAuditTx(ctx, tx, acceptance.AuditEvent); err != nil {
 		return storage.PairingAcceptanceResult{}, err
 	}
@@ -1745,6 +1765,12 @@ func (store pairingStore) Revoke(ctx context.Context, revocation storage.Pairing
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM share_permissions WHERE device_id = ?`, revocation.DeviceID); err != nil {
 		return storage.PairingRevocationResult{}, fmt.Errorf("remove revoked device permissions: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE control_plane_grants SET can_read_status = 0, revoked_at = ? WHERE device_id = ?`, formatTime(revocation.RevokedAt.UTC()), revocation.DeviceID); err != nil {
+		return storage.PairingRevocationResult{}, fmt.Errorf("revoke control-plane grant: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_status_replicas WHERE device_id = ?`, revocation.DeviceID); err != nil {
+		return storage.PairingRevocationResult{}, fmt.Errorf("remove revoked node status: %w", err)
 	}
 	if trustState == storage.TrustRevoked {
 		if err := tx.Commit(); err != nil {
