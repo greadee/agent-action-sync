@@ -301,3 +301,11 @@ suites.
 ```powershell
 tools/check_desktop_node_slice7_release.ps1
 ```
+
+## Browser result, budget, and incident gate
+
+Desktop Slice 8 proves durable local integration-summary evidence, bounded latest-telemetry reads, explicit unknown and weak-evidence states, sanitized result/test/review projections, acceptance audit history, and incident classification for uncertain runtime recovery. Browser checks require the evidence and incident panels while preserving the existing exact route allowlist, no raw local metadata, and confirmed recovery controls. The Windows release gate chains the prior browser gates before exercising the focused storage, desktop, API, and control-plane suites.
+
+```powershell
+tools/check_desktop_node_slice8_release.ps1
+```

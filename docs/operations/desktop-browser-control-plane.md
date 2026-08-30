@@ -15,6 +15,7 @@ The initial session document is deliberately narrow. It contains process health,
 - `project.visibility.read`
 - `task.readiness.read`
 - `assignment.visibility.read`
+- `result-budget-incident.read`
 - `worker-node.inventory.read`
 - `operator.controls.write`
 
@@ -27,6 +28,12 @@ The cookie is restricted to an explicit method-and-path allowlist. Reads cover n
 State-changing buttons open a native confirmation dialog. Review the selected project authority, scheduler and concurrency state, task/graph digest, dispatch preview, assignment state, budget completeness, gate summary, and result digest before submitting. Reassignment additionally requires a different active worker. Canceling the dialog performs no request.
 
 Each confirmation creates one opaque idempotency key and retains it while the dialog stays open. The node stores the sanitized result in its authority-local replay ledger. A repeated submission of the same command reports a safe replay; key reuse with different inputs reports `409 state_conflict`. The shell does not retry conflicts or unavailable operations automatically and displays the response code plus request ID. Disabling the scheduler pauses new dispatch without deleting assignments, history, worktrees, or audit evidence.
+
+## Decision evidence and incidents
+
+Selecting an assignment shows only its bounded integration summary, test-gate outcomes, review outcome, acceptance audit event, observed token/cost/tool counters, and recent allowlisted telemetry summaries. Missing or weak telemetry is labeled `unknown` or `partial` with closed warning codes; it is never displayed as zero or extrapolated. The browser has no endpoint for result bytes, changed-file lists, shell output, runtime sessions, prompts, credentials, logs, or paths.
+
+Incident panels classify stale leases, uncertain runtime recovery, leaked-context reports, unsafe output, and runaway processes from closed local state and failure codes. Buttons reuse the confirmed cancel, mark-failed, retry, or reassign controls. An expired lease permits only local scheduler reconciliation, because the browser cannot override a stale fence.
 
 ## Security boundary
 

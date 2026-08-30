@@ -234,3 +234,17 @@ func TestLocalOperatorControlLedgerStoresOnlySanitizedReplayResults(t *testing.T
 		}
 	}
 }
+
+func TestLocalIntegrationSummaryMigrationKeepsOnlyBoundedDecisionEvidence(t *testing.T) {
+	sql := strings.ToLower(Migrations[17].SQL)
+	for _, required := range []string{"local_integration_summaries", "assignment_id text primary key", "summary_digest", "summary_json", "length(summary_json) <= 65536"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("local integration summary migration is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"credential", "prompt", "runtime_session", "shell_output", "artifact_bytes", "absolute_path"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("local integration summary migration contains forbidden field %q", forbidden)
+		}
+	}
+}

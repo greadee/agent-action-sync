@@ -161,10 +161,11 @@ type NodePage struct {
 }
 
 type BudgetObservation struct {
-	TokenCount   *int64 `json:"token_count,omitempty"`
-	CostMicros   *int64 `json:"cost_micros,omitempty"`
-	ToolCalls    *int64 `json:"tool_calls,omitempty"`
-	Completeness string `json:"completeness"`
+	TokenCount   *int64   `json:"token_count,omitempty"`
+	CostMicros   *int64   `json:"cost_micros,omitempty"`
+	ToolCalls    *int64   `json:"tool_calls,omitempty"`
+	Completeness string   `json:"completeness"`
+	WeakEvidence []string `json:"weak_evidence,omitempty"`
 }
 type GateItem struct {
 	GateID     string `json:"gate_id"`
@@ -183,17 +184,53 @@ type AttemptItem struct {
 	UpdatedAt           string `json:"updated_at"`
 }
 type ResultSummary struct {
-	ResultID         string   `json:"result_id"`
-	BaseCommit       string   `json:"base_commit"`
-	CurrentCommit    string   `json:"current_commit"`
-	HeadCommit       string   `json:"head_commit"`
-	ManifestDigest   string   `json:"manifest_digest"`
-	PreviewDigest    string   `json:"preview_digest"`
-	TestEvidenceIDs  []string `json:"test_evidence_ids"`
-	ReviewOutcome    string   `json:"review_outcome"`
-	Limitations      []string `json:"limitations"`
-	UnresolvedIssues []string `json:"unresolved_issues"`
-	SummaryDigest    string   `json:"summary_digest"`
+	ResultID         string            `json:"result_id"`
+	BaseCommit       string            `json:"base_commit"`
+	CurrentCommit    string            `json:"current_commit"`
+	HeadCommit       string            `json:"head_commit"`
+	ManifestDigest   string            `json:"manifest_digest"`
+	PreviewDigest    string            `json:"preview_digest"`
+	Tests            []TestOutcomeItem `json:"tests"`
+	ReviewOutcome    string            `json:"review_outcome"`
+	Limitations      []string          `json:"limitations"`
+	UnresolvedIssues []string          `json:"unresolved_issues"`
+	EvidenceAt       string            `json:"evidence_at"`
+	ReadyForDecision bool              `json:"ready_for_decision"`
+	SummaryDigest    string            `json:"summary_digest"`
+}
+
+type TestOutcomeItem struct {
+	GateID               string `json:"gate_id"`
+	Outcome              string `json:"outcome"`
+	EvidenceID           string `json:"evidence_id"`
+	EvidenceDigest       string `json:"evidence_digest"`
+	DurationMilliseconds int64  `json:"duration_milliseconds,omitempty"`
+}
+
+type TelemetrySummaryItem struct {
+	TelemetryID     string            `json:"telemetry_id"`
+	TelemetryDigest string            `json:"telemetry_digest"`
+	FinalOutcome    string            `json:"final_outcome"`
+	CreatedAt       string            `json:"created_at"`
+	Completeness    string            `json:"completeness"`
+	WeakEvidence    []string          `json:"weak_evidence,omitempty"`
+	ObservedBudget  BudgetObservation `json:"observed_budget"`
+}
+
+type AcceptedHistoryItem struct {
+	AuditID       string `json:"audit_id"`
+	AttemptID     string `json:"attempt_id"`
+	ReasonCode    string `json:"reason_code"`
+	AcceptedAt    string `json:"accepted_at"`
+	SummaryDigest string `json:"summary_digest,omitempty"`
+}
+
+type IncidentItem struct {
+	Kind            string   `json:"kind"`
+	Severity        string   `json:"severity"`
+	Status          string   `json:"status"`
+	EvidenceCode    string   `json:"evidence_code"`
+	RecoveryActions []string `json:"recovery_actions"`
 }
 type AssignmentItem struct {
 	AssignmentID  string `json:"assignment_id"`
@@ -212,12 +249,15 @@ type AssignmentPage struct {
 }
 type AssignmentDetail struct {
 	AssignmentItem
-	Attempts       []AttemptItem       `json:"attempts"`
-	Gates          []GateItem          `json:"gates"`
-	Audit          []AuditTimelineItem `json:"audit"`
-	ObservedBudget BudgetObservation   `json:"observed_budget"`
-	Result         *ResultSummary      `json:"result,omitempty"`
-	AlreadyPresent bool                `json:"already_present"`
+	Attempts        []AttemptItem          `json:"attempts"`
+	Gates           []GateItem             `json:"gates"`
+	Audit           []AuditTimelineItem    `json:"audit"`
+	ObservedBudget  BudgetObservation      `json:"observed_budget"`
+	Telemetry       []TelemetrySummaryItem `json:"telemetry"`
+	AcceptedHistory []AcceptedHistoryItem  `json:"accepted_history"`
+	Incidents       []IncidentItem         `json:"incidents"`
+	Result          *ResultSummary         `json:"result,omitempty"`
+	AlreadyPresent  bool                   `json:"already_present"`
 }
 
 type AuditTimelineItem struct {

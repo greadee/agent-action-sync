@@ -48,7 +48,10 @@ The current implementation provides:
   opaque HttpOnly sessions, exact-origin and CSRF enforcement, and sanitized
   health/status, project-readiness, assignment, worker, and node discovery,
   plus confirmation-bound task, scheduler, assignment, and integration controls
-  with durable idempotent replay and stable conflict reporting.
+  with durable idempotent replay and stable conflict reporting. Assignment
+  detail also presents bounded result/test/review evidence, accepted-history
+  metadata, observed budget/telemetry completeness, and fixed incident
+  containment actions without raw logs or filesystem exploration.
 
 ## MVP Boundary
 
@@ -88,6 +91,7 @@ tools\check_desktop_node_slice4_release.ps1
 tools\check_desktop_node_slice5_release.ps1
 tools\check_desktop_node_slice6_release.ps1
 tools\check_desktop_node_slice7_release.ps1
+tools\check_desktop_node_slice8_release.ps1
 ```
 
 Initialize, run, and check an installed per-user node with:

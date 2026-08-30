@@ -84,3 +84,26 @@ func TestLocalOperatorOperationLedgerReplaysAndRejectsKeyReuse(t *testing.T) {
 		t.Fatalf("loaded operation = %+v, err=%v", loaded, err)
 	}
 }
+
+func TestLocalIntegrationSummaryPersistsLatestAttemptEvidence(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	saveProjectRegistration(t, store, "project-integration-summary")
+	operations := store.LocalProjectOperations()
+	first := storage.LocalIntegrationSummary{
+		AssignmentID: "assignment:summary", AttemptID: "attempt:summary-one", ProjectID: "project-integration-summary",
+		SummaryDigest: projectionHash("a"), SummaryJSON: []byte(`{"summary":"one"}`), RecordedAt: time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC),
+	}
+	if err := operations.SaveLocalIntegrationSummary(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.AttemptID, second.SummaryDigest, second.SummaryJSON, second.RecordedAt = "attempt:summary-two", projectionHash("b"), []byte(`{"summary":"two"}`), first.RecordedAt.Add(time.Minute)
+	if err := operations.SaveLocalIntegrationSummary(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := operations.GetLocalIntegrationSummary(ctx, first.AssignmentID)
+	if err != nil || loaded.AttemptID != second.AttemptID || loaded.SummaryDigest != second.SummaryDigest || string(loaded.SummaryJSON) != string(second.SummaryJSON) {
+		t.Fatalf("loaded summary = %+v, err=%v", loaded, err)
+	}
+}

@@ -45,7 +45,7 @@ func TestServerServesHardenedControlPlaneShell(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), string(credential)) || recorder.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatal("control plane disclosed a credential or enabled CORS")
 	}
-	for _, marker := range []string{"project-picker", "readiness-graph", "assignment-detail", "worker-list", "node-list", "control-dialog", "dispatch-preview"} {
+	for _, marker := range []string{"project-picker", "readiness-graph", "assignment-detail", "worker-list", "node-list", "control-dialog", "dispatch-preview", "assignment-evidence", "incident-list"} {
 		if !strings.Contains(recorder.Body.String(), marker) {
 			t.Fatalf("control plane shell missing Slice 6 marker %q", marker)
 		}
@@ -66,7 +66,7 @@ func TestControlPlaneScriptUsesOnlyBoundedExplicitControls(t *testing.T) {
 	if !strings.Contains(script, "/api/v1/browser-session/bootstrap") || !strings.Contains(script, browserCSRFHeader) {
 		t.Fatal("control script is missing protected bootstrap or CSRF submission")
 	}
-	for _, marker := range []string{"showModal()", "crypto.randomUUID()", "Submit same key again", "already_present", "observed_budget", "Gate summary"} {
+	for _, marker := range []string{"showModal()", "crypto.randomUUID()", "Submit same key again", "already_present", "observed_budget", "Gate summary", "result-evidence", "telemetry-evidence", "incident-item", "await_reconciliation"} {
 		if !strings.Contains(script, marker) {
 			t.Fatalf("control script is missing confirmation or replay marker %q", marker)
 		}

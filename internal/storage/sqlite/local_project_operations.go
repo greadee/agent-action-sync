@@ -181,6 +181,44 @@ FROM local_operator_operations WHERE idempotency_key = ?`, key).Scan(
 	return operation, nil
 }
 
+func (store localProjectOperationsStore) SaveLocalIntegrationSummary(ctx context.Context, summary storage.LocalIntegrationSummary) error {
+	if err := validateLocalIntegrationSummary(summary); err != nil {
+		return err
+	}
+	_, err := store.db.ExecContext(ctx, `
+INSERT INTO local_integration_summaries(assignment_id, attempt_id, project_id, summary_digest, summary_json, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(assignment_id) DO UPDATE SET
+    attempt_id = excluded.attempt_id,
+    project_id = excluded.project_id,
+    summary_digest = excluded.summary_digest,
+    summary_json = excluded.summary_json,
+    recorded_at = excluded.recorded_at`,
+		summary.AssignmentID, summary.AttemptID, summary.ProjectID, summary.SummaryDigest, summary.SummaryJSON, formatTime(summary.RecordedAt))
+	if err != nil {
+		return fmt.Errorf("save local integration summary: %w", err)
+	}
+	return nil
+}
+
+func (store localProjectOperationsStore) GetLocalIntegrationSummary(ctx context.Context, assignmentID string) (storage.LocalIntegrationSummary, error) {
+	if strings.TrimSpace(assignmentID) == "" || len(assignmentID) > 128 {
+		return storage.LocalIntegrationSummary{}, errors.New("local integration assignment ID is invalid")
+	}
+	var summary storage.LocalIntegrationSummary
+	var recordedAt string
+	err := store.db.QueryRowContext(ctx, `
+SELECT assignment_id, attempt_id, project_id, summary_digest, summary_json, recorded_at
+FROM local_integration_summaries WHERE assignment_id = ?`, assignmentID).Scan(
+		&summary.AssignmentID, &summary.AttemptID, &summary.ProjectID, &summary.SummaryDigest, &summary.SummaryJSON, &recordedAt)
+	if err != nil {
+		return storage.LocalIntegrationSummary{}, mapNotFound(err, "local integration summary", assignmentID)
+	}
+	summary.RecordedAt = parseStoredTime(recordedAt)
+	summary.SummaryJSON = append([]byte(nil), summary.SummaryJSON...)
+	return summary, nil
+}
+
 func validateLocalOperatorOperation(operation storage.LocalOperatorOperation) error {
 	if strings.TrimSpace(operation.IdempotencyKey) == "" || len(operation.IdempotencyKey) > 128 ||
 		len(operation.Fingerprint) != 64 || strings.Trim(operation.Fingerprint, "0123456789abcdef") != "" ||
@@ -188,6 +226,16 @@ func validateLocalOperatorOperation(operation storage.LocalOperatorOperation) er
 		storage.ValidateProjectProjectionID(operation.ProjectID) != nil || strings.TrimSpace(operation.SubjectID) == "" || len(operation.SubjectID) > 128 ||
 		len(operation.ResultJSON) == 0 || len(operation.ResultJSON) > storage.MaxLocalOperatorResultBytes || operation.OccurredAt.IsZero() {
 		return errors.New("local operator operation is invalid")
+	}
+	return nil
+}
+
+func validateLocalIntegrationSummary(summary storage.LocalIntegrationSummary) error {
+	if !strings.HasPrefix(summary.AssignmentID, "assignment:") || len(summary.AssignmentID) > 128 ||
+		!strings.HasPrefix(summary.AttemptID, "attempt:") || len(summary.AttemptID) > 128 ||
+		storage.ValidateProjectProjectionID(summary.ProjectID) != nil || len(summary.SummaryDigest) != 64 || strings.Trim(summary.SummaryDigest, "0123456789abcdef") != "" ||
+		len(summary.SummaryJSON) == 0 || len(summary.SummaryJSON) > storage.MaxLocalOperatorResultBytes || summary.RecordedAt.IsZero() {
+		return errors.New("local integration summary is invalid")
 	}
 	return nil
 }

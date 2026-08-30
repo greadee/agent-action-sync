@@ -167,6 +167,7 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 		Scheduler: schedulerValue, Control: control, Inventory: options.Store.OrchestrationControl(),
 		Projects: options.Store.ProjectRegistrations(), Operations: options.Store.LocalProjectOperations(),
 		Tasks: options.Store.ProjectTasks(), TaskNodes: options.Store.ProjectTaskNodes(), Registry: options.Store.Registry(),
+		Telemetry:           options.Store.ExecutionTelemetry(),
 		AuthorizedProjectID: authorizedProjectID, MaxConcurrent: options.Config.Node.Execution.MaxConcurrent,
 		Node: node, Gate: gate, Now: options.Now,
 	})

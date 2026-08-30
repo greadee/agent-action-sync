@@ -95,7 +95,7 @@ footer { padding: 28px 4px 0; color: #68758a; font-size: 11px; letter-spacing: .
 .muted { color: #91a0b5; font-size: 13px; line-height: 1.55; }
 .inline-state { border: 1px solid rgba(251, 113, 133, .48); border-radius: 12px; padding: 13px 15px; color: #fecdd3; background: rgba(136, 19, 55, .18); font-size: 13px; }
 .visibility-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-.project-card, .readiness-panel, .preview-panel, .assignment-panel, .inventory-panel { padding: 24px; }
+.project-card, .readiness-panel, .preview-panel, .assignment-panel, .inventory-panel, .evidence-panel, .incident-panel { padding: 24px; }
 .count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; color: #c4d0e9; background: #1a2435; font-size: 12px; font-weight: 720; }
 select { width: 100%; min-height: 42px; margin-top: 22px; border: 1px solid #3a475d; border-radius: 10px; padding: 9px 12px; color: #ebeff7; background: #111927; font: inherit; }
 select:focus-visible, button:focus-visible { outline: 2px solid #94a9ff; outline-offset: 3px; }
@@ -146,6 +146,16 @@ select:focus-visible, button:focus-visible { outline: 2px solid #94a9ff; outline
 .audit-item { display: grid; grid-template-columns: minmax(90px, .4fr) minmax(0, 1fr); gap: 7px 12px; border-left: 2px solid #4b8e7a; padding: 9px 0 9px 12px; }
 .audit-item time { grid-column: 1 / -1; color: #8d9ab0; font-size: 11px; }
 .timeline-item time { color: #8d9ab0; font-size: 11px; }
+.evidence-grid, .incident-list { display: grid; gap: 12px; margin-top: 20px; }
+.evidence-item, .incident-item { display: grid; gap: 10px; border: 1px solid rgba(56, 70, 91, .82); border-radius: 12px; padding: 14px; background: rgba(15, 22, 33, .62); }
+.evidence-item h4, .incident-item h4, .outcome-list h5 { margin: 0; color: #dce5f5; font-size: 14px; text-transform: capitalize; }
+.outcome-list { display: grid; gap: 8px; }
+.outcome-item, .telemetry-item, .history-item { display: grid; gap: 7px; border-left: 2px solid #5266a1; padding: 8px 0 8px 11px; color: #c7d2e6; font-size: 12px; overflow-wrap: anywhere; }
+.telemetry-item { border-left-color: #438b9d; }
+.history-item { border-left-color: #4b8e7a; }
+.incident-item { border-left: 3px solid #d97706; }
+.incident-item.severity-high { border-left-color: #f59e0b; }
+.incident-item.severity-critical { border-left-color: #fb7185; background: rgba(127, 29, 29, .2); }
 .inventory-panel { display: grid; align-content: start; gap: 24px; }
 .inventory-section { display: grid; gap: 12px; }
 .inventory-list { display: grid; gap: 12px; }

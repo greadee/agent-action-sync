@@ -20,6 +20,7 @@ import (
 	"syncgate/internal/resultintake"
 	"syncgate/internal/scheduler"
 	"syncgate/internal/storage"
+	"syncgate/internal/telemetry"
 )
 
 type LocalAdministrationOptions struct {
@@ -31,6 +32,7 @@ type LocalAdministrationOptions struct {
 	Tasks               storage.ProjectTaskStore
 	TaskNodes           storage.ProjectTaskNodeStore
 	Registry            storage.RegistryStore
+	Telemetry           storage.ExecutionTelemetryStore
 	AuthorizedProjectID string
 	MaxConcurrent       int
 	Node                computenode.Provider
@@ -47,6 +49,7 @@ type LocalOrchestrationAdministration struct {
 	tasks               storage.ProjectTaskStore
 	taskNodes           storage.ProjectTaskNodeStore
 	registry            storage.RegistryStore
+	telemetry           storage.ExecutionTelemetryStore
 	authorizedProjectID string
 	maxConcurrent       int
 	node                computenode.Provider
@@ -63,7 +66,7 @@ func NewLocalOrchestrationAdministration(options LocalAdministrationOptions) *Lo
 	return &LocalOrchestrationAdministration{
 		scheduler: options.Scheduler, control: options.Control, inventory: inventory,
 		projects: options.Projects, operations: options.Operations, authorizedProjectID: options.AuthorizedProjectID,
-		tasks: options.Tasks, taskNodes: options.TaskNodes, registry: options.Registry,
+		tasks: options.Tasks, taskNodes: options.TaskNodes, registry: options.Registry, telemetry: options.Telemetry,
 		maxConcurrent: options.MaxConcurrent, node: options.Node, gate: options.Gate, now: options.Now,
 		projectKeys: map[string]string{}, summaries: map[string]integrationgate.IntegrationSummary{},
 	}
@@ -368,7 +371,7 @@ func (admin *LocalOrchestrationAdministration) GetAssignment(ctx context.Context
 	if err != nil {
 		return api.AssignmentDetail{}, localUnavailable("assignment audit timeline is unavailable")
 	}
-	return admin.detail(snapshot, audit), nil
+	return admin.detail(ctx, snapshot, audit), nil
 }
 
 func (admin *LocalOrchestrationAdministration) ControlAssignment(ctx context.Context, input api.AssignmentControlInput) (api.AssignmentDetail, error) {
@@ -483,6 +486,9 @@ func (admin *LocalOrchestrationAdministration) evaluate(ctx context.Context, sna
 	if err != nil && !errors.Is(err, integrationgate.ErrHumanRequired) {
 		return api.AssignmentDetail{}, localConflict("result evaluation failed")
 	}
+	if err := admin.saveIntegrationSummary(ctx, summary); err != nil {
+		return api.AssignmentDetail{}, err
+	}
 	admin.mu.Lock()
 	admin.summaries[snapshot.Assignment.AssignmentID] = summary
 	admin.mu.Unlock()
@@ -494,7 +500,7 @@ func (admin *LocalOrchestrationAdministration) evaluate(ctx context.Context, sna
 	if auditErr != nil {
 		return api.AssignmentDetail{}, localUnavailable("assignment audit timeline is unavailable")
 	}
-	return admin.detail(updated, audit), nil
+	return admin.detail(ctx, updated, audit), nil
 }
 
 func (admin *LocalOrchestrationAdministration) DecideIntegration(ctx context.Context, input api.IntegrationDecisionInput) (api.AssignmentDetail, error) {
@@ -516,10 +522,8 @@ func (admin *LocalOrchestrationAdministration) DecideIntegration(ctx context.Con
 	if err != nil || snapshot.Assignment.ProjectID != input.ProjectID || snapshot.Lease == nil || admin.gate == nil {
 		return api.AssignmentDetail{}, localConflict("integration decision is unavailable")
 	}
-	admin.mu.Lock()
-	summary, ok := admin.summaries[input.AssignmentID]
-	admin.mu.Unlock()
-	if !ok || summary.Digest != input.SummaryDigest || summary.AttemptID != input.AttemptID {
+	summary, err := admin.integrationSummary(ctx, input.AssignmentID)
+	if err != nil || summary.Digest != input.SummaryDigest || summary.AttemptID != input.AttemptID || summary.ProjectID != input.ProjectID {
 		return api.AssignmentDetail{}, localConflict("integration summary is stale or unavailable")
 	}
 	decision := integrationgate.DecisionReject
@@ -563,7 +567,7 @@ func (admin *LocalOrchestrationAdministration) recoveryTransition(ctx context.Co
 	})
 }
 
-func (admin *LocalOrchestrationAdministration) detail(snapshot storage.OrchestrationSnapshot, auditEvents []storage.OrchestrationAuditEvent) api.AssignmentDetail {
+func (admin *LocalOrchestrationAdministration) detail(ctx context.Context, snapshot storage.OrchestrationSnapshot, auditEvents []storage.OrchestrationAuditEvent) api.AssignmentDetail {
 	attempt := api.AttemptItem{
 		AttemptID: snapshot.Attempt.AttemptID, AttemptNumber: snapshot.Attempt.AttemptNumber,
 		State: string(snapshot.Attempt.State), RecoveryDisposition: string(snapshot.Attempt.RecoveryDisposition),
@@ -578,13 +582,195 @@ func (admin *LocalOrchestrationAdministration) detail(snapshot storage.Orchestra
 	for _, event := range auditEvents {
 		audit = append(audit, api.AuditTimelineItem{AuditID: event.AuditID, AttemptID: event.AttemptID, Action: event.Action, FromState: string(event.FromState), ToState: string(event.ToState), ReasonCode: event.ReasonCode, OccurredAt: event.OccurredAt.UTC().Format(time.RFC3339Nano)})
 	}
-	detail := api.AssignmentDetail{AssignmentItem: assignmentItem(snapshot.Assignment), Attempts: []api.AttemptItem{attempt}, Gates: gates, Audit: audit, ObservedBudget: api.BudgetObservation{Completeness: "unknown"}}
-	admin.mu.Lock()
-	if summary, ok := admin.summaries[snapshot.Assignment.AssignmentID]; ok {
+	detail := api.AssignmentDetail{AssignmentItem: assignmentItem(snapshot.Assignment), Attempts: []api.AttemptItem{attempt}, Gates: gates, Audit: audit}
+	if summary, err := admin.integrationSummary(ctx, snapshot.Assignment.AssignmentID); err == nil {
 		detail.Result = resultSummary(summary)
 	}
-	admin.mu.Unlock()
+	detail.Telemetry, detail.ObservedBudget = admin.telemetryProjection(ctx, snapshot.Assignment.ProjectID, snapshot.Assignment.ExecutionID)
+	detail.AcceptedHistory = acceptedHistory(auditEvents, detail.Result)
+	detail.Incidents = admin.incidents(snapshot)
 	return detail
+}
+
+func (admin *LocalOrchestrationAdministration) saveIntegrationSummary(ctx context.Context, summary integrationgate.IntegrationSummary) error {
+	if admin.operations == nil || admin.now == nil || summary.AssignmentID == "" || summary.AttemptID == "" || summary.ProjectID == "" || len(summary.Digest) != 64 {
+		return localUnavailable("integration summary storage is unavailable")
+	}
+	encoded, err := json.Marshal(summary)
+	if err != nil || len(encoded) > storage.MaxLocalOperatorResultBytes {
+		return localUnavailable("integration summary is unavailable")
+	}
+	if err := admin.operations.SaveLocalIntegrationSummary(ctx, storage.LocalIntegrationSummary{
+		AssignmentID: summary.AssignmentID, AttemptID: summary.AttemptID, ProjectID: summary.ProjectID,
+		SummaryDigest: summary.Digest, SummaryJSON: encoded, RecordedAt: admin.now().UTC(),
+	}); err != nil {
+		return localUnavailable("integration summary could not be recorded")
+	}
+	return nil
+}
+
+func (admin *LocalOrchestrationAdministration) integrationSummary(ctx context.Context, assignmentID string) (integrationgate.IntegrationSummary, error) {
+	admin.mu.Lock()
+	if summary, ok := admin.summaries[assignmentID]; ok {
+		admin.mu.Unlock()
+		return summary, nil
+	}
+	admin.mu.Unlock()
+	if admin.operations == nil {
+		return integrationgate.IntegrationSummary{}, storage.ErrNotFound
+	}
+	record, err := admin.operations.GetLocalIntegrationSummary(ctx, assignmentID)
+	if err != nil {
+		return integrationgate.IntegrationSummary{}, err
+	}
+	var summary integrationgate.IntegrationSummary
+	if err := json.Unmarshal(record.SummaryJSON, &summary); err != nil || summary.AssignmentID != record.AssignmentID || summary.AttemptID != record.AttemptID || summary.ProjectID != record.ProjectID || summary.Digest != record.SummaryDigest {
+		return integrationgate.IntegrationSummary{}, storage.ErrNotFound
+	}
+	admin.mu.Lock()
+	admin.summaries[assignmentID] = summary
+	admin.mu.Unlock()
+	return summary, nil
+}
+
+func (admin *LocalOrchestrationAdministration) telemetryProjection(ctx context.Context, projectID, executionID string) ([]api.TelemetrySummaryItem, api.BudgetObservation) {
+	unknown := api.BudgetObservation{Completeness: "unknown", WeakEvidence: []string{"telemetry_not_reported"}}
+	reader, ok := admin.telemetry.(storage.LatestExecutionTelemetryStore)
+	if !ok || reader == nil {
+		unknown.WeakEvidence = []string{"telemetry_projection_unavailable"}
+		return nil, unknown
+	}
+	records, err := reader.ListLatestExecutionTelemetry(ctx, projectID, executionID, 3)
+	if err != nil {
+		unknown.WeakEvidence = []string{"telemetry_projection_unavailable"}
+		return nil, unknown
+	}
+	if len(records) == 0 {
+		return nil, unknown
+	}
+	items := make([]api.TelemetrySummaryItem, 0, len(records))
+	for _, record := range records {
+		observed, completeness, warnings := telemetryBudget(record)
+		items = append(items, api.TelemetrySummaryItem{
+			TelemetryID: record.TelemetryID, TelemetryDigest: record.TelemetryDigest, FinalOutcome: record.FinalOutcome,
+			CreatedAt: record.CreatedAt.UTC().Format(time.RFC3339Nano), Completeness: completeness, WeakEvidence: warnings, ObservedBudget: observed,
+		})
+	}
+	return items, items[0].ObservedBudget
+}
+
+func telemetryBudget(record storage.ExecutionTelemetryRecord) (api.BudgetObservation, string, []string) {
+	unknown := api.BudgetObservation{Completeness: "unknown", WeakEvidence: []string{"telemetry_unverifiable"}}
+	envelope, _, err := telemetry.DecodeEnvelope(record.SummaryJSON)
+	if err != nil || envelope.TelemetryID != record.TelemetryID || envelope.Digest != record.TelemetryDigest || envelope.Summary.FinalOutcome != record.FinalOutcome {
+		return unknown, unknown.Completeness, unknown.WeakEvidence
+	}
+	var inputTokens, outputTokens, costMicros, toolCalls *int64
+	warnings := make([]string, 0, 4)
+	for _, observation := range envelope.Summary.Observations {
+		if observation.Value == nil {
+			continue
+		}
+		value := *observation.Value
+		switch observation.Name {
+		case "input_tokens":
+			inputTokens = &value
+			if observation.Source != "provider_reported" {
+				warnings = append(warnings, "input_tokens_not_provider_reported")
+			}
+		case "output_tokens":
+			outputTokens = &value
+			if observation.Source != "provider_reported" {
+				warnings = append(warnings, "output_tokens_not_provider_reported")
+			}
+		case "provider_cost_micros":
+			costMicros = &value
+			if observation.Source != "provider_reported" {
+				warnings = append(warnings, "cost_not_provider_reported")
+			}
+		case "tool_calls":
+			toolCalls = &value
+		}
+	}
+	observed := api.BudgetObservation{CostMicros: costMicros, ToolCalls: toolCalls}
+	if inputTokens != nil && outputTokens != nil {
+		tokens := *inputTokens + *outputTokens
+		observed.TokenCount = &tokens
+	} else {
+		warnings = append(warnings, "token_count_incomplete")
+	}
+	if costMicros == nil {
+		warnings = append(warnings, "cost_not_reported")
+	}
+	if toolCalls == nil {
+		warnings = append(warnings, "tool_calls_not_reported")
+	}
+	if observed.TokenCount != nil && observed.CostMicros != nil && observed.ToolCalls != nil {
+		observed.Completeness = "complete"
+	} else if observed.TokenCount != nil || observed.CostMicros != nil || observed.ToolCalls != nil {
+		observed.Completeness = "partial"
+	} else {
+		observed.Completeness = "unknown"
+	}
+	sort.Strings(warnings)
+	observed.WeakEvidence = append([]string(nil), warnings...)
+	return observed, observed.Completeness, observed.WeakEvidence
+}
+
+func acceptedHistory(events []storage.OrchestrationAuditEvent, summary *api.ResultSummary) []api.AcceptedHistoryItem {
+	items := make([]api.AcceptedHistoryItem, 0, 1)
+	for _, event := range events {
+		if event.ToState != storage.AssignmentAccepted {
+			continue
+		}
+		digest := ""
+		if summary != nil {
+			digest = summary.SummaryDigest
+		}
+		items = append(items, api.AcceptedHistoryItem{AuditID: event.AuditID, AttemptID: event.AttemptID, ReasonCode: event.ReasonCode, AcceptedAt: event.OccurredAt.UTC().Format(time.RFC3339Nano), SummaryDigest: digest})
+	}
+	return items
+}
+
+func (admin *LocalOrchestrationAdministration) incidents(snapshot storage.OrchestrationSnapshot) []api.IncidentItem {
+	now := time.Now().UTC()
+	if admin.now != nil {
+		now = admin.now().UTC()
+	}
+	items := make([]api.IncidentItem, 0, 2)
+	if snapshot.Lease != nil && !terminalAssignment(snapshot.Attempt.State) && !snapshot.Lease.ExpiresAt.After(now) {
+		items = append(items, api.IncidentItem{Kind: "stale_lease", Severity: "high", Status: "requires_reconciliation", EvidenceCode: "lease_expired", RecoveryActions: []string{"await_reconciliation"}})
+	}
+	if snapshot.Attempt.RecoveryDisposition == storage.RecoveryNeedsOperator {
+		items = append(items, api.IncidentItem{Kind: "uncertain_runtime", Severity: "high", Status: "requires_operator", EvidenceCode: "recovery_needs_operator", RecoveryActions: recoveryActions(snapshot, now)})
+	}
+	if kind, severity, ok := classifiedIncident(snapshot.Attempt.FailureCode); ok {
+		items = append(items, api.IncidentItem{Kind: kind, Severity: severity, Status: "open", EvidenceCode: snapshot.Attempt.FailureCode, RecoveryActions: recoveryActions(snapshot, now)})
+	}
+	return items
+}
+
+func classifiedIncident(code string) (string, string, bool) {
+	switch code {
+	case "context_leak_detected", "leaked_context_reported", "leaked_context":
+		return "leaked_context_report", "critical", true
+	case "unsafe_output", "unsafe_output_detected", "output_policy_violation":
+		return "unsafe_output", "critical", true
+	case "runaway_process", "runaway_process_detected", "runtime_runaway", "process_containment_required":
+		return "runaway_process", "critical", true
+	default:
+		return "", "", false
+	}
+}
+
+func recoveryActions(snapshot storage.OrchestrationSnapshot, now time.Time) []string {
+	if terminalAssignment(snapshot.Attempt.State) {
+		return []string{"retry", "reassign"}
+	}
+	if snapshot.Lease != nil && snapshot.Lease.ExpiresAt.After(now) {
+		return []string{"cancel", "fail"}
+	}
+	return []string{"await_reconciliation"}
 }
 
 func (admin *LocalOrchestrationAdministration) activeWorker(ctx context.Context, workerID string) bool {
@@ -766,18 +952,20 @@ func assignmentItem(value storage.OrchestrationAssignment) api.AssignmentItem {
 }
 
 func resultSummary(value integrationgate.IntegrationSummary) *api.ResultSummary {
-	evidence := make([]string, 0, len(value.Tests))
+	tests := make([]api.TestOutcomeItem, 0, len(value.Tests))
 	for _, test := range value.Tests {
-		evidence = append(evidence, test.EvidenceID)
+		tests = append(tests, api.TestOutcomeItem{GateID: test.GateID, Outcome: string(test.Outcome), EvidenceID: test.EvidenceID, EvidenceDigest: test.EvidenceDigest, DurationMilliseconds: test.DurationMilliseconds})
 	}
+	sort.Slice(tests, func(i, j int) bool { return tests[i].GateID < tests[j].GateID })
 	review := "not_required"
 	if value.Review != nil {
 		review = string(value.Review.Outcome)
 	}
 	return &api.ResultSummary{
 		ResultID: value.ResultID, BaseCommit: value.BaseCommit, CurrentCommit: value.CurrentCommit, HeadCommit: value.HeadCommit,
-		ManifestDigest: value.ManifestDigest, PreviewDigest: value.PreviewDigest, TestEvidenceIDs: evidence,
-		ReviewOutcome: review, Limitations: append([]string(nil), value.Limitations...), UnresolvedIssues: append([]string(nil), value.UnresolvedIssues...), SummaryDigest: value.Digest,
+		ManifestDigest: value.ManifestDigest, PreviewDigest: value.PreviewDigest, Tests: tests,
+		ReviewOutcome: review, Limitations: append([]string(nil), value.Limitations...), UnresolvedIssues: append([]string(nil), value.UnresolvedIssues...),
+		EvidenceAt: value.EvidenceAt.UTC().Format(time.RFC3339Nano), ReadyForDecision: value.ReadyForDecision, SummaryDigest: value.Digest,
 	}
 }
 

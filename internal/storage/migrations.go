@@ -768,6 +768,22 @@ CREATE INDEX IF NOT EXISTS local_operator_operations_project_idx
     ON local_operator_operations(project_id, occurred_at, idempotency_key);
 `),
 	},
+	{
+		Version: 18,
+		Name:    "local integration summary evidence",
+		SQL: strings.TrimSpace(`
+CREATE TABLE IF NOT EXISTS local_integration_summaries (
+    assignment_id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES agent_projects(project_id) ON DELETE CASCADE,
+    summary_digest TEXT NOT NULL,
+    summary_json BLOB NOT NULL CHECK (length(summary_json) > 0 AND length(summary_json) <= 65536),
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS local_integration_summaries_project_idx
+    ON local_integration_summaries(project_id, recorded_at, assignment_id);
+`),
+	},
 }
 
 func ValidateMigrations(migrations []Migration) error {

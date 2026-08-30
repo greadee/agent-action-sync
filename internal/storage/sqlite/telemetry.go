@@ -85,6 +85,29 @@ func (store executionTelemetryStore) ListExecutionTelemetry(ctx context.Context,
 	return records, rows.Err()
 }
 
+func (store executionTelemetryStore) ListLatestExecutionTelemetry(ctx context.Context, projectID, executionID string, limit int) ([]storage.ExecutionTelemetryRecord, error) {
+	if err := validateRegistryKey(ctx, projectID, 1); err != nil || validateRegistryKey(ctx, executionID, 1) != nil || limit < 1 || limit > storage.MaxAdminPageLimit {
+		return nil, errors.New("latest execution telemetry query is invalid")
+	}
+	rows, err := store.db.QueryContext(ctx, `SELECT telemetry_id, telemetry_digest, idempotency_key_digest, project_id, execution_id, contract_id, contract_version, contract_digest, final_outcome, summary_json, created_at FROM execution_telemetry WHERE project_id = ? AND execution_id = ? ORDER BY created_at DESC, telemetry_id DESC LIMIT ?`, projectID, executionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []storage.ExecutionTelemetryRecord
+	for rows.Next() {
+		var record storage.ExecutionTelemetryRecord
+		var createdAt string
+		if err := rows.Scan(&record.TelemetryID, &record.TelemetryDigest, &record.IdempotencyKeyDigest, &record.ProjectID, &record.ExecutionID, &record.ContractID, &record.ContractVersion, &record.ContractDigest, &record.FinalOutcome, &record.SummaryJSON, &createdAt); err != nil {
+			return nil, err
+		}
+		record.SummaryJSON = append([]byte(nil), record.SummaryJSON...)
+		record.CreatedAt = parseStoredTime(createdAt)
+		records = append(records, record)
+	}
+	return records, rows.Err()
+}
+
 func validateTelemetryRecord(ctx context.Context, record storage.ExecutionTelemetryRecord) error {
 	for _, value := range []string{record.TelemetryID, record.ProjectID, record.ExecutionID, record.ContractID} {
 		if err := validateRegistryKey(ctx, value, 1); err != nil {

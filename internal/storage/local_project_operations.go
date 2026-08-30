@@ -7,6 +7,18 @@ import (
 
 const MaxLocalOperatorResultBytes = 64 << 10
 
+// LocalIntegrationSummary keeps the authority-local decision evidence needed
+// to re-open a bounded integration decision after the desktop process restarts.
+// Its JSON is never returned directly to browser clients.
+type LocalIntegrationSummary struct {
+	AssignmentID  string
+	AttemptID     string
+	ProjectID     string
+	SummaryDigest string
+	SummaryJSON   []byte
+	RecordedAt    time.Time
+}
+
 // LocalProjectPolicy is authority-local control state. It is deliberately not
 // part of portable project history and contains no paths or project content.
 type LocalProjectPolicy struct {
@@ -55,4 +67,6 @@ type LocalProjectOperationsStore interface {
 	GetProjectOrchestrationStatus(context.Context, string) (ProjectOrchestrationStatus, error)
 	SaveLocalOperatorOperation(context.Context, LocalOperatorOperation) (LocalOperatorOperationResult, error)
 	GetLocalOperatorOperation(context.Context, string) (LocalOperatorOperation, error)
+	SaveLocalIntegrationSummary(context.Context, LocalIntegrationSummary) error
+	GetLocalIntegrationSummary(context.Context, string) (LocalIntegrationSummary, error)
 }

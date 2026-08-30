@@ -18,6 +18,7 @@ var browserCapabilities = []string{
 	"project.visibility.read",
 	"task.readiness.read",
 	"assignment.visibility.read",
+	"result-budget-incident.read",
 	"worker-node.inventory.read",
 	"operator.controls.write",
 }

@@ -156,10 +156,14 @@ function renderAssignments() {
 }
 
 async function loadAssignmentDetail(assignmentID) {
-  const container = byId("assignment-detail"); if (!state.selectedProjectID || !assignmentID) { clear(container); return; }
+  const container = byId("assignment-detail"); if (!state.selectedProjectID || !assignmentID) { clear(container); renderEvidenceEmpty("No assignment selected", "Choose an assignment to inspect verifiable decision evidence."); return; }
   empty(container, "Loading assignment detail", "Reading attempts, gates, and closed reason codes.");
   try { state.assignmentDetail = await getJSON(`/api/v1/projects/${encodeURIComponent(state.selectedProjectID)}/assignments/${encodeURIComponent(assignmentID)}`); renderAssignmentDetail(state.assignmentDetail); }
-  catch (error) { state.assignmentDetail = null; empty(container, "Assignment detail unavailable", error instanceof Error ? error.message : "The assignment could not be read."); }
+  catch (error) { state.assignmentDetail = null; const message = error instanceof Error ? error.message : "The assignment could not be read."; empty(container, "Assignment detail unavailable", message); renderEvidenceEmpty("Evidence unavailable", message); }
+}
+
+function renderEvidenceEmpty(title, message) {
+  text("evidence-status", "Unavailable"); empty(byId("assignment-evidence"), title, message); text("incident-status", "Unavailable"); empty(byId("incident-list"), title, message);
 }
 
 function renderAssignmentDetail(detail) {
@@ -176,6 +180,42 @@ function renderAssignmentDetail(detail) {
   for (const [action, label] of Object.entries({pause: "Pause", resume: "Resume", cancel: "Cancel", retry: "Retry", reassign: "Reassign", evaluate: "Evaluate result"})) { const button = node("button", action === "cancel" ? "danger-action" : "", label); button.type = "button"; button.disabled = !actionStates[action].includes(detail.state); button.addEventListener("click", () => openControl(action)); controls.append(button); }
   if (detail.result) { for (const [action, label] of [["approve", "Approve result"], ["reject", "Reject result"]]) { const button = node("button", action === "approve" ? "primary-action" : "danger-action", label); button.type = "button"; button.addEventListener("click", () => openControl(action)); controls.append(button); } }
   container.append(timeline, gates, audit, controls);
+  renderDecisionEvidence(detail); renderIncidents(detail);
+}
+
+function metric(value, suffix = "") { return value === undefined || value === null ? "not reported" : `${value}${suffix}`; }
+function renderDecisionEvidence(detail) {
+  const container = byId("assignment-evidence"); clear(container);
+  text("evidence-status", detail.result?.ready_for_decision ? "Decision ready" : detail.result ? "Decision evidence" : "Evidence incomplete");
+  const budget = detail.observed_budget || {completeness: "unknown", weak_evidence: ["telemetry_not_reported"]};
+  const budgetPanel = node("section", "evidence-item budget-evidence"); budgetPanel.append(node("h4", "", "Observed budget"), statusChip(budget.completeness), explanation("Tokens", metric(budget.token_count)), explanation("Cost (micros)", metric(budget.cost_micros)), explanation("Tool calls", metric(budget.tool_calls)));
+  const warnings = node("ul", "mini-tags"); for (const warning of budget.weak_evidence || []) warnings.append(node("li", "", warning)); if (warnings.childElementCount) budgetPanel.append(node("p", "muted", "Weak-evidence warnings"), warnings); container.append(budgetPanel);
+  const resultPanel = node("section", "evidence-item result-evidence"); resultPanel.append(node("h4", "", "Integration summary"));
+  if (!detail.result) resultPanel.append(node("p", "muted", "No evaluated integration summary is available. Approval and rejection remain unavailable until bounded evaluation records one."));
+  else {
+    resultPanel.append(statusChip(detail.result.ready_for_decision ? "ready" : "pending"), explanation("Result", detail.result.result_id), explanation("Review", detail.result.review_outcome), explanation("Summary digest", compact(detail.result.summary_digest)), explanation("Evidence at", detail.result.evidence_at));
+    const tests = node("div", "outcome-list"); tests.append(node("h5", "", "Test outcomes")); if (!(detail.result.tests || []).length) tests.append(node("p", "muted", "No test outcomes were recorded."));
+    for (const test of detail.result.tests || []) { const item = node("div", "outcome-item"); item.append(node("strong", "", test.gate_id), statusChip(test.outcome), explanation("Evidence", compact(test.evidence_digest)), explanation("Duration (ms)", metric(test.duration_milliseconds))); tests.append(item); }
+    const caveats = node("ul", "mini-tags"); for (const value of [...(detail.result.limitations || []), ...(detail.result.unresolved_issues || [])]) caveats.append(node("li", "", value)); if (caveats.childElementCount) resultPanel.append(node("p", "muted", "Bounded limitations"), caveats); resultPanel.append(tests);
+  }
+  container.append(resultPanel);
+  const telemetryPanel = node("section", "evidence-item telemetry-evidence"); telemetryPanel.append(node("h4", "", "Telemetry completeness"));
+  if (!(detail.telemetry || []).length) telemetryPanel.append(node("p", "muted", "No verified telemetry summary is available for this execution."));
+  for (const itemValue of detail.telemetry || []) { const item = node("div", "telemetry-item"); item.append(node("strong", "", itemValue.telemetry_id), statusChip(itemValue.completeness), explanation("Outcome", itemValue.final_outcome), explanation("Recorded", itemValue.created_at), explanation("Digest", compact(itemValue.telemetry_digest))); const itemWarnings = node("ul", "mini-tags"); for (const warning of itemValue.weak_evidence || []) itemWarnings.append(node("li", "", warning)); if (itemWarnings.childElementCount) item.append(itemWarnings); telemetryPanel.append(item); }
+  container.append(telemetryPanel);
+  const acceptedPanel = node("section", "evidence-item accepted-history"); acceptedPanel.append(node("h4", "", "Accepted history"));
+  if (!(detail.accepted_history || []).length) acceptedPanel.append(node("p", "muted", "No canonical acceptance is recorded for this assignment."));
+  for (const itemValue of detail.accepted_history || []) acceptedPanel.append(node("div", "history-item", `${itemValue.accepted_at} · ${itemValue.reason_code}`), explanation("Summary digest", compact(itemValue.summary_digest)));
+  container.append(acceptedPanel);
+}
+
+function renderIncidents(detail) {
+  const container = byId("incident-list"); clear(container); const incidents = detail.incidents || []; text("incident-status", incidents.length ? `${incidents.length} active` : "No active incidents");
+  if (!incidents.length) { empty(container, "No active incident signals", "The current assignment has no stale-lease, uncertain-runtime, leaked-context, unsafe-output, or runaway-process signal."); return; }
+  for (const incident of incidents) {
+    const item = node("article", `incident-item severity-${incident.severity}`); const heading = node("div", "detail-heading"); heading.append(node("h4", "", incident.kind.replace(/_/g, " ")), statusChip(incident.severity)); item.append(heading, explanation("Status", incident.status), explanation("Evidence code", incident.evidence_code));
+    const actions = node("div", "control-actions"); for (const action of incident.recovery_actions || []) { if (action === "await_reconciliation") { item.append(node("p", "muted", "This signal is fenced. Wait for local scheduler reconciliation; the browser cannot override an expired lease.")); continue; } if (!["cancel", "fail", "retry", "reassign"].includes(action)) continue; const button = node("button", action === "cancel" || action === "fail" ? "danger-action" : "", controlLabel(action)); button.type = "button"; button.addEventListener("click", () => openControl(action)); actions.append(button); } if (actions.childElementCount) item.append(actions); container.append(item);
+  }
 }
 
 function renderDispatchPreview(value) {
@@ -194,7 +234,7 @@ async function previewDispatch() {
 }
 
 function operationKey(action) { return `ui-${action}-${crypto.randomUUID()}`; }
-function controlLabel(action) { return ({start_scheduler: "Start scheduler", disable_scheduler: "Disable scheduler", approve_task: "Approve task graph", pause: "Pause assignment", resume: "Resume assignment", cancel: "Cancel assignment", retry: "Retry assignment", reassign: "Reassign assignment", evaluate: "Evaluate result", approve: "Approve result", reject: "Reject result"})[action] || action; }
+function controlLabel(action) { return ({start_scheduler: "Start scheduler", disable_scheduler: "Disable scheduler", approve_task: "Approve task graph", pause: "Pause assignment", resume: "Resume assignment", cancel: "Cancel assignment", fail: "Mark assignment failed", retry: "Retry assignment", reassign: "Reassign assignment", evaluate: "Evaluate result", approve: "Approve result", reject: "Reject result"})[action] || action; }
 
 function openControl(action) {
   const project = currentProject(); const task = currentTask(); const detail = state.assignmentDetail;
@@ -242,6 +282,7 @@ function renderVisibilityUnavailable(message) {
   for (const [pickerID, label] of [["project-picker", "Project inventory unavailable"], ["task-picker", "Task inventory unavailable"]]) { const picker = byId(pickerID); clear(picker); picker.append(node("option", "", label)); picker.disabled = true; }
   empty(byId("project-summary"), "Project visibility unavailable", message); empty(byId("task-summary"), "Task visibility unavailable", message);
   empty(byId("readiness-graph"), "Readiness unavailable", message); empty(byId("assignment-list"), "Assignment visibility unavailable", message); clear(byId("assignment-detail"));
+  renderEvidenceEmpty("Decision evidence unavailable", message);
   empty(byId("worker-list"), "Worker inventory unavailable", message); empty(byId("node-list"), "Node inventory unavailable", message); text("readiness-status", "Unavailable");
   for (const id of ["scheduler-start", "scheduler-disable", "task-preview", "task-approve"]) byId(id).disabled = true;
   text("dispatch-status", "Unavailable"); empty(byId("dispatch-preview"), "Dispatch controls unavailable", message);
@@ -249,7 +290,7 @@ function renderVisibilityUnavailable(message) {
 
 async function selectProject(projectID) {
   state.selectedProjectID = projectID; state.selectedTaskID = ""; state.selectedAssignmentID = ""; state.assignmentDetail = null; state.dispatchPreview = null; state.tasks = {items: [], page: {}}; state.readiness = {items: [], page: {}, summary: null}; state.assignments = {items: [], page: {}};
-  renderProjects(); renderTasks(); renderReadiness(); renderAssignments(); setRefresh("Loading project visibility…");
+  renderProjects(); renderTasks(); renderReadiness(); renderAssignments(); renderEvidenceEmpty("Loading decision evidence", "Assignment evidence will appear after the bounded assignment projection loads."); setRefresh("Loading project visibility…");
   try { await Promise.all([loadTasks(), loadAssignments()]); await loadReadiness(); setRefresh("Sanitized project visibility is current."); } catch (error) { renderInlineError(error instanceof Error ? error.message : "Could not load project visibility."); setRefresh("Project visibility could not be refreshed."); }
 }
 

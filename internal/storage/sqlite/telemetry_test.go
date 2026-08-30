@@ -41,4 +41,12 @@ func TestExecutionTelemetryIsIdempotentConflictSafeAndListable(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].TelemetryID != record.TelemetryID {
 		t.Fatalf("listed=%+v err=%v", listed, err)
 	}
+	latestStore, ok := store.ExecutionTelemetry().(storage.LatestExecutionTelemetryStore)
+	if !ok {
+		t.Fatal("telemetry store does not expose bounded latest telemetry")
+	}
+	latest, err := latestStore.ListLatestExecutionTelemetry(context.Background(), record.ProjectID, record.ExecutionID, 1)
+	if err != nil || len(latest) != 1 || latest[0].TelemetryID != record.TelemetryID {
+		t.Fatalf("latest=%+v err=%v", latest, err)
+	}
 }

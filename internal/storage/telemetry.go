@@ -27,3 +27,10 @@ type ExecutionTelemetryStore interface {
 	GetExecutionTelemetry(context.Context, string) (ExecutionTelemetryRecord, error)
 	ListExecutionTelemetry(context.Context, string, string) ([]ExecutionTelemetryRecord, error)
 }
+
+// LatestExecutionTelemetryStore is an optional bounded local read model for
+// operator projections. Callers must not fall back to unbounded telemetry
+// enumeration when this capability is unavailable.
+type LatestExecutionTelemetryStore interface {
+	ListLatestExecutionTelemetry(context.Context, string, string, int) ([]ExecutionTelemetryRecord, error)
+}
