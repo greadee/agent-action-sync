@@ -317,3 +317,11 @@ Desktop Slice 9 uses two generated paired identities and a real migrated SQLite 
 ```powershell
 tools/check_desktop_node_slice9_release.ps1
 ```
+
+## Cross-node project observability gate
+
+Desktop Slice 10 uses independently signed current and legacy status replicas to prove the cross-node project API names only the local control store as scheduler authority. It deterministically distinguishes replica, stale, offline, and legacy-incompatible observations, compares accepted-history watermarks without merging stores, and rejects every federation mutation path. Browser-session tests verify the project comparison endpoint is cookie-readable but not cookie-writable.
+
+```powershell
+tools/check_desktop_node_slice10_release.ps1
+```

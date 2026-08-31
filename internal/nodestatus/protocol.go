@@ -21,12 +21,30 @@ import (
 
 const (
 	Protocol         = "syncgate-node-status-v1"
+	LegacyProtocol   = "syncgate-node-status-v0"
 	MaxProjects      = 200
 	MaxStatusCounts  = 16
 	MaxSnapshotTTL   = 5 * time.Minute
 	MaxClockSkew     = 5 * time.Minute
 	MaxEnvelopeBytes = 96 << 10
 )
+
+// Compatibility identifies how much of a replica can be safely projected by
+// the current control plane. Legacy replicas remain read-only observations.
+func Compatibility(protocol string) string {
+	switch protocol {
+	case Protocol:
+		return "current"
+	case LegacyProtocol:
+		return "downgraded"
+	default:
+		return "incompatible"
+	}
+}
+
+func SupportedProtocol(protocol string) bool {
+	return Compatibility(protocol) != "incompatible"
+}
 
 type StatusCount struct {
 	State string `json:"state"`
@@ -165,7 +183,7 @@ func (receiver Receiver) Apply(ctx context.Context, envelope Envelope) (storage.
 }
 
 func ValidateSnapshot(snapshot Snapshot, now time.Time) error {
-	if snapshot.Protocol != Protocol {
+	if !SupportedProtocol(snapshot.Protocol) {
 		return errors.New("unsupported node status protocol")
 	}
 	if err := boundedID(string(snapshot.SourceDeviceID)); err != nil || snapshot.Revision < 1 || !digestValue(snapshot.Watermark) {

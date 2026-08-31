@@ -5,7 +5,7 @@ const byId = (id) => document.getElementById(id);
 const state = {
   selectedProjectID: "", selectedTaskID: "", selectedAssignmentID: "",
   projects: {items: [], page: {}}, tasks: {items: [], page: {}}, readiness: {items: [], page: {}},
-  assignments: {items: [], page: {}}, workers: {items: [], page: {}}, nodes: {items: [], page: {}}, federatedNodes: [],
+  assignments: {items: [], page: {}}, workers: {items: [], page: {}}, nodes: {items: [], page: {}}, federatedNodes: [], crossNodeProjects: [],
   csrfToken: "", assignmentDetail: null, dispatchPreview: null, pendingControl: null
 };
 
@@ -290,6 +290,20 @@ function renderFederatedNodes() {
   }
 }
 
+async function loadCrossNodeProjects() { const value = await getJSON("/api/v1/federation/projects"); state.crossNodeProjects = value.items || []; renderCrossNodeProjects(); }
+function readableInsight(value) { return String(value || "not reported").replace(/_/g, " "); }
+function renderCrossNodeProjects() {
+  const list = byId("cross-node-project-list"); clear(list); text("cross-node-project-count", state.crossNodeProjects.length);
+  if (!state.crossNodeProjects.length) { empty(list, "No cross-node project observations", "Register a local project or receive a signed paired-node summary to compare read-only distributed state."); return; }
+  for (const project of state.crossNodeProjects) {
+    const item = node("article", "cross-node-project-item"); const heading = node("div", "detail-heading"); heading.append(node("h3", "", project.display_name || project.project_id), statusChip(project.authority === "local_control_store" ? "authority" : "not_observed")); item.append(heading, explanation("Project", project.project_id), explanation("Scheduler authority", project.authority === "local_control_store" ? "this node's local control store" : "not observed locally"));
+    const insights = node("ul", "mini-tags"); for (const insight of project.insights || []) insights.append(node("li", "", readableInsight(insight))); item.append(insights);
+    const observations = node("div", "cross-node-observations"); if (!(project.observations || []).length) observations.append(node("p", "muted", "No paired-node replica has reported this local project."));
+    for (const observation of project.observations || []) { const replica = node("section", "cross-node-observation"); const replicaHeading = node("div", "detail-heading"); replicaHeading.append(node("h4", "", observation.display_name || observation.device_id), statusChip(observation.observation_kind)); replica.append(replicaHeading, explanation("Replica device", observation.device_id), explanation("Scheduler state", observation.scheduler_state), explanation("Accepted watermark", compact(observation.accepted_history_watermark)), explanation("Snapshot", `${observation.protocol || "unknown"} · r${observation.revision || "—"}`), explanation("Observed", observation.observed_at), explanation("Expires", observation.expires_at)); if (observation.compatibility_message) replica.append(node("p", "muted", observation.compatibility_message)); observations.append(replica); }
+    item.append(observations); list.append(item);
+  }
+}
+
 function renderVisibilityUnavailable(message) {
   for (const [pickerID, label] of [["project-picker", "Project inventory unavailable"], ["task-picker", "Task inventory unavailable"]]) { const picker = byId(pickerID); clear(picker); picker.append(node("option", "", label)); picker.disabled = true; }
   empty(byId("project-summary"), "Project visibility unavailable", message); empty(byId("task-summary"), "Task visibility unavailable", message);
@@ -315,6 +329,8 @@ async function loadVisibility() {
 async function loadFederationVisibility() {
   try { await loadFederatedNodes(); }
   catch (error) { state.federatedNodes = []; text("federation-count", 0); empty(byId("federated-node-list"), "Paired-node visibility unavailable", error instanceof Error ? error.message : "Could not load paired-node status."); }
+  try { await loadCrossNodeProjects(); }
+  catch (error) { state.crossNodeProjects = []; text("cross-node-project-count", 0); empty(byId("cross-node-project-list"), "Cross-node project view unavailable", error instanceof Error ? error.message : "Could not compare paired-node project observations."); }
 }
 
 async function connect() {

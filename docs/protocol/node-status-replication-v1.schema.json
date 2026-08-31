@@ -11,7 +11,7 @@
       "additionalProperties": false,
       "required": ["protocol", "source_device_id", "revision", "watermark", "health", "lifecycle", "observed_at", "expires_at"],
       "properties": {
-        "protocol": { "const": "syncgate-node-status-v1" },
+        "protocol": { "enum": ["syncgate-node-status-v1", "syncgate-node-status-v0"], "description": "v0 is a legacy read-only compatibility profile; it never grants authority." },
         "source_device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "revision": { "type": "integer", "minimum": 1 },
         "watermark": { "type": "string", "pattern": "^[a-f0-9]{64}$" },

@@ -95,7 +95,7 @@ footer { padding: 28px 4px 0; color: #68758a; font-size: 11px; letter-spacing: .
 .muted { color: #91a0b5; font-size: 13px; line-height: 1.55; }
 .inline-state { border: 1px solid rgba(251, 113, 133, .48); border-radius: 12px; padding: 13px 15px; color: #fecdd3; background: rgba(136, 19, 55, .18); font-size: 13px; }
 .visibility-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-.project-card, .readiness-panel, .preview-panel, .assignment-panel, .inventory-panel, .evidence-panel, .incident-panel, .federation-panel { padding: 24px; }
+.project-card, .readiness-panel, .preview-panel, .assignment-panel, .inventory-panel, .evidence-panel, .incident-panel, .federation-panel, .cross-node-project-panel { padding: 24px; }
 .count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; color: #c4d0e9; background: #1a2435; font-size: 12px; font-weight: 720; }
 select { width: 100%; min-height: 42px; margin-top: 22px; border: 1px solid #3a475d; border-radius: 10px; padding: 9px 12px; color: #ebeff7; background: #111927; font: inherit; }
 select:focus-visible, button:focus-visible { outline: 2px solid #94a9ff; outline-offset: 3px; }
@@ -162,12 +162,18 @@ select:focus-visible, button:focus-visible { outline: 2px solid #94a9ff; outline
 .inventory-item { border: 1px solid rgba(56, 70, 91, .8); border-left: 2px solid #5266a1; border-radius: 10px; padding: 12px; background: rgba(15, 22, 33, .6); }
 .inventory-item > p { margin: 0; color: #9facbf; font-size: 12px; overflow-wrap: anywhere; }
 .federation-panel { grid-column: 1 / -1; display: grid; gap: 18px; }
-.federation-panel h2 { margin: 0; font-size: 24px; letter-spacing: -.035em; }
+.federation-panel h2, .cross-node-project-panel h2 { margin: 0; font-size: 24px; letter-spacing: -.035em; }
 .federated-node-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
 .federated-node-item { display: grid; gap: 9px; border: 1px solid rgba(68, 91, 127, .86); border-left: 3px solid #5688a8; border-radius: 13px; padding: 16px; background: rgba(14, 22, 34, .74); }
 .federated-node-item h3 { margin: 0; max-width: 72%; font-size: 16px; overflow-wrap: anywhere; }
 .federated-projects { display: grid; gap: 9px; margin-top: 8px; }
 .federated-project { display: grid; gap: 8px; border-top: 1px solid rgba(61, 78, 105, .7); padding-top: 11px; }
+.cross-node-project-panel { grid-column: 1 / -1; display: grid; gap: 18px; }
+.cross-node-project-list { display: grid; gap: 14px; }
+.cross-node-project-item { display: grid; gap: 12px; border: 1px solid rgba(77, 96, 142, .82); border-left: 3px solid #7b83d4; border-radius: 13px; padding: 16px; background: rgba(16, 20, 38, .74); }
+.cross-node-project-item h3, .cross-node-observation h4 { margin: 0; overflow-wrap: anywhere; }
+.cross-node-observations { display: grid; gap: 10px; }
+.cross-node-observation { display: grid; gap: 8px; border-top: 1px solid rgba(61, 78, 105, .7); padding: 12px 0 0; }
 .empty-state { display: grid; gap: 6px; border: 1px dashed rgba(79, 94, 118, .82); border-radius: 12px; padding: 17px; color: #b5c0d1; }
 .empty-state strong { color: #dbe3f1; font-size: 14px; }
 .empty-state p { margin: 0; color: #93a0b4; font-size: 13px; line-height: 1.55; }

@@ -80,9 +80,19 @@ func TestOrchestrationRoutesAreUnavailableWithoutDaemonFacade(t *testing.T) {
 	}
 }
 
-type orchestrationFacadeStub struct{ nodes, controlled bool }
+type orchestrationFacadeStub struct {
+	nodes, controlled bool
+	projects          []LocalProjectItem
+	projectErr        error
+}
 
 func (stub *orchestrationFacadeStub) ListLocalProjects(context.Context, storage.PageRequest) (LocalProjectPage, error) {
+	if stub.projectErr != nil {
+		return LocalProjectPage{}, stub.projectErr
+	}
+	if stub.projects != nil {
+		return LocalProjectPage{Items: append([]LocalProjectItem(nil), stub.projects...), Page: InventoryPage{Limit: len(stub.projects)}}, nil
+	}
 	return LocalProjectPage{Items: []LocalProjectItem{{ProjectID: "project-one", DisplayName: "One", SchedulerState: "paused", AssignmentCounts: []StatusCount{}, GateCounts: []StatusCount{}}}, Page: InventoryPage{Limit: 1}}, nil
 }
 func (stub *orchestrationFacadeStub) SelectLocalProject(context.Context, LocalProjectSelectionInput) (LocalProjectItem, error) {

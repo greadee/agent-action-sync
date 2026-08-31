@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
 	"syncgate/internal/nodestatus"
@@ -80,30 +79,6 @@ func (service *LocalAdministrationService) ListFederatedNodes(ctx context.Contex
 		})
 	}
 	return FederatedNodePage{Items: items}, nil
-}
-
-func NewNodeFederationHandler(service *LocalAdministrationService) http.Handler {
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/api/v1/federation/nodes" {
-			writeError(writer, request, errNotFound)
-			return
-		}
-		if request.Method != http.MethodGet {
-			writer.Header().Set("Allow", http.MethodGet)
-			writeError(writer, request, errMethodNotAllowed)
-			return
-		}
-		if service == nil {
-			writeError(writer, request, errUnavailable)
-			return
-		}
-		page, err := service.ListFederatedNodes(request.Context())
-		if err != nil {
-			writeError(writer, request, err)
-			return
-		}
-		writeJSON(writer, request, http.StatusOK, page)
-	})
 }
 
 func (service *LocalAdministrationService) currentTime() time.Time {

@@ -20,6 +20,7 @@ var browserCapabilities = []string{
 	"assignment.visibility.read",
 	"result-budget-incident.read",
 	"paired-node-status.read",
+	"cross-node-project.read",
 	"worker-node.inventory.read",
 	"operator.controls.write",
 }
@@ -196,7 +197,7 @@ func browserSessionAllows(request *http.Request) bool {
 	}
 	if request.Method == http.MethodGet {
 		switch request.URL.Path {
-		case "/api/v1/status", "/api/v1/orchestration/projects", "/api/v1/orchestration/workers", "/api/v1/orchestration/nodes", "/api/v1/federation/nodes":
+		case "/api/v1/status", "/api/v1/orchestration/projects", "/api/v1/orchestration/workers", "/api/v1/orchestration/nodes", "/api/v1/federation/nodes", "/api/v1/federation/projects":
 			return true
 		}
 	}

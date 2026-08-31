@@ -81,7 +81,7 @@ try {
     $browser = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     $headers = @{ Origin = $origin; "Sec-Fetch-Site" = "same-origin" }
     $document = Invoke-RestMethod -Uri ($origin + "/api/v1/browser-session/bootstrap") -Method Post -Headers $headers -ContentType "application/json" -Body (@{ bootstrap_token = $bootstrap } | ConvertTo-Json) -WebSession $browser
-    $expectedCapabilities = @("node.health.read", "node.status.read", "project.visibility.read", "task.readiness.read", "assignment.visibility.read", "result-budget-incident.read", "paired-node-status.read", "worker-node.inventory.read", "operator.controls.write")
+    $expectedCapabilities = @("node.health.read", "node.status.read", "project.visibility.read", "task.readiness.read", "assignment.visibility.read", "result-budget-incident.read", "paired-node-status.read", "cross-node-project.read", "worker-node.inventory.read", "operator.controls.write")
     if ($document.health -ne "ok" -or $document.status.status -ne "running" -or $document.capabilities.Count -ne $expectedCapabilities.Count) {
         throw "browser bootstrap did not return sanitized node status"
     }

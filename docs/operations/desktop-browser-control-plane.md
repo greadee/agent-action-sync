@@ -17,6 +17,7 @@ The initial session document is deliberately narrow. It contains process health,
 - `assignment.visibility.read`
 - `result-budget-incident.read`
 - `paired-node-status.read`
+- `cross-node-project.read`
 - `worker-node.inventory.read`
 - `operator.controls.write`
 
@@ -40,7 +41,9 @@ Incident panels classify stale leases, uncertain runtime recovery, leaked-contex
 
 The paired-node panel compares the local status cards with verified replicas from trusted devices that have an active, explicit `read_status` grant. Each card identifies its revision and watermark, observation and expiry, online/offline state, closed health/lifecycle values, and bounded project counts. An expired observation is labeled offline; an expired grant removes the card. Pairing revocation disables the grant and deletes the stored replica transactionally, so a refresh immediately removes it.
 
-The federation endpoint is GET-only. It cannot start, stop, schedule, cancel, retry, reassign, transfer, browse, or otherwise command the remote node. Its project summaries do not carry paths, prompts, logs, artifacts, runtime sessions, worker/provider details, or execution ownership.
+The cross-node project view groups only independent local and paired-node observations. It marks this node's local control store as scheduler authority when a local project exists; every peer remains a replica even when project IDs and accepted-history watermarks match. It deterministically labels matching or differing accepted-history watermarks, offline observations, snapshots older than two minutes, and `syncgate-node-status-v0` legacy-schema downgrade. A legacy observation is intentionally incompatible with the current full display and is not silently upgraded.
+
+Both federation endpoints are GET-only. They cannot start, stop, schedule, cancel, retry, reassign, transfer, browse, or otherwise command the remote node. Their project summaries do not carry paths, prompts, logs, artifacts, runtime sessions, worker/provider details, or execution ownership.
 
 ## Security boundary
 

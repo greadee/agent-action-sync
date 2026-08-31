@@ -149,7 +149,7 @@ func NewAdminV1Handler(service AdministrationService) http.Handler {
 			handleInventoryAudit(writer, request, service)
 			return
 		}
-		if request.URL.Path == "/api/v1/federation/nodes" {
+		if request.URL.Path == "/api/v1/federation/nodes" || request.URL.Path == "/api/v1/federation/projects" {
 			setup, ok := service.(*LocalAdministrationService)
 			if !ok {
 				writeError(writer, request, errUnavailable)

@@ -270,6 +270,16 @@ func (client *Client) ListLocalProjects(ctx context.Context, limit int) (LocalPr
 	err := client.do(ctx, http.MethodGet, collectionPath("/api/v1/orchestration/projects", limit), nil, &result)
 	return result, err
 }
+func (client *Client) ListFederatedNodes(ctx context.Context) (FederatedNodePage, error) {
+	var result FederatedNodePage
+	err := client.do(ctx, http.MethodGet, "/api/v1/federation/nodes", nil, &result)
+	return result, err
+}
+func (client *Client) ListCrossNodeProjects(ctx context.Context) (CrossNodeProjectPage, error) {
+	var result CrossNodeProjectPage
+	err := client.do(ctx, http.MethodGet, "/api/v1/federation/projects", nil, &result)
+	return result, err
+}
 func (client *Client) SelectLocalProject(ctx context.Context, input LocalProjectSelectionInput) (LocalProjectItem, error) {
 	if err := input.Validate(); err != nil {
 		return LocalProjectItem{}, errors.New("local project selection input is invalid")
