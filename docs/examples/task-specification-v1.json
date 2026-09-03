@@ -1,0 +1,25 @@
+{
+  "schema": "syncgate.task-specification.v1",
+  "specification_id": "spec:laptop-pilot",
+  "project_id": "project:laptop-pilot",
+  "created_at": "2026-09-01T12:00:00Z",
+  "task_id": "task:laptop-pilot",
+  "task_revision": 1,
+  "graph_revision": 1,
+  "objective": "Complete one supervised Codex pilot from the laptop control plane.",
+  "priority": "normal",
+  "work_packages": [
+    {
+      "work_package_id": "work:laptop-pilot",
+      "objective": "Make and verify one bounded disposable change.",
+      "trade": "engineering",
+      "scope": {
+        "allowed": ["."],
+        "inspect": ["."]
+      },
+      "deliverables": ["A bounded implementation change."],
+      "acceptance_criteria": ["The configured focused test passes."],
+      "review_required": true
+    }
+  ]
+}

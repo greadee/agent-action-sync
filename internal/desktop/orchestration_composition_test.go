@@ -83,7 +83,7 @@ func TestBuildLocalOrchestrationStartsPausedWithRealNodeOwnedComponents(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if composition.Runtime == nil || composition.Workspace == nil || composition.Node == nil || composition.Results.Root == "" || composition.Administration == nil {
+	if composition.Runtime == nil || composition.Workspace == nil || composition.Node == nil || composition.Results.Root == "" || composition.Administration == nil || composition.Setup == nil {
 		t.Fatalf("composition is incomplete: %+v", composition)
 	}
 	if err := composition.Scheduler.Start(ctx); err != nil {

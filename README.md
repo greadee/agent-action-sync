@@ -93,6 +93,8 @@ tools\check_desktop_node_slice6_release.ps1
 tools\check_desktop_node_slice7_release.ps1
 tools\check_desktop_node_slice8_release.ps1
 tools\check_desktop_node_slice9_release.ps1
+tools\check_desktop_node_slice10_release.ps1
+tools\check_desktop_node_slice11_release.ps1
 ```
 
 Initialize, run, and check an installed per-user node with:
@@ -160,6 +162,8 @@ Useful docs:
 - [Desktop version manifest v1](docs/protocol/desktop-version-manifest-v1.schema.json)
 - [Desktop settings, credentials, and execution opt-in decision](docs/adr/phase-8-desktop-settings-credentials.md)
 - [Desktop configuration and credential lifecycle](docs/operations/desktop-node-configuration.md)
+- [Laptop-to-home Codex operations sprint](docs/operations/laptop-remote-codex-sprint.md)
+- [Task specification example](docs/examples/task-specification-v1.json)
 - [Sanitized desktop diagnostics v1](docs/protocol/desktop-diagnostics-v1.schema.json)
 - [Orchestration control, fencing, and recovery](docs/architecture/orchestration-control-recovery.md)
 - [Deterministic dispatch selection](docs/architecture/deterministic-dispatch-selection.md)

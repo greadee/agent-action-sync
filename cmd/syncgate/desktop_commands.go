@@ -14,6 +14,7 @@ import (
 	"syncgate/internal/desktop"
 	"syncgate/internal/identity"
 	"syncgate/internal/resultintake"
+	"syncgate/internal/taskspec"
 )
 
 const deleteProviderCredentialConfirmation = "DELETE PROVIDER CREDENTIAL"
@@ -314,6 +315,42 @@ func runNodeResultImport(args []string) {
 		ResultID string `json:"result_id"`
 		Digest   string `json:"digest"`
 	}{ResultID: envelope.ResultID, Digest: envelope.Digest})
+}
+
+func runNodeTaskSpecificationImport(args []string) {
+	flags := flag.NewFlagSet("node-task-spec-import", flag.ExitOnError)
+	root := flags.String("root", "", "optional explicit desktop node root")
+	fromStdin := flags.Bool("from-stdin", false, "read a bounded task specification from stdin")
+	_ = flags.Parse(args)
+	if !*fromStdin {
+		exitf("--from-stdin is required")
+	}
+	base := resolveDesktopRoots(*root)
+	_, roots, err := (desktop.SettingsManager{Base: base}).Active(context.Background())
+	if err != nil {
+		exitf("read desktop settings: %v", err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(os.Stdin, taskspec.MaxBytes+1))
+	if err != nil || len(raw) > taskspec.MaxBytes {
+		exitf("read bounded task specification: input exceeds the limit")
+	}
+	stored, err := (taskspec.FileStore{Root: filepath.Join(roots.DataDir, "orchestration", "task-specifications")}).Put(context.Background(), raw)
+	for index := range raw {
+		raw[index] = 0
+	}
+	if err != nil {
+		exitf("import task specification: %v", err)
+	}
+	printJSON(struct {
+		SpecificationID string `json:"specification_id"`
+		Digest          string `json:"digest"`
+		ProjectID       string `json:"project_id"`
+		TaskID          string `json:"task_id"`
+		AlreadyPresent  bool   `json:"already_present"`
+	}{
+		SpecificationID: stored.Specification.SpecificationID, Digest: stored.Digest,
+		ProjectID: stored.Specification.ProjectID, TaskID: stored.Specification.TaskID, AlreadyPresent: stored.AlreadyPresent,
+	})
 }
 
 func providerCredentials(base desktop.Roots) desktop.ProviderCredentials {

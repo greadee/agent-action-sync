@@ -79,6 +79,8 @@ func main() {
 		runNodeResources(os.Args[2:])
 	case "node-result-import":
 		runNodeResultImport(os.Args[2:])
+	case "node-task-spec-import":
+		runNodeTaskSpecificationImport(os.Args[2:])
 	case "check-config":
 		runCheckConfig(os.Args[2:])
 	case "diagnostics":

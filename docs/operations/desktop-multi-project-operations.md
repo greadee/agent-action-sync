@@ -30,6 +30,37 @@ inventory exceeds one page.
 The scheduler starts paused after every node start. While it is paused, select
 one project and set its local policy:
 
+Before task approval, import an immutable authority-local task specification
+through bounded stdin. Specification content is never accepted in process
+arguments:
+
+```powershell
+$specification = Get-Content -Raw docs\examples\task-specification-v1.json |
+  syncgate node-task-spec-import --from-stdin | ConvertFrom-Json
+
+syncgate orchestration-task-validate `
+  --config <node-config.json> `
+  --project $specification.project_id `
+  --specification $specification.specification_id `
+  --specification-digest $specification.digest
+
+syncgate orchestration-task-create `
+  --config <node-config.json> `
+  --project $specification.project_id `
+  --task $specification.task_id `
+  --task-revision 1 `
+  --graph-revision 1 `
+  --specification $specification.specification_id `
+  --specification-digest $specification.digest `
+  --idempotency-key <unique-key>
+```
+
+The specification is stored only in the node-owned data root. Task creation
+publishes its validated task, graph, work-package definitions, and creation
+events into canonical portable project history. Reimporting equivalent content
+or repeating the same create command is safe; changing content under an
+existing specification identity or idempotency key fails as a conflict.
+
 ```powershell
 syncgate orchestration-project-select `
   --config <node-config.json> `

@@ -115,6 +115,13 @@ func (daemon *Daemon) ConfigureLocalAPI(options Options) error {
 	if orchestration == nil {
 		orchestration = disabledOrchestrationFacade{}
 	}
+	setup := options.SetupAdministration
+	if setup == nil {
+		setup = daemon.setupAdmin
+	}
+	if setup == nil {
+		setup = disabledSetupFacade{}
+	}
 	service, err := api.NewAdministrationService(api.AdministrationServiceOptions{
 		Queries:       queries,
 		Ready:         daemon.localAPIReady,
@@ -124,7 +131,7 @@ func (daemon *Daemon) ConfigureLocalAPI(options Options) error {
 		Control:       api.ControlWithJobStore(daemon.Store.OneWayJobs(), daemon.currentTime),
 		Pairing:       pairingCoordinator,
 		ProjectStore:  daemon.Store,
-		Setup:         disabledSetupFacade{},
+		Setup:         setup,
 		Orchestration: orchestration,
 		NodeStatus:    daemon.Store.NodeStatus(),
 		Now:           daemon.currentTime,

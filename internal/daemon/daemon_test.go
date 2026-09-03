@@ -79,14 +79,14 @@ func TestDaemonComposesOrchestrationOnlyWhenExecutionEnabled(t *testing.T) {
 	called := 0
 	composer := func(context.Context, config.Config, storage.Store, identity.DeviceIdentity) (OrchestrationComponents, error) {
 		called++
-		return OrchestrationComponents{Scheduler: &orderedOrchestrationScheduler{events: &orderedEvents{}}, Administration: disabledOrchestrationFacade{}}, nil
+		return OrchestrationComponents{Scheduler: &orderedOrchestrationScheduler{events: &orderedEvents{}}, Administration: disabledOrchestrationFacade{}, Setup: disabledSetupFacade{}}, nil
 	}
 	instance, err := Bootstrap(context.Background(), cfg, Options{ComposeOrchestration: composer})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if called != 1 || instance.orchestrationScheduler == nil || instance.orchestrationAdmin == nil {
-		t.Fatalf("composition called=%d scheduler=%v admin=%v", called, instance.orchestrationScheduler, instance.orchestrationAdmin)
+	if called != 1 || instance.orchestrationScheduler == nil || instance.orchestrationAdmin == nil || instance.setupAdmin == nil {
+		t.Fatalf("composition called=%d scheduler=%v admin=%v setup=%v", called, instance.orchestrationScheduler, instance.orchestrationAdmin, instance.setupAdmin)
 	}
 	_ = instance.Close()
 

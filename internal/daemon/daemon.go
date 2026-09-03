@@ -53,6 +53,7 @@ type Options struct {
 	OrchestrationScheduler      OrchestrationScheduler
 	OrchestrationDrain          time.Duration
 	OrchestrationAdministration api.OrchestrationAdministration
+	SetupAdministration         api.SetupAdministration
 	ComposeOrchestration        OrchestrationComposer
 }
 
@@ -64,6 +65,7 @@ type OrchestrationScheduler interface {
 type OrchestrationComponents struct {
 	Scheduler      OrchestrationScheduler
 	Administration api.OrchestrationAdministration
+	Setup          api.SetupAdministration
 }
 
 type OrchestrationComposer func(context.Context, config.Config, storage.Store, identity.DeviceIdentity) (OrchestrationComponents, error)
@@ -95,6 +97,7 @@ type Daemon struct {
 	requestProjectIngestion func(context.Context, core.ShareID, string) error
 	orchestrationScheduler  OrchestrationScheduler
 	orchestrationAdmin      api.OrchestrationAdministration
+	setupAdmin              api.SetupAdministration
 	orchestrationDrain      time.Duration
 }
 
@@ -180,11 +183,12 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 		if composeErr != nil {
 			return nil, fmt.Errorf("compose local orchestration: %w", composeErr)
 		}
-		if components.Scheduler == nil || components.Administration == nil {
+		if components.Scheduler == nil || components.Administration == nil || components.Setup == nil {
 			return nil, errors.New("local orchestration composition is incomplete")
 		}
 		options.OrchestrationScheduler = components.Scheduler
 		options.OrchestrationAdministration = components.Administration
+		options.SetupAdministration = components.Setup
 	}
 
 	if err := store.Devices().TrustDevice(ctx, storage.Device{
@@ -245,6 +249,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, options Options) (*Daemon
 		requestProjectIngestion: options.RequestProjectIngestion,
 		orchestrationScheduler:  options.OrchestrationScheduler,
 		orchestrationAdmin:      options.OrchestrationAdministration,
+		setupAdmin:              options.SetupAdministration,
 		orchestrationDrain:      options.OrchestrationDrain,
 		startedAt:               options.Now().UTC(),
 	}, nil

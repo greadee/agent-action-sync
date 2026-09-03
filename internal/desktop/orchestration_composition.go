@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"syncgate/internal/api"
 	"syncgate/internal/codexruntime"
 	"syncgate/internal/computenode"
 	"syncgate/internal/config"
@@ -23,6 +24,7 @@ import (
 	"syncgate/internal/runtimecontract"
 	"syncgate/internal/scheduler"
 	"syncgate/internal/storage"
+	"syncgate/internal/taskspec"
 	"syncgate/internal/workhistory"
 	"syncgate/internal/workspace"
 )
@@ -43,6 +45,7 @@ type LocalOrchestrationOptions struct {
 type LocalOrchestration struct {
 	Scheduler           *scheduler.Scheduler
 	Administration      *LocalOrchestrationAdministration
+	Setup               *LocalSetupAdministration
 	Runtime             *codexruntime.Adapter
 	Node                *LocalNodeProvider
 	Workspace           *workspace.GitWorktreeManager
@@ -105,13 +108,14 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 		return nil, err
 	}
 	control := orchestration.ControlService{Store: options.Store.OrchestrationControl(), Now: options.Now}
+	runtimeCapabilities := []executioncontract.Capability{
+		executioncontract.CapabilityInspect, executioncontract.CapabilityWrite,
+		executioncontract.CapabilityShell, executioncontract.CapabilityTest, executioncontract.CapabilityBranch,
+	}
 	adapter, err := codexruntime.New(codexruntime.Config{
 		Enabled: true, Executable: record.RuntimeExecutable, CodexHome: codexHome, StateRoot: runtimeState,
 		Runtime: runtimeRef, Provider: providerRef, Model: modelRef, Node: nodeRef,
-		Capabilities: []executioncontract.Capability{
-			executioncontract.CapabilityInspect, executioncontract.CapabilityWrite,
-			executioncontract.CapabilityShell, executioncontract.CapabilityTest, executioncontract.CapabilityBranch,
-		},
+		Capabilities:  runtimeCapabilities,
 		MaxConcurrent: options.Config.Node.Execution.MaxConcurrent, Now: options.Now, Executor: options.Executor,
 		Workspace: func(resolveCtx context.Context, binding codexruntime.WorkspaceBinding) (string, error) {
 			return resolveRuntimeWorkspace(resolveCtx, workspaces, control, binding)
@@ -156,6 +160,19 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 	if err != nil {
 		return nil, err
 	}
+	capabilityIDs := make([]string, len(runtimeCapabilities))
+	for index, capability := range runtimeCapabilities {
+		capabilityIDs[index] = string(capability)
+	}
+	setup, err := NewLocalSetupAdministration(LocalSetupOptions{
+		Specifications: taskspec.FileStore{Root: filepath.Join(roots.DataDir, "orchestration", "task-specifications")},
+		History:        history, Projects: options.Store.ProjectRegistrations(), Tasks: options.Store.ProjectTasks(), DeviceID: string(options.Identity.DeviceID),
+		Runtimes: []api.CapabilityReference{{ID: runtimeRef.ID, Version: runtimeRef.Version, Digest: runtimeRef.Digest, Lifecycle: "active", CapabilityIDs: capabilityIDs}},
+		Nodes:    []api.CapabilityReference{{ID: nodeRef.ID, Version: nodeRef.Version, Digest: nodeRef.Digest, Lifecycle: string(nodeDefinition.Lifecycle), CapabilityIDs: capabilityIDs}},
+	})
+	if err != nil {
+		return nil, err
+	}
 	runtimes := singleRuntimeResolver{reference: runtimeRef, adapter: adapter}
 	gate := &integrationgate.Service{
 		Contracts: options.Store.ExecutionContracts(),
@@ -172,7 +189,7 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 		Node: node, Gate: gate, Now: options.Now,
 	})
 	return &LocalOrchestration{
-		Scheduler: schedulerValue, Administration: administration, Runtime: adapter, Node: node,
+		Scheduler: schedulerValue, Administration: administration, Setup: setup, Runtime: adapter, Node: node,
 		Workspace: workspaces, Results: results, RuntimeRef: runtimeRef, ProviderRef: providerRef, ModelRef: modelRef, NodeRef: nodeRef,
 		AuthorizedProjectID: authorizedProjectID,
 	}, nil
@@ -260,7 +277,7 @@ func NewOrchestrationComposer(base Roots) daemon.OrchestrationComposer {
 		if err != nil {
 			return daemon.OrchestrationComponents{}, err
 		}
-		return daemon.OrchestrationComponents{Scheduler: composition.Scheduler, Administration: composition.Administration}, nil
+		return daemon.OrchestrationComponents{Scheduler: composition.Scheduler, Administration: composition.Administration, Setup: composition.Setup}, nil
 	}
 }
 
