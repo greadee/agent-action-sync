@@ -21,6 +21,13 @@ func TestGitWorktreeProvisioningRestartManifestAndCleanup(t *testing.T) {
 	}
 	request := fixture.request(t, "attempt:one", "workspace:one", "assignment:one")
 	primaryHead := gitTest(t, fixture.repository, "rev-parse", "HEAD")
+	preflight, err := manager.Preflight(context.Background(), request)
+	if err != nil || !preflight.Ready || preflight.WorkspaceID != request.WorkspaceID || preflight.BranchName != request.BranchName {
+		t.Fatalf("preflight=%+v err=%v", preflight, err)
+	}
+	if got := gitTest(t, fixture.repository, "branch", "--list", request.BranchName); got != "" {
+		t.Fatalf("preflight created branch: %q", got)
+	}
 	allocated, err := manager.Allocate(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)

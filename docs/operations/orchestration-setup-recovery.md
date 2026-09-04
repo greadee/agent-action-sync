@@ -1,10 +1,11 @@
 # Orchestration Setup Recovery and Disable Procedure
 
-The shipped daemon exposes orchestration setup inventory only. Runtime
-execution and workspace allocation are disabled, and authority-service routes
-for graph publication, validation, context/runtime preflight, and contract
-preview return sanitized `503 unavailable` responses until an explicitly
-configured authority service is released.
+The shipped daemon keeps orchestration disabled unless local execution has
+passed its explicit disposable-project preflight and enablement. When enabled,
+the daemon composes graph publication and validation, context/runtime preflight,
+immutable contract preview, and a project-backed scheduler source. When that
+authority is absent, the same routes return sanitized `503 unavailable`
+responses rather than partially resolving authority.
 
 ## Release gate
 
@@ -44,9 +45,9 @@ host before a release.
 
 ## Disable and containment
 
-- Leave `runtime_execution_enabled` and `workspace_allocation_enabled` false.
-  Do not replace the shipped disabled setup facade with a runtime adapter as a
-  recovery action.
+- Disable local execution and confirm `runtime_execution_enabled` and
+  `workspace_allocation_enabled` are false when containing a suspected boundary
+  violation. Do not bypass preflight by wiring a runtime adapter directly.
 - If a future authority service is enabled and a boundary violation is
   suspected, stop the daemon, remove that service from composition, restart,
   and verify `GET /api/v1/orchestration/capabilities` reports both flags false.

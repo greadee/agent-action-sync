@@ -18,7 +18,7 @@ changes execution authority.
 | Slice | Outcome | Recommended model | Reasoning effort | Status |
 | --- | --- | --- | --- | --- |
 | 1. Task authority | Import immutable authority-local task specifications and publish/validate their portable task graphs through the production setup facade | `gpt-5.6-sol` | high | completed |
-| 2. Dispatch authority | Build a SQLite/project-backed scheduler work source, registry bootstrap, context compilation, contract preview, and deterministic dispatch binding | `gpt-5.6-sol` | high | pending |
+| 2. Dispatch authority | Build a SQLite/project-backed scheduler work source, registry bootstrap, context compilation, contract preview, and deterministic dispatch binding | `gpt-5.6-sol` | high | completed |
 | 3. Hosted runtime loop | Establish isolated Codex authentication, bridge supervised runtime results into intake, configure exact test/review gates, and pass a disposable hosted pilot | `gpt-5.6-sol` | xhigh | pending |
 | 4. Work telemetry | Record real queue/runtime/gate/review timestamps and persist nullable usage evidence into telemetry and portable accepted history | `gpt-5.6-terra` | high | pending |
 | 5. Private laptop control | Keep the administration listener loopback-only while adding an authenticated private-tunnel bootstrap and narrowly scoped remote operator workflow | `gpt-5.6-sol` | high | pending |
@@ -69,6 +69,23 @@ records. Register one local Codex worker/node definition, compile an allowlisted
 context, build an immutable contract, and expose production context/runtime and
 contract preflight. The scheduler must start paused and must never dispatch a
 project that is merely visible but not execution-authorized.
+
+### Completed 2026-09-03
+
+The production composition now bootstraps one deterministic local Codex trade
+and worker, reconstructs work only from matching portable records and SQLite
+projections, compiles the authority-selected context, persists an immutable
+preview contract, and emits deterministic scheduler requests only after the
+exact graph is approved. Runtime preflight verifies the stored contract, local
+node, clean pinned Git workspace, required capabilities, and configured gates
+without allocating a branch. The scheduler still starts paused, and changing
+selection to a registered but execution-unauthorized project makes the work
+source return no requests.
+
+The contract binds a SHA-256 project-revision identity separately from the
+exact Git base commit, so SHA-1 repositories remain supported without weakening
+the execution-contract digest rules. The focused authority test, full repository
+suite, and `tools\check_desktop_node_slice12_release.ps1 -SkipTests` pass.
 
 ## Slice 3: hosted runtime loop
 

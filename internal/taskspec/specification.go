@@ -127,6 +127,9 @@ func Validate(ctx context.Context, value Specification) error {
 		if _, exists := definitions[item.WorkPackageID]; exists {
 			return fmt.Errorf("%w: duplicate work package %s", ErrInvalid, item.WorkPackageID)
 		}
+		if item.TradeReference == nil {
+			return fmt.Errorf("%w: work package %s requires an immutable trade reference", ErrInvalid, item.WorkPackageID)
+		}
 		recordID := validationRecordID(item.WorkPackageID)
 		record := project.WorkPackageDefinition{
 			RecordHeader:  project.NewRecordHeader(project.RecordWorkPackage, recordID, value.ProjectID),

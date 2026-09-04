@@ -2,6 +2,7 @@ package contextcompiler
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,26 @@ import (
 	"syncgate/internal/project"
 	"syncgate/internal/workhistory"
 )
+
+func TestSourceSetDigestIsOrderIndependentAndStrict(t *testing.T) {
+	left := []SourceSpec{
+		{RelativePath: "workspace/z.go", Kind: SourceRepositoryFile, Privacy: PrivacyProject, TradeIDs: []string{"trade:z", "trade:a"}},
+		{RelativePath: ".agent-project/manifest.json", Kind: SourceProjectHistory, Privacy: PrivacyProject},
+	}
+	right := []SourceSpec{left[1], left[0]}
+	right[1].TradeIDs = []string{"trade:a", "trade:z"}
+	first, err := SourceSetDigest(left)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := SourceSetDigest(right)
+	if err != nil || first != second || len(first) != 64 {
+		t.Fatalf("first=%q second=%q err=%v", first, second, err)
+	}
+	if _, err := SourceSetDigest([]SourceSpec{{RelativePath: `workspace\\bad.go`, Kind: SourceRepositoryFile, Privacy: PrivacyProject}}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("noncanonical source error=%v", err)
+	}
+}
 
 func TestCompilerGoldenDeterminismBudgetsPrivacyAndTradeFiltering(t *testing.T) {
 	fixture := newCompilerFixture(t)

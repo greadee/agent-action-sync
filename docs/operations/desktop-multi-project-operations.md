@@ -34,6 +34,18 @@ Before task approval, import an immutable authority-local task specification
 through bounded stdin. Specification content is never accepted in process
 arguments:
 
+First inspect the authority-local identities that the running node bootstrapped:
+
+```powershell
+$trades = syncgate orchestration-trades --config <node-config.json> | ConvertFrom-Json
+$workers = syncgate orchestration-workers --config <node-config.json> | ConvertFrom-Json
+$capabilities = syncgate orchestration-capabilities --config <node-config.json> | ConvertFrom-Json
+```
+
+Every work package in the specification must contain the exact active
+`trade_id`, `version`, and `digest`. The worker is configuration-scoped, so use
+the worker returned by the node rather than copying an ID from another machine.
+
 ```powershell
 $specification = Get-Content -Raw docs\examples\task-specification-v1.json |
   syncgate node-task-spec-import --from-stdin | ConvertFrom-Json
@@ -44,7 +56,7 @@ syncgate orchestration-task-validate `
   --specification $specification.specification_id `
   --specification-digest $specification.digest
 
-syncgate orchestration-task-create `
+$created = syncgate orchestration-task-create `
   --config <node-config.json> `
   --project $specification.project_id `
   --task $specification.task_id `
@@ -52,7 +64,7 @@ syncgate orchestration-task-create `
   --graph-revision 1 `
   --specification $specification.specification_id `
   --specification-digest $specification.digest `
-  --idempotency-key <unique-key>
+  --idempotency-key <unique-key> | ConvertFrom-Json
 ```
 
 The specification is stored only in the node-owned data root. Task creation
@@ -60,6 +72,13 @@ publishes its validated task, graph, work-package definitions, and creation
 events into canonical portable project history. Reimporting equivalent content
 or repeating the same create command is safe; changing content under an
 existing specification identity or idempotency key fails as a conflict.
+
+Keep the execution repository clean before workspace preflight. Portable Agent
+Project history is synchronized by SyncGate, not by Git; when both share one
+root, configure the repository's local ignore policy for portable control data
+before execution preflight. If the control directory is intentionally tracked,
+commit its immutable additions and refresh execution authorization before the
+next node start.
 
 ```powershell
 syncgate orchestration-project-select `
@@ -73,6 +92,65 @@ syncgate orchestration-project-policy `
   --scheduling-enabled `
   --max-concurrent 1 `
   --idempotency-key <unique-key>
+```
+
+Preflight the context, immutable contract, and runtime before approval. The
+first context preflight discovers and returns `source_set_digest`; supplying
+that digest on a replay pins the caller to the same authority-selected source
+set. Use one new operation key for both the contract preview and the graph
+approval so the scheduler reconstructs the exact previewed contract:
+
+```powershell
+$context = syncgate orchestration-context-preflight `
+  --config <node-config.json> `
+  --project <project-id> `
+  --work-package <work-package-id> `
+  --trade $trades.items[0].trade_id `
+  --trade-version $trades.items[0].version `
+  --trade-digest $trades.items[0].digest | ConvertFrom-Json
+
+$operationKey = "approve-<unique-value>"
+$contract = syncgate orchestration-contract-preview `
+  --config <node-config.json> `
+  --project <project-id> `
+  --task <task-id> `
+  --task-revision 1 `
+  --graph-revision 1 `
+  --work-package <work-package-id> `
+  --worker $workers.items[0].worker_id `
+  --worker-version $workers.items[0].version `
+  --worker-digest $workers.items[0].digest `
+  --idempotency-key $operationKey | ConvertFrom-Json
+
+$runtime = $capabilities.runtimes[0]
+$node = $capabilities.nodes[0]
+syncgate orchestration-runtime-preflight `
+  --config <node-config.json> `
+  --project <project-id> `
+  --contract $contract.contract_id `
+  --contract-version $contract.contract_version `
+  --contract-digest $contract.contract_digest `
+  --runtime $runtime.id `
+  --runtime-version $runtime.version `
+  --runtime-digest $runtime.digest `
+  --node $node.id `
+  --node-version $node.version `
+  --node-digest $node.digest
+
+syncgate orchestration-task-approve `
+  --config <node-config.json> `
+  --project <project-id> `
+  --task <task-id> `
+  --task-revision 1 `
+  --graph-revision 1 `
+  --approval-digest $created.graph_digest `
+  --idempotency-key $operationKey
+```
+
+Only after all preflights report the expected identity and runtime readiness,
+start the scheduler:
+
+```powershell
 
 syncgate orchestration-scheduler-start `
   --config <node-config.json> `
@@ -128,8 +206,8 @@ configuration and data directories. After restore, inspect every nonterminal or
 lease or runtime handle is live. Revalidate project roots, Git HEAD, credentials,
 and execution authorization before scheduler start.
 
-Run the Slice 4 release boundary with:
+Run the dispatch-authority release boundary with:
 
 ```powershell
-tools\check_desktop_node_slice4_release.ps1
+tools\check_desktop_node_slice12_release.ps1
 ```

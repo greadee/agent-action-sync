@@ -79,7 +79,7 @@ type ContextPreflightInput struct {
 }
 
 func (v ContextPreflightInput) Validate() error {
-	if !validSetupID(v.ProjectID) || !validSetupID(v.WorkPackageID) || !namespacedSetup(v.TradeID, "trade:") || v.TradeVersion < 1 || !validSetupDigest(v.TradeDigest) || !validSetupDigest(v.SourceSetDigest) {
+	if !validSetupID(v.ProjectID) || !validSetupID(v.WorkPackageID) || !namespacedSetup(v.TradeID, "trade:") || v.TradeVersion < 1 || !validSetupDigest(v.TradeDigest) || v.SourceSetDigest != "" && !validSetupDigest(v.SourceSetDigest) {
 		return errBadRequest
 	}
 	return nil
@@ -88,6 +88,7 @@ func (v ContextPreflightInput) Validate() error {
 type ContextPreflightResult struct {
 	CompilerVersion string   `json:"compiler_version"`
 	ContextDigest   string   `json:"context_digest"`
+	SourceSetDigest string   `json:"source_set_digest"`
 	EstimatedTokens int64    `json:"estimated_tokens"`
 	SourceCount     int      `json:"source_count"`
 	OmissionCodes   []string `json:"omission_codes"`
@@ -149,6 +150,7 @@ func (v ExecutionContractPreviewInput) Validate() error {
 
 type ExecutionContractPreviewResult struct {
 	ContractID             string   `json:"contract_id"`
+	ContractVersion        int64    `json:"contract_version"`
 	ContractDigest         string   `json:"contract_digest"`
 	EffectiveCapabilityIDs []string `json:"effective_capability_ids"`
 	RequiredGateIDs        []string `json:"required_gate_ids"`

@@ -24,6 +24,7 @@ type LocalSetupOptions struct {
 	DeviceID       string
 	Runtimes       []api.CapabilityReference
 	Nodes          []api.CapabilityReference
+	Dispatch       *LocalDispatchAuthority
 }
 
 type LocalSetupAdministration struct {
@@ -34,6 +35,7 @@ type LocalSetupAdministration struct {
 	deviceID       string
 	runtimes       []api.CapabilityReference
 	nodes          []api.CapabilityReference
+	dispatch       *LocalDispatchAuthority
 }
 
 func NewLocalSetupAdministration(options LocalSetupOptions) (*LocalSetupAdministration, error) {
@@ -43,6 +45,7 @@ func NewLocalSetupAdministration(options LocalSetupOptions) (*LocalSetupAdminist
 	return &LocalSetupAdministration{
 		specifications: options.Specifications, history: options.History, projects: options.Projects, tasks: options.Tasks,
 		deviceID: options.DeviceID, runtimes: cloneCapabilities(options.Runtimes), nodes: cloneCapabilities(options.Nodes),
+		dispatch: options.Dispatch,
 	}, nil
 }
 
@@ -105,16 +108,34 @@ func (admin *LocalSetupAdministration) ValidateTaskGraph(ctx context.Context, in
 	}, nil
 }
 
-func (*LocalSetupAdministration) ContextPreflight(context.Context, api.ContextPreflightInput) (api.ContextPreflightResult, error) {
-	return api.ContextPreflightResult{}, setupUnavailable("context preflight is unavailable until dispatch authority is configured")
+func (admin *LocalSetupAdministration) ContextPreflight(ctx context.Context, input api.ContextPreflightInput) (api.ContextPreflightResult, error) {
+	if admin == nil || input.Validate() != nil {
+		return api.ContextPreflightResult{}, setupError(http.StatusBadRequest, "invalid_context_preflight", "context preflight input is invalid", nil)
+	}
+	if admin.dispatch == nil {
+		return api.ContextPreflightResult{}, setupUnavailable("context preflight is unavailable until dispatch authority is configured")
+	}
+	return admin.dispatch.ContextPreflight(ctx, input)
 }
 
-func (*LocalSetupAdministration) RuntimePreflight(context.Context, api.RuntimePreflightInput) (api.RuntimePreflightResult, error) {
-	return api.RuntimePreflightResult{}, setupUnavailable("runtime preflight is unavailable until dispatch authority is configured")
+func (admin *LocalSetupAdministration) RuntimePreflight(ctx context.Context, input api.RuntimePreflightInput) (api.RuntimePreflightResult, error) {
+	if admin == nil || input.Validate() != nil {
+		return api.RuntimePreflightResult{}, setupError(http.StatusBadRequest, "invalid_runtime_preflight", "runtime preflight input is invalid", nil)
+	}
+	if admin.dispatch == nil {
+		return api.RuntimePreflightResult{}, setupUnavailable("runtime preflight is unavailable until dispatch authority is configured")
+	}
+	return admin.dispatch.RuntimePreflight(ctx, input)
 }
 
-func (*LocalSetupAdministration) PreviewExecutionContract(context.Context, api.ExecutionContractPreviewInput) (api.ExecutionContractPreviewResult, error) {
-	return api.ExecutionContractPreviewResult{}, setupUnavailable("execution contract preview is unavailable until dispatch authority is configured")
+func (admin *LocalSetupAdministration) PreviewExecutionContract(ctx context.Context, input api.ExecutionContractPreviewInput) (api.ExecutionContractPreviewResult, error) {
+	if admin == nil || input.Validate() != nil {
+		return api.ExecutionContractPreviewResult{}, setupError(http.StatusBadRequest, "invalid_contract_preview", "execution contract preview input is invalid", nil)
+	}
+	if admin.dispatch == nil {
+		return api.ExecutionContractPreviewResult{}, setupUnavailable("execution contract preview is unavailable until dispatch authority is configured")
+	}
+	return admin.dispatch.PreviewContract(ctx, input)
 }
 
 func (admin *LocalSetupAdministration) CapabilityInventory(context.Context) (api.CapabilityInventory, error) {

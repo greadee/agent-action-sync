@@ -83,6 +83,10 @@ func TestLocalOperatorOperationLedgerReplaysAndRejectsKeyReuse(t *testing.T) {
 	if err != nil || loaded.Action != operation.Action || string(loaded.ResultJSON) != string(operation.ResultJSON) {
 		t.Fatalf("loaded operation = %+v, err=%v", loaded, err)
 	}
+	found, err := operations.FindLatestLocalOperatorOperation(ctx, operation.Action, operation.ProjectID, operation.SubjectID)
+	if err != nil || found.IdempotencyKey != operation.IdempotencyKey || string(found.ResultJSON) != string(operation.ResultJSON) {
+		t.Fatalf("found operation = %+v, err=%v", found, err)
+	}
 }
 
 func TestLocalIntegrationSummaryPersistsLatestAttemptEvidence(t *testing.T) {

@@ -104,6 +104,36 @@ type Result struct {
 	Bytes  []byte
 }
 
+// SourceSetDigest identifies the exact ordered source specification selected
+// by authority. It contains paths and classifications only, never file bytes.
+func SourceSetDigest(sources []SourceSpec) (string, error) {
+	if len(sources) > MaxSources {
+		return "", ErrInvalidRequest
+	}
+	values := append([]SourceSpec(nil), sources...)
+	for index := range values {
+		values[index].TradeIDs = append([]string(nil), values[index].TradeIDs...)
+		sort.Strings(values[index].TradeIDs)
+		if err := project.ValidateProjectRelativePath(values[index].RelativePath); err != nil || !validKind(values[index].Kind) || !validPrivacy(values[index].Privacy) {
+			return "", ErrInvalidRequest
+		}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if values[i].RelativePath != values[j].RelativePath {
+			return values[i].RelativePath < values[j].RelativePath
+		}
+		if values[i].Kind != values[j].Kind {
+			return values[i].Kind < values[j].Kind
+		}
+		return values[i].Privacy < values[j].Privacy
+	})
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return "", ErrInvalidRequest
+	}
+	return digest(raw), nil
+}
+
 // VerifyBundleBytes checks canonical bundle bytes against the context digest
 // that an immutable execution contract authorized.
 func VerifyBundleBytes(raw []byte, expectedDigest string) error {

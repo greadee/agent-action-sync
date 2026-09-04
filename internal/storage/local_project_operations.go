@@ -67,6 +67,7 @@ type LocalProjectOperationsStore interface {
 	GetProjectOrchestrationStatus(context.Context, string) (ProjectOrchestrationStatus, error)
 	SaveLocalOperatorOperation(context.Context, LocalOperatorOperation) (LocalOperatorOperationResult, error)
 	GetLocalOperatorOperation(context.Context, string) (LocalOperatorOperation, error)
+	FindLatestLocalOperatorOperation(context.Context, string, string, string) (LocalOperatorOperation, error)
 	SaveLocalIntegrationSummary(context.Context, LocalIntegrationSummary) error
 	GetLocalIntegrationSummary(context.Context, string) (LocalIntegrationSummary, error)
 }

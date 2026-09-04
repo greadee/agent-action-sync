@@ -46,6 +46,7 @@ type LocalOrchestration struct {
 	Scheduler           *scheduler.Scheduler
 	Administration      *LocalOrchestrationAdministration
 	Setup               *LocalSetupAdministration
+	Dispatch            *LocalDispatchAuthority
 	Runtime             *codexruntime.Adapter
 	Node                *LocalNodeProvider
 	Workspace           *workspace.GitWorktreeManager
@@ -124,13 +125,29 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 	if err != nil {
 		return nil, err
 	}
+	registrySnapshot, err := BootstrapLocalRegistry(ctx, options.Store.Registry(), options.Store.ProjectRegistrations(), runtimeRef, record.ProviderID, record.ModelID, options.Now)
+	if err != nil {
+		return nil, err
+	}
+	dispatchAuthority, err := NewLocalDispatchAuthority(LocalDispatchAuthorityOptions{
+		AuthorizedProjectID: authorizedProjectID, Projects: options.Store.ProjectRegistrations(), Operations: options.Store.LocalProjectOperations(),
+		Tasks: options.Store.ProjectTasks(), TaskNodes: options.Store.ProjectTaskNodes(), Events: options.Store.ProjectEvents(),
+		Registry: options.Store.Registry(), Contracts: options.Store.ExecutionContracts(), Control: options.Store.OrchestrationControl(),
+		Node: node, Workspace: workspaces, WorktreeBase: worktreeBase, BaseCommit: record.HeadDigest,
+		ProjectRevision: localHash("project-revision", record.HeadDigest),
+		Runtime:         runtimeRef, Provider: providerRef, Model: modelRef, NodeReference: nodeRef,
+		RuntimeCapabilities: runtimeCapabilities, Worker: registrySnapshot.WorkerRef, Now: options.Now,
+	})
+	if err != nil {
+		return nil, err
+	}
 	var binder scheduler.BindingPlanner = dispatchbinding.ContractBindingService{
 		Contracts: executioncontract.Service{Store: options.Store.ExecutionContracts()}, Control: control, Now: options.Now,
 	}
 	if options.Binder != nil {
 		binder = options.Binder
 	}
-	var workSource scheduler.WorkSource
+	var workSource scheduler.WorkSource = dispatchAuthority
 	if options.Source != nil {
 		workSource = authorizedWorkSource{source: options.Source, projectID: authorizedProjectID}
 	}
@@ -169,6 +186,7 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 		History:        history, Projects: options.Store.ProjectRegistrations(), Tasks: options.Store.ProjectTasks(), DeviceID: string(options.Identity.DeviceID),
 		Runtimes: []api.CapabilityReference{{ID: runtimeRef.ID, Version: runtimeRef.Version, Digest: runtimeRef.Digest, Lifecycle: "active", CapabilityIDs: capabilityIDs}},
 		Nodes:    []api.CapabilityReference{{ID: nodeRef.ID, Version: nodeRef.Version, Digest: nodeRef.Digest, Lifecycle: string(nodeDefinition.Lifecycle), CapabilityIDs: capabilityIDs}},
+		Dispatch: dispatchAuthority,
 	})
 	if err != nil {
 		return nil, err
@@ -189,7 +207,7 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 		Node: node, Gate: gate, Now: options.Now,
 	})
 	return &LocalOrchestration{
-		Scheduler: schedulerValue, Administration: administration, Setup: setup, Runtime: adapter, Node: node,
+		Scheduler: schedulerValue, Administration: administration, Setup: setup, Dispatch: dispatchAuthority, Runtime: adapter, Node: node,
 		Workspace: workspaces, Results: results, RuntimeRef: runtimeRef, ProviderRef: providerRef, ModelRef: modelRef, NodeRef: nodeRef,
 		AuthorizedProjectID: authorizedProjectID,
 	}, nil

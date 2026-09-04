@@ -102,6 +102,50 @@ func AttemptBranchName(attemptID string) (string, error) {
 	return "syncgate/attempt-" + hash([]byte(attemptID))[:20], nil
 }
 
+// Preflight performs the exact allocation checks without creating a branch,
+// worktree, registry record, or Git reference.
+func (manager *GitWorktreeManager) Preflight(ctx context.Context, request PreflightRequest) (PreflightReport, error) {
+	if err := contextError(ctx); err != nil {
+		return PreflightReport{}, err
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if filepath.Clean(request.ProjectSyncRoot) != filepath.Clean(manager.config.ProjectSyncRoot) || filepath.Clean(request.RepositoryRoot) != filepath.Clean(manager.config.RepositoryRoot) || filepath.Clean(request.WorktreeBase) != filepath.Clean(manager.config.WorktreeBase) {
+		return PreflightReport{}, ErrUnsafeRoot
+	}
+	wantBranch, err := AttemptBranchName(request.AttemptID)
+	if err != nil || request.BranchName != wantBranch || !validCommit(request.BaseCommit) {
+		return PreflightReport{}, ErrInvalidRequest
+	}
+	allowed := false
+	for _, value := range manager.config.AllowedBaseCommits {
+		if value == request.BaseCommit {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return PreflightReport{}, ErrBaseCommit
+	}
+	request.RepositoryDirty, err = manager.repositoryDirty(ctx, manager.config.RepositoryRoot)
+	if err != nil {
+		return PreflightReport{}, err
+	}
+	request.BranchExists, err = manager.branchExists(ctx, request.BranchName)
+	if err != nil {
+		return PreflightReport{}, err
+	}
+	report, err := Preflight(request)
+	if err != nil {
+		return PreflightReport{}, err
+	}
+	resolved, err := manager.git(ctx, manager.config.RepositoryRoot, "rev-parse", "--verify", request.BaseCommit+"^{commit}")
+	if err != nil || strings.TrimSpace(resolved) != request.BaseCommit {
+		return PreflightReport{}, ErrBaseCommit
+	}
+	return report, nil
+}
+
 func (manager *GitWorktreeManager) Allocate(ctx context.Context, request PreflightRequest) (Workspace, error) {
 	if err := contextError(ctx); err != nil {
 		return Workspace{}, err

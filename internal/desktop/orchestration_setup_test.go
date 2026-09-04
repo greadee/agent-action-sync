@@ -133,8 +133,12 @@ func setupSpecification() taskspec.Specification {
 		QualityGates: []project.QualityGateReference{{GateID: "gate:review", Version: 1, Digest: strings.Repeat("a", 64), Required: true}},
 		Barriers:     []string{"work:verify"},
 		WorkPackages: []taskspec.WorkPackage{
-			{WorkPackageID: "work:implement", Objective: "implement the slice", Trade: "engineering", Scope: project.WorkScope{Allowed: []string{"internal"}}, Deliverables: []string{"implementation"}, AcceptanceCriteria: []string{"focused tests pass"}},
-			{WorkPackageID: "work:verify", Objective: "verify the slice", Trade: "quality", Scope: project.WorkScope{Allowed: []string{"tests"}}, Dependencies: []string{"work:implement"}, Deliverables: []string{"verification"}, AcceptanceCriteria: []string{"full suite passes"}, ReviewRequired: true},
+			{WorkPackageID: "work:implement", Objective: "implement the slice", Trade: "engineering", Scope: project.WorkScope{Allowed: []string{"internal"}}, Deliverables: []string{"implementation"}, AcceptanceCriteria: []string{"focused tests pass"}, TradeReference: setupTradeReference()},
+			{WorkPackageID: "work:verify", Objective: "verify the slice", Trade: "quality", Scope: project.WorkScope{Allowed: []string{"tests"}}, Dependencies: []string{"work:implement"}, Deliverables: []string{"verification"}, AcceptanceCriteria: []string{"full suite passes"}, ReviewRequired: true, TradeReference: setupTradeReference()},
 		},
 	}
+}
+
+func setupTradeReference() *project.RegistryReference {
+	return &project.RegistryReference{ID: "trade:codex-generalist", Version: 1, Digest: strings.Repeat("b", 64)}
 }

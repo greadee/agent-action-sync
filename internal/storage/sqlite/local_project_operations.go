@@ -181,6 +181,29 @@ FROM local_operator_operations WHERE idempotency_key = ?`, key).Scan(
 	return operation, nil
 }
 
+func (store localProjectOperationsStore) FindLatestLocalOperatorOperation(ctx context.Context, action, projectID, subjectID string) (storage.LocalOperatorOperation, error) {
+	if strings.TrimSpace(action) == "" || len(action) > 64 || storage.ValidateProjectProjectionID(projectID) != nil || strings.TrimSpace(subjectID) == "" || len(subjectID) > 128 {
+		return storage.LocalOperatorOperation{}, errors.New("local operator operation query is invalid")
+	}
+	var operation storage.LocalOperatorOperation
+	var occurredAt string
+	err := store.db.QueryRowContext(ctx, `
+SELECT idempotency_key, fingerprint, action, project_id, subject_id, result_json, occurred_at
+FROM local_operator_operations
+WHERE action = ? AND project_id = ? AND subject_id = ?
+ORDER BY occurred_at DESC, idempotency_key DESC
+LIMIT 1`, action, projectID, subjectID).Scan(
+		&operation.IdempotencyKey, &operation.Fingerprint, &operation.Action, &operation.ProjectID,
+		&operation.SubjectID, &operation.ResultJSON, &occurredAt,
+	)
+	if err != nil {
+		return storage.LocalOperatorOperation{}, mapNotFound(err, "local operator operation", action+":"+subjectID)
+	}
+	operation.OccurredAt = parseStoredTime(occurredAt)
+	operation.ResultJSON = append([]byte(nil), operation.ResultJSON...)
+	return operation, nil
+}
+
 func (store localProjectOperationsStore) SaveLocalIntegrationSummary(ctx context.Context, summary storage.LocalIntegrationSummary) error {
 	if err := validateLocalIntegrationSummary(summary); err != nil {
 		return err

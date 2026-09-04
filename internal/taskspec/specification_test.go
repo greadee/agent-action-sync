@@ -94,10 +94,14 @@ func validSpecification() Specification {
 		QualityGates: []project.QualityGateReference{{GateID: "gate:review", Version: 1, Digest: strings.Repeat("a", 64), Required: true}},
 		Barriers:     []string{"work:verify"},
 		WorkPackages: []WorkPackage{
-			{WorkPackageID: "work:implement", Objective: "implement the bounded change", Trade: "engineering", Scope: project.WorkScope{Allowed: []string{"internal"}, Inspect: []string{"docs"}}, Deliverables: []string{"implementation"}, AcceptanceCriteria: []string{"focused tests pass"}},
-			{WorkPackageID: "work:verify", Objective: "verify the bounded change", Trade: "quality", Scope: project.WorkScope{Allowed: []string{"tests"}, Inspect: []string{"internal"}}, Dependencies: []string{"work:implement"}, Deliverables: []string{"verification"}, AcceptanceCriteria: []string{"full suite passes"}, ReviewRequired: true},
+			{WorkPackageID: "work:implement", Objective: "implement the bounded change", Trade: "engineering", Scope: project.WorkScope{Allowed: []string{"internal"}, Inspect: []string{"docs"}}, Deliverables: []string{"implementation"}, AcceptanceCriteria: []string{"focused tests pass"}, TradeReference: testTradeReference()},
+			{WorkPackageID: "work:verify", Objective: "verify the bounded change", Trade: "quality", Scope: project.WorkScope{Allowed: []string{"tests"}, Inspect: []string{"internal"}}, Dependencies: []string{"work:implement"}, Deliverables: []string{"verification"}, AcceptanceCriteria: []string{"full suite passes"}, ReviewRequired: true, TradeReference: testTradeReference()},
 		},
 	}
+}
+
+func testTradeReference() *project.RegistryReference {
+	return &project.RegistryReference{ID: "trade:codex-generalist", Version: 1, Digest: strings.Repeat("b", 64)}
 }
 
 func marshalSpecification(t *testing.T, value Specification) []byte {

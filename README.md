@@ -95,6 +95,7 @@ tools\check_desktop_node_slice8_release.ps1
 tools\check_desktop_node_slice9_release.ps1
 tools\check_desktop_node_slice10_release.ps1
 tools\check_desktop_node_slice11_release.ps1
+tools\check_desktop_node_slice12_release.ps1
 ```
 
 Initialize, run, and check an installed per-user node with:
