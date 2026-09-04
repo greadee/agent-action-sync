@@ -22,6 +22,7 @@ import (
 	"syncgate/internal/identity"
 	"syncgate/internal/orchestration"
 	"syncgate/internal/project"
+	"syncgate/internal/resultintake"
 	"syncgate/internal/runtimecontract"
 	"syncgate/internal/scheduler"
 	"syncgate/internal/storage"
@@ -75,7 +76,8 @@ func TestBuildLocalOrchestrationStartsPausedWithRealNodeOwnedComponents(t *testi
 	}
 	composition, err := BuildLocalOrchestration(ctx, LocalOrchestrationOptions{
 		Base: manager.Base, Config: cfg, Store: store, Identity: deviceIdentity, Credentials: manager.Credentials,
-		Now: func() time.Time { return now.UTC() },
+		AuthRunner: &recordingCodexAuthRunner{},
+		Now:        func() time.Time { return now.UTC() },
 		Observe: func(_ string, ceiling int, observedAt time.Time) (MachineResources, error) {
 			return MachineResources{CPUMillis: 4000, LogicalCPUs: 4, DiskTotalBytes: 100 << 20, DiskAvailableBytes: 80 << 20, ConfiguredConcurrency: ceiling, ObservedAt: observedAt, ExpiresAt: observedAt.Add(30 * time.Second)}, nil
 		},
@@ -216,7 +218,8 @@ func TestLocalOrchestrationRunsDeterministicPilotToCollecting(t *testing.T) {
 	executor := &pilotExecutor{completed: make(chan struct{})}
 	composition, err := BuildLocalOrchestration(ctx, LocalOrchestrationOptions{
 		Base: manager.Base, Config: cfg, Store: store, Identity: deviceIdentity, Credentials: manager.Credentials,
-		Now: func() time.Time { return pilotNow }, Executor: executor,
+		AuthRunner: &recordingCodexAuthRunner{},
+		Now:        func() time.Time { return pilotNow }, Executor: executor,
 		Binder: pilotBinder{contracts: executioncontract.Service{Store: store.ExecutionContracts()}, control: control, now: func() time.Time { return pilotNow }},
 		Observe: func(_ string, ceiling int, observedAt time.Time) (MachineResources, error) {
 			return MachineResources{CPUMillis: 4000, LogicalCPUs: 4, DiskTotalBytes: 100 << 20, DiskAvailableBytes: 80 << 20, ConfiguredConcurrency: ceiling, ObservedAt: observedAt, ExpiresAt: observedAt.Add(30 * time.Second)}, nil
@@ -257,7 +260,18 @@ func TestLocalOrchestrationRunsDeterministicPilotToCollecting(t *testing.T) {
 		}
 		t.Fatalf("deterministic runtime did not complete: attempt=%+v snapshot_err=%v observation=%+v observation_err=%v", snapshot.Attempt, snapshotErr, observation, observationErr)
 	}
-	collected, err := composition.Scheduler.Cycle(ctx, nil)
+	var collected scheduler.CycleReport
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		collected, err = composition.Scheduler.Cycle(ctx, nil)
+		if err != nil {
+			break
+		}
+		if len(collected.Items) == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if err != nil || len(collected.Items) != 1 || collected.Items[0].Outcome != scheduler.OutcomeCollecting {
 		t.Fatalf("pilot collection = %+v, err=%v", collected, err)
 	}
@@ -271,6 +285,22 @@ func TestLocalOrchestrationRunsDeterministicPilotToCollecting(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(filepath.Join(worktreePath, "src", "pilot.txt")); err != nil || string(raw) != "deterministic desktop pilot\n" {
 		t.Fatalf("pilot worktree output = %q, err=%v", raw, err)
+	}
+	collectedResult, err := composition.Runtime.CollectResult(ctx, runtimecontract.ActionRequest{SessionID: snapshot.Resources.RuntimeSessionID, IdempotencyKeyDigest: pilotDigest([]byte("collect-published-result"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawEnvelope, err := composition.Results.GetEnvelope(ctx, collectedResult.ResultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, _, err := resultintake.DecodeEnvelope(rawEnvelope)
+	if err != nil || envelope.Digest != collectedResult.EnvelopeDigest || envelope.Assignment != LocalAssignmentReference(snapshot) || envelope.WorkspaceID != snapshot.Resources.WorkspaceID {
+		t.Fatalf("authority envelope = %+v, collected=%+v, err=%v", envelope, collectedResult, err)
+	}
+	intake, err := store.ResultIntake().GetResultIntake(ctx, collectedResult.ResultID)
+	if err != nil || intake.Decision != "accepted" || intake.EnvelopeDigest != envelope.Digest {
+		t.Fatalf("automatic result intake = %+v, err=%v", intake, err)
 	}
 }
 
@@ -343,15 +373,13 @@ func (executor *pilotExecutor) Run(_ context.Context, invocation codexruntime.In
 		return codexruntime.Execution{}, err
 	}
 	final, err := json.Marshal(struct {
-		ResultID        string `json:"result_id"`
-		EnvelopeDigest  string `json:"envelope_digest"`
 		ClaimedOutcome  string `json:"claimed_outcome"`
 		ContractDigest  string `json:"contract_digest"`
 		SessionID       string `json:"session_id"`
 		AttemptID       string `json:"attempt_id"`
 		LeaseGeneration int64  `json:"lease_generation"`
 		FencingDigest   string `json:"fencing_digest"`
-	}{"result:local-pilot", strings.Repeat("9", 64), "succeeded", input.Contract.Digest, input.SessionID, input.AttemptID, input.LeaseGeneration, input.FencingDigest})
+	}{"succeeded", input.Contract.Digest, input.SessionID, input.AttemptID, input.LeaseGeneration, input.FencingDigest})
 	close(executor.completed)
 	return codexruntime.Execution{FinalMessage: final}, err
 }

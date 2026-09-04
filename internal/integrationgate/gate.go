@@ -260,10 +260,7 @@ func (service Service) Evaluate(ctx context.Context, request EvaluateRequest) (I
 		summary.Limitations = safeList(handoff.Limitations)
 		summary.UnresolvedIssues = safeList(handoff.UnresolvedIssues)
 	}
-	if requiresReviewer(contract) {
-		if service.Reviewer == nil {
-			return IntegrationSummary{}, service.fail(ctx, request, base, contract, "review_unavailable", ErrGateFailed)
-		}
+	if service.Reviewer != nil {
 		review, reviewErr := service.Reviewer.Review(ctx, contract, summary)
 		review.Summary = safeText(review.Summary)
 		if reviewErr != nil || review.Outcome != project.ReviewApproved {

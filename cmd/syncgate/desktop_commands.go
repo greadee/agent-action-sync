@@ -186,6 +186,52 @@ func runNodeCredentialDelete(args []string) {
 	printJSON(status)
 }
 
+func runNodeCodexAuthBootstrap(args []string) {
+	flags := flag.NewFlagSet("node-codex-auth-bootstrap", flag.ExitOnError)
+	root := flags.String("root", "", "optional explicit desktop node root")
+	_ = flags.Parse(args)
+	manager, err := localCodexAuthManager(*root)
+	if err != nil {
+		exitf("configure isolated Codex authentication: %v", err)
+	}
+	status, err := manager.Bootstrap(context.Background())
+	if err != nil {
+		exitf("bootstrap isolated Codex authentication: %v", err)
+	}
+	printJSON(status)
+}
+
+func runNodeCodexAuthStatus(args []string) {
+	flags := flag.NewFlagSet("node-codex-auth-status", flag.ExitOnError)
+	root := flags.String("root", "", "optional explicit desktop node root")
+	_ = flags.Parse(args)
+	manager, err := localCodexAuthManager(*root)
+	if err != nil {
+		exitf("configure isolated Codex authentication: %v", err)
+	}
+	status, err := manager.Status(context.Background())
+	if err != nil {
+		exitf("read isolated Codex authentication: %v", err)
+	}
+	printJSON(status)
+}
+
+func localCodexAuthManager(root string) (desktop.CodexAuthManager, error) {
+	base := resolveDesktopRoots(root)
+	cfg, roots, err := (desktop.SettingsManager{Base: base}).Active(context.Background())
+	if err != nil {
+		return desktop.CodexAuthManager{}, err
+	}
+	home := filepath.Join(roots.RuntimeCacheDir, "codex-home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return desktop.CodexAuthManager{}, err
+	}
+	return desktop.CodexAuthManager{
+		Executable: cfg.Node.Execution.RuntimeExecutable, CodexHome: home, ProviderID: cfg.Node.Execution.ProviderID,
+		Credentials: desktop.ProviderCredentials{ScopeRoot: roots.ConfigDir},
+	}, nil
+}
+
 func runNodeDisposableMark(args []string) {
 	flags := flag.NewFlagSet("node-disposable-mark", flag.ExitOnError)
 	root := flags.String("root", "", "optional explicit desktop node root")

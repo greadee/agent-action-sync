@@ -37,6 +37,7 @@ type LocalOrchestrationOptions struct {
 	Credentials ProviderCredentials
 	Now         func() time.Time
 	Executor    codexruntime.Executor
+	AuthRunner  CodexAuthRunner
 	Source      scheduler.WorkSource
 	Observe     ResourceObserver
 	Binder      scheduler.BindingPlanner
@@ -84,6 +85,14 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 			return nil, err
 		}
 	}
+	auth, err := (CodexAuthManager{
+		Executable: record.RuntimeExecutable, CodexHome: codexHome, ProviderID: record.ProviderID,
+		Credentials: ProviderCredentials{ScopeRoot: roots.ConfigDir}, Runner: options.AuthRunner,
+	}).Status(ctx)
+	if err != nil || !auth.Configured {
+		return nil, errors.New("isolated Codex authentication is unavailable; run node-codex-auth-bootstrap")
+	}
+	results := LocalResultStore{Root: resultRoot}
 
 	runtimeRef := executioncontract.BindingReference{ID: "runtime:codex-local", Version: 1, Digest: localHash("runtime", record.RuntimeDigest)}
 	providerRef := executioncontract.BindingReference{ID: "provider:" + record.ProviderID, Version: 1, Digest: localHash("provider", record.ProviderID)}
@@ -109,6 +118,7 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 		return nil, err
 	}
 	control := orchestration.ControlService{Store: options.Store.OrchestrationControl(), Now: options.Now}
+	intake := resultintake.Service{Contracts: options.Store.ExecutionContracts(), Intake: options.Store.ResultIntake(), Now: options.Now}
 	runtimeCapabilities := []executioncontract.Capability{
 		executioncontract.CapabilityInspect, executioncontract.CapabilityWrite,
 		executioncontract.CapabilityShell, executioncontract.CapabilityTest, executioncontract.CapabilityBranch,
@@ -118,6 +128,7 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 		Runtime: runtimeRef, Provider: providerRef, Model: modelRef, Node: nodeRef,
 		Capabilities:  runtimeCapabilities,
 		MaxConcurrent: options.Config.Node.Execution.MaxConcurrent, Now: options.Now, Executor: options.Executor,
+		Publisher: LocalResultPublisher{Control: control, Results: results, Intake: intake, Now: options.Now},
 		Workspace: func(resolveCtx context.Context, binding codexruntime.WorkspaceBinding) (string, error) {
 			return resolveRuntimeWorkspace(resolveCtx, workspaces, control, binding)
 		},
@@ -171,7 +182,6 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 	if err != nil {
 		return nil, err
 	}
-	results := LocalResultStore{Root: resultRoot}
 	projection := &projector.Projector{Store: options.Store, Now: options.Now}
 	history, err := workhistory.New(options.Store, projection)
 	if err != nil {
@@ -194,9 +204,10 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 	runtimes := singleRuntimeResolver{reference: runtimeRef, adapter: adapter}
 	gate := &integrationgate.Service{
 		Contracts: options.Store.ExecutionContracts(),
-		Intake:    resultintake.Service{Contracts: options.Store.ExecutionContracts(), Intake: options.Store.ResultIntake(), Now: options.Now},
+		Intake:    intake,
 		Control:   control, History: history, HistoryRoots: projectHistoryRoots{projects: options.Store.ProjectRegistrations()},
-		Runtimes: runtimes, Results: results, Contents: results, Workspaces: workspaces, Tests: unavailableTestRunner{},
+		Runtimes: runtimes, Results: results, Contents: results, Workspaces: workspaces,
+		Tests: LocalTestRunner{Control: control, Workspaces: workspaces}, TestPlans: localTestPlans(),
 	}
 	administration := NewLocalOrchestrationAdministration(LocalAdministrationOptions{
 		Scheduler: schedulerValue, Control: control, Inventory: options.Store.OrchestrationControl(),
@@ -321,10 +332,4 @@ func (resolver projectHistoryRoots) HistoryRoot(projectID string) (string, error
 		return "", err
 	}
 	return registration.RootPath, nil
-}
-
-type unavailableTestRunner struct{}
-
-func (unavailableTestRunner) RunAuthorized(context.Context, executioncontract.Contract, integrationgate.TestCommand) (integrationgate.TestResult, error) {
-	return integrationgate.TestResult{}, errors.New("authorized test runner is not configured")
 }

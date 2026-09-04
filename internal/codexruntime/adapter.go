@@ -44,6 +44,19 @@ type WorkspaceBinding struct {
 
 type WorkspaceResolver func(context.Context, WorkspaceBinding) (string, error)
 
+// ResultPublication contains only immutable authority bindings and the terminal
+// worker claim. A publisher, not the model, creates the canonical result ID and
+// envelope digest used by result intake.
+type ResultPublication struct {
+	Session        runtimecontract.Session
+	Contract       executioncontract.Contract
+	ClaimedOutcome string
+}
+
+type ResultPublisher interface {
+	PublishResult(context.Context, ResultPublication) (runtimecontract.CollectedResult, error)
+}
+
 type Config struct {
 	Enabled       bool
 	Executable    string
@@ -58,6 +71,7 @@ type Config struct {
 	Workspace     WorkspaceResolver
 	Now           func() time.Time
 	Executor      Executor
+	Publisher     ResultPublisher
 }
 
 type Invocation struct {
@@ -178,13 +192,13 @@ func (adapter *Adapter) Prepare(ctx context.Context, request runtimecontract.Pre
 	if err := contextErr(ctx); err != nil {
 		return runtimecontract.Session{}, err
 	}
-	if !validReference(request.AttemptID, "attempt:") || request.LeaseGeneration < 1 || !validDigest(request.FencingDigest) || !validReference(request.WorkspaceID, "workspace:") || !validDigest(request.IdempotencyKeyDigest) || !validDigest(request.ResumeKeyDigest) || len(request.InstructionBundle) == 0 || len(request.InstructionBundle) > maxInstructionBytes || !utf8.Valid(request.InstructionBundle) || digest(request.InstructionBundle) != request.Contract.Instruction.Digest || contextcompiler.VerifyBundleBytes(request.ContextBundle, request.Contract.ContextDigest) != nil {
+	if !validReference(request.AssignmentID, "assignment:") || !validReference(request.AttemptID, "attempt:") || request.LeaseGeneration < 1 || !validDigest(request.FencingDigest) || !validReference(request.WorkspaceID, "workspace:") || !validDigest(request.IdempotencyKeyDigest) || !validDigest(request.ResumeKeyDigest) || len(request.InstructionBundle) == 0 || len(request.InstructionBundle) > maxInstructionBytes || !utf8.Valid(request.InstructionBundle) || digest(request.InstructionBundle) != request.Contract.Instruction.Digest || contextcompiler.VerifyBundleBytes(request.ContextBundle, request.Contract.ContextDigest) != nil {
 		return runtimecontract.Session{}, normalized(runtimecontract.CodeInvalidRequest, false, "prepare input does not match immutable authority")
 	}
 	if _, err := adapter.Negotiate(ctx, runtimecontract.NegotiationRequest{Contract: request.Contract, RequiredCapabilities: request.Contract.Permissions.Capabilities}); err != nil {
 		return runtimecontract.Session{}, err
 	}
-	fingerprint := digest([]byte(request.Contract.Digest + "\x00" + request.AttemptID + "\x00" + fmt.Sprint(request.LeaseGeneration) + "\x00" + request.FencingDigest + "\x00" + request.WorkspaceID + "\x00" + request.ResumeKeyDigest + "\x00" + request.Contract.ContextDigest + "\x00" + request.Contract.Instruction.Digest))
+	fingerprint := digest([]byte(request.Contract.Digest + "\x00" + request.AssignmentID + "\x00" + request.AttemptID + "\x00" + fmt.Sprint(request.LeaseGeneration) + "\x00" + request.FencingDigest + "\x00" + request.WorkspaceID + "\x00" + request.ResumeKeyDigest + "\x00" + request.Contract.ContextDigest + "\x00" + request.Contract.Instruction.Digest))
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
 	if replay, ok := adapter.preparations[request.IdempotencyKeyDigest]; ok {
@@ -196,13 +210,13 @@ func (adapter *Adapter) Prepare(ctx context.Context, request runtimecontract.Pre
 	sessionID := "runtime-session:" + digest([]byte(request.Contract.Digest + request.IdempotencyKeyDigest))[:32]
 	if existing, ok := adapter.sessions[sessionID]; ok {
 		contractReference := contractRef(request.Contract)
-		if existing.Session.Contract != contractReference || existing.Session.WorkspaceID != request.WorkspaceID || existing.Session.AttemptID != request.AttemptID || existing.Session.LeaseGeneration != request.LeaseGeneration || existing.Session.FencingDigest != request.FencingDigest || existing.Session.ResumeKeyDigest != request.ResumeKeyDigest {
+		if existing.Session.Contract != contractReference || existing.Session.AssignmentID != request.AssignmentID || existing.Session.WorkspaceID != request.WorkspaceID || existing.Session.AttemptID != request.AttemptID || existing.Session.LeaseGeneration != request.LeaseGeneration || existing.Session.FencingDigest != request.FencingDigest || existing.Session.ResumeKeyDigest != request.ResumeKeyDigest {
 			return runtimecontract.Session{}, normalized(runtimecontract.CodeConflict, false, "prepare identity conflicts with recovered runtime state")
 		}
 		adapter.preparations[request.IdempotencyKeyDigest] = preparationReplay{Fingerprint: fingerprint, SessionID: sessionID}
 		return existing.Session, nil
 	}
-	session := runtimecontract.Session{SessionID: sessionID, Contract: contractRef(request.Contract), WorkspaceID: request.WorkspaceID, AttemptID: request.AttemptID, LeaseGeneration: request.LeaseGeneration, FencingDigest: request.FencingDigest, ResumeKeyDigest: request.ResumeKeyDigest, Status: runtimecontract.StatusPrepared, Sequence: 1, UpdatedAt: adapter.now()}
+	session := runtimecontract.Session{SessionID: sessionID, Contract: contractRef(request.Contract), AssignmentID: request.AssignmentID, WorkspaceID: request.WorkspaceID, AttemptID: request.AttemptID, LeaseGeneration: request.LeaseGeneration, FencingDigest: request.FencingDigest, ResumeKeyDigest: request.ResumeKeyDigest, Status: runtimecontract.StatusPrepared, Sequence: 1, UpdatedAt: adapter.now()}
 	state := &sessionState{Session: session, Contract: request.Contract, Input: &preparedInput{Context: append([]byte(nil), request.ContextBundle...), Instruction: append([]byte(nil), request.InstructionBundle...)}, ProgressCode: "prepared"}
 	adapter.sessions[sessionID] = state
 	adapter.preparations[request.IdempotencyKeyDigest] = preparationReplay{Fingerprint: fingerprint, SessionID: sessionID}
@@ -468,7 +482,7 @@ func (adapter *Adapter) execute(ctx context.Context, sessionID string, input pre
 		adapter.finish(sessionID, status, code, retryable, "execution_"+string(code), runtimecontract.CollectedResult{}, usage)
 		return
 	}
-	result, err := decodeFinal(execution.FinalMessage, runtimeSession)
+	claim, err := decodeFinal(execution.FinalMessage, runtimeSession)
 	if err != nil {
 		adapter.finish(sessionID, runtimecontract.StatusFailed, runtimecontract.CodeMalformedOutput, false, "result_malformed", runtimecontract.CollectedResult{}, usage)
 		return
@@ -476,10 +490,22 @@ func (adapter *Adapter) execute(ctx context.Context, sessionID string, input pre
 	status := runtimecontract.StatusSucceeded
 	code := runtimecontract.ErrorCode("")
 	progress := "completed"
-	if result.ClaimedOutcome == "refused" {
+	if claim.ClaimedOutcome == "refused" {
 		status, code, progress = runtimecontract.StatusFailed, runtimecontract.CodeRefused, "refused"
-	} else if result.ClaimedOutcome == "failed" {
+	} else if claim.ClaimedOutcome == "failed" {
 		status, code, progress = runtimecontract.StatusFailed, runtimecontract.CodeExecutionFailed, "worker_failed"
+	}
+	result := runtimecontract.CollectedResult{}
+	if status == runtimecontract.StatusSucceeded {
+		if adapter.config.Publisher == nil {
+			adapter.finish(sessionID, runtimecontract.StatusFailed, runtimecontract.CodeUnavailable, false, "result_publisher_unavailable", result, usage)
+			return
+		}
+		result, err = adapter.config.Publisher.PublishResult(ctx, ResultPublication{Session: runtimeSession, Contract: contract, ClaimedOutcome: claim.ClaimedOutcome})
+		if err != nil || !validReference(result.ResultID, "result:") || !validDigest(result.EnvelopeDigest) || result.ClaimedOutcome != claim.ClaimedOutcome {
+			adapter.finish(sessionID, runtimecontract.StatusFailed, runtimecontract.CodeMalformedOutput, false, "result_publication_failed", runtimecontract.CollectedResult{}, usage)
+			return
+		}
 	}
 	adapter.finish(sessionID, status, code, false, progress, result, usage)
 }
@@ -584,14 +610,14 @@ func buildPrompt(session runtimecontract.Session, contract executioncontract.Con
 		Instruction     string                              `json:"instruction"`
 		Context         json.RawMessage                     `json:"context"`
 		Output          string                              `json:"output_requirement"`
-	}{"syncgate.codex-input.v1", contractRef(contract), session.SessionID, session.AttemptID, session.LeaseGeneration, session.FencingDigest, string(input.Instruction), contextValue, "Return only the schema-conforming result reference with the exact supplied session, attempt, lease, fence, and contract bindings. Never include secrets, paths, logs, or prose."}
+	}{"syncgate.codex-input.v1", contractRef(contract), session.SessionID, session.AttemptID, session.LeaseGeneration, session.FencingDigest, string(input.Instruction), contextValue, "Return only the schema-conforming terminal claim with the exact supplied session, attempt, lease, fence, and contract bindings. The authority creates the result envelope. Never include secrets, paths, logs, or prose."}
 	return json.Marshal(payload)
 }
 
-var resultSchema = []byte(`{"type":"object","properties":{"result_id":{"type":"string","pattern":"^result:[A-Za-z0-9._:-]{1,120}$"},"envelope_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"claimed_outcome":{"type":"string","enum":["succeeded","failed","refused"]},"contract_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"session_id":{"type":"string","pattern":"^runtime-session:[A-Za-z0-9._:-]{1,120}$"},"attempt_id":{"type":"string","pattern":"^attempt:[A-Za-z0-9._:-]{1,120}$"},"lease_generation":{"type":"integer","minimum":1},"fencing_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["result_id","envelope_digest","claimed_outcome","contract_digest","session_id","attempt_id","lease_generation","fencing_digest"],"additionalProperties":false}`)
+var resultSchema = []byte(`{"type":"object","properties":{"claimed_outcome":{"type":"string","enum":["succeeded","failed","refused"]},"contract_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"session_id":{"type":"string","pattern":"^runtime-session:[A-Za-z0-9._:-]{1,120}$"},"attempt_id":{"type":"string","pattern":"^attempt:[A-Za-z0-9._:-]{1,120}$"},"lease_generation":{"type":"integer","minimum":1},"fencing_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["claimed_outcome","contract_digest","session_id","attempt_id","lease_generation","fencing_digest"],"additionalProperties":false}`)
 
 type codexFinal struct {
-	runtimecontract.CollectedResult
+	ClaimedOutcome  string `json:"claimed_outcome"`
 	ContractDigest  string `json:"contract_digest"`
 	SessionID       string `json:"session_id"`
 	AttemptID       string `json:"attempt_id"`
@@ -599,17 +625,17 @@ type codexFinal struct {
 	FencingDigest   string `json:"fencing_digest"`
 }
 
-func decodeFinal(raw []byte, session runtimecontract.Session) (runtimecontract.CollectedResult, error) {
+func decodeFinal(raw []byte, session runtimecontract.Session) (codexFinal, error) {
 	if len(raw) == 0 || len(raw) > maxFinalBytes {
-		return runtimecontract.CollectedResult{}, errors.New("invalid final result")
+		return codexFinal{}, errors.New("invalid final result")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var value codexFinal
-	if decoder.Decode(&value) != nil || decoder.Decode(&struct{}{}) != io.EOF || !validReference(value.ResultID, "result:") || !validDigest(value.EnvelopeDigest) || (value.ClaimedOutcome != "succeeded" && value.ClaimedOutcome != "failed" && value.ClaimedOutcome != "refused") || value.ContractDigest != session.Contract.Digest || value.SessionID != session.SessionID || value.AttemptID != session.AttemptID || value.LeaseGeneration != session.LeaseGeneration || value.FencingDigest != session.FencingDigest {
-		return runtimecontract.CollectedResult{}, errors.New("invalid final result")
+	if decoder.Decode(&value) != nil || decoder.Decode(&struct{}{}) != io.EOF || (value.ClaimedOutcome != "succeeded" && value.ClaimedOutcome != "failed" && value.ClaimedOutcome != "refused") || value.ContractDigest != session.Contract.Digest || value.SessionID != session.SessionID || value.AttemptID != session.AttemptID || value.LeaseGeneration != session.LeaseGeneration || value.FencingDigest != session.FencingDigest {
+		return codexFinal{}, errors.New("invalid final result")
 	}
-	return value.CollectedResult, nil
+	return value, nil
 }
 
 func consumeEvent(line []byte, usage *runtimecontract.UsageEvidence, maxTools, maxTokens int64) (string, error) {

@@ -72,6 +72,27 @@ func (service ProviderCredentials) Delete(providerID string) (CredentialStatus, 
 	return status, nil
 }
 
+// WithSecret keeps provider bytes inside one bounded callback and clears the
+// loaded buffer before returning. Callers must not retain the slice.
+func (service ProviderCredentials) WithSecret(providerID string, use func([]byte) error) error {
+	if use == nil {
+		return errors.New("provider credential callback is required")
+	}
+	store, _, err := service.open(providerID)
+	if err != nil {
+		return err
+	}
+	secret, err := store.Load()
+	if err != nil {
+		return err
+	}
+	defer clearSecret(secret)
+	if len(secret) < 1 || len(secret) > identity.MaxOSSecretBytes {
+		return errors.New("provider credential is invalid")
+	}
+	return use(secret)
+}
+
 func (service ProviderCredentials) open(providerID string) (CredentialStore, CredentialStatus, error) {
 	providerID = strings.TrimSpace(providerID)
 	if !desktopIdentifier(providerID) {

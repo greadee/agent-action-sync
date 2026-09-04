@@ -1,8 +1,7 @@
 # Supervised Codex Runtime Adapter
 
-- Status: implemented for Phase 1 Slice 5
-- Release boundary: opt-in library component; scheduler-capable daemon seam
-  exists, but shipped CLI/config composition remains disabled
+- Status: production-composed for the laptop operations sprint Slice 3
+- Release boundary: explicitly enabled disposable-project execution only
 
 ## Boundary
 
@@ -34,10 +33,12 @@ that input once. Action keys make duplicate starts deterministic, and one
 runtime process can never be started twice for the same prepared session.
 
 Every structured final response must echo the exact contract digest, runtime
-session, attempt, lease generation, and fencing digest. The adapter rejects an
-unknown field, malformed reference, changed binding, oversized response, or
-non-terminal collection. A successful collection is still only an immutable
-result reference for the separate untrusted result-intake gate.
+session, attempt, lease generation, and fencing digest. The model supplies only
+a closed terminal claim. The desktop authority derives the result identity,
+builds the complete envelope from the current contract and fenced assignment,
+stores it, and performs untrusted result intake before the adapter can report
+success. The adapter rejects an unknown field, changed binding, oversized
+response, stale fence, failed publication, or non-terminal collection.
 
 Pause and resume fail closed because `codex exec` has no safe resumable pause.
 Cancel fences the result before terminating the child context. A wall-clock or
@@ -72,10 +73,21 @@ belongs to the authority scheduler.
 ## Privacy and observations
 
 The child receives a minimal environment allowlist plus `CODEX_HOME`. API-key
-variables are deliberately excluded; authentication must already exist in the
-isolated local Codex home through a platform-supported Codex login or workload
-identity. Credentials never enter config structures, SQLite, portable records,
-logs, prompts, or arguments.
+variables are deliberately excluded. `node-codex-auth-bootstrap` passes the
+already-authorized OS-stored provider key to the supported `codex login
+--with-api-key` stdin flow for that isolated home; `node-codex-auth-status`
+reduces `codex login status` to a boolean. The runtime composition refuses to
+start while that status is false. Credentials never enter arguments, config,
+SQLite, portable records, logs, prompts, or runtime environment variables.
+
+## Deterministic gate boundary
+
+The production integration service recognizes only exact version-and-digest
+built-in gate definitions. `gate:tests` maps to a fixed, non-hooking `git diff
+--check HEAD --` command whose arguments and semantic command digest are
+closed in code. Output is bounded, reduced to a digest, and never persisted.
+Review gates remain pending for the human operator; an optional automated
+reviewer may add evidence but is not required to reach the decision stop.
 
 JSONL is reduced immediately to closed progress codes such as `connected`,
 `working`, `tool_active`, and `response_complete`. Raw event content and model

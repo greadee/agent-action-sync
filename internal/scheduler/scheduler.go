@@ -528,7 +528,7 @@ func (scheduler *Scheduler) dispatchLocked(ctx context.Context, request Dispatch
 	}
 	resumeKey := digest("resume", assignmentID, plan.AttemptID, bound.Contract.Digest)
 	session, err := adapter.Prepare(ctx, runtimecontract.PrepareRequest{
-		Contract: bound.Contract, AttemptID: plan.AttemptID, LeaseGeneration: leaseGeneration, FencingDigest: fence,
+		Contract: bound.Contract, AssignmentID: assignmentID, AttemptID: plan.AttemptID, LeaseGeneration: leaseGeneration, FencingDigest: fence,
 		WorkspaceID: allocated.WorkspaceID, ContextBundle: append([]byte(nil), bound.Context.Bytes...), InstructionBundle: append([]byte(nil), request.InstructionBundle...),
 		IdempotencyKeyDigest: digest("prepare", assignmentID, plan.AttemptID, bound.Contract.Digest), ResumeKeyDigest: resumeKey,
 	})

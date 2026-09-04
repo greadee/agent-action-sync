@@ -212,7 +212,20 @@ Fixtures cover success, duplicate completion, malformed and forged output,
 refusal, rate limit, timeout, disconnect, budget exhaustion, cancellation, and
 restart uncertainty. Tests inspect durable state, arguments, and environment to
 prove prompts, context, credentials, provider sessions, and local paths are not
-retained. The shipped command still does not compose the adapter.
+retained.
+
+The laptop operations Slice 3 production-composes that adapter only after the
+isolated Codex home passes `codex login status`. Its deterministic disposable
+pilot proves authority-authored envelope storage and automatic intake rather
+than trusting a model-provided result identity or digest. Separate fixtures
+prove the credential reaches `codex login --with-api-key` only over stdin, the
+runtime child receives no provider key variable, exact built-in gate digests
+select the sole bounded workspace-check command, and human review can reach the
+decision stop without an automated reviewer. Run the layered gate with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/check_desktop_node_slice13_release.ps1
+```
 
 ## DAG scheduler and bounded-execution gate
 

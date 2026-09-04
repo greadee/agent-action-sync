@@ -297,6 +297,18 @@ func TestFailuresAndHumanRejectionNeverAccept(t *testing.T) {
 	}
 }
 
+func TestHumanReviewStopsForDecisionWithoutAutomatedReviewer(t *testing.T) {
+	fixture := newGateFixture(t)
+	fixture.service.Reviewer = nil
+	summary, err := fixture.service.Evaluate(context.Background(), fixture.request)
+	if !errors.Is(err, ErrHumanRequired) || !summary.ReadyForDecision || summary.Review != nil {
+		t.Fatalf("summary=%+v err=%v", summary, err)
+	}
+	if fixture.control.snapshot.Attempt.State != storage.AssignmentAwaitingGates {
+		t.Fatalf("state=%s", fixture.control.snapshot.Attempt.State)
+	}
+}
+
 func TestForgedEnvelopeAndStaleAttemptFailClosed(t *testing.T) {
 	for _, name := range []string{"forged", "stale"} {
 		t.Run(name, func(t *testing.T) {

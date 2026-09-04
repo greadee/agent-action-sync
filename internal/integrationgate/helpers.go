@@ -292,17 +292,8 @@ func hasDecision(decisions []storage.OrchestrationOperatorDecision, decision, di
 	}
 	return false
 }
-func humanGate(id string) bool { return strings.Contains(id, "review") }
-func requiresReviewer(contract executioncontract.Contract) bool {
-	if contract.ReviewRequired {
-		return true
-	}
-	for _, gate := range contract.RequiredGates {
-		if humanGate(gate.GateID) {
-			return true
-		}
-	}
-	return false
+func humanGate(id string) bool {
+	return strings.Contains(id, "review") || id == "gate:operations-approval"
 }
 func reason(value, fallback string) string {
 	value = strings.TrimSpace(value)

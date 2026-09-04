@@ -68,6 +68,7 @@ type NegotiationResult struct {
 
 type PrepareRequest struct {
 	Contract             executioncontract.Contract
+	AssignmentID         string
 	AttemptID            string
 	LeaseGeneration      int64
 	FencingDigest        string
@@ -81,6 +82,7 @@ type PrepareRequest struct {
 type Session struct {
 	SessionID       string
 	Contract        executioncontract.ContractReference
+	AssignmentID    string
 	WorkspaceID     string
 	AttemptID       string
 	LeaseGeneration int64

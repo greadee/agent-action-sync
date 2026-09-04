@@ -680,14 +680,19 @@ func contractPreviewResult(contract executioncontract.Contract) api.ExecutionCon
 }
 
 func configuredGate(gate executioncontract.GateRequirement) bool {
-	return gate.GateID == "gate:human-review"
+	switch gate.GateID {
+	case "gate:tests", "gate:human-review", "gate:security-review", "gate:data-review", "gate:operations-approval":
+		return gate.Version == 1 && gate.Digest == builtInGateDigest(gate.GateID)
+	default:
+		return false
+	}
 }
 
 func gateEvidence(gates []executioncontract.GateRequirement) []orchestration.GateEvidence {
 	result := []orchestration.GateEvidence{}
 	for _, gate := range gates {
 		if configuredGate(gate) {
-			result = append(result, orchestration.GateEvidence{GateID: gate.GateID, Version: gate.Version, Digest: gate.Digest, EvidenceID: "evidence:configured-human-review", EvidenceDigest: dispatchDigest("gate", gate.Digest)})
+			result = append(result, orchestration.GateEvidence{GateID: gate.GateID, Version: gate.Version, Digest: gate.Digest, EvidenceID: "evidence:configured-gate", EvidenceDigest: dispatchDigest("gate", gate.Digest)})
 		}
 	}
 	return result

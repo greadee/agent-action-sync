@@ -63,6 +63,10 @@ func main() {
 		runNodeCredentialStatus(os.Args[2:])
 	case "node-credential-delete":
 		runNodeCredentialDelete(os.Args[2:])
+	case "node-codex-auth-bootstrap":
+		runNodeCodexAuthBootstrap(os.Args[2:])
+	case "node-codex-auth-status":
+		runNodeCodexAuthStatus(os.Args[2:])
 	case "node-disposable-mark":
 		runNodeDisposableMark(os.Args[2:])
 	case "node-execution-preflight":

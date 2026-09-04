@@ -144,6 +144,7 @@ func TestAdapterClassifiesMalformedRefusalRateLimitDisconnectAndBudget(t *testin
 		{"rate-limit", Execution{}, "", nil, [][]byte{[]byte(`{"type":"error","message":"429 rate limit exceeded"}`)}, runtimecontract.StatusFailed, runtimecontract.CodeRateLimited},
 		{"disconnect", Execution{}, "", errors.New("connection lost"), nil, runtimecontract.StatusFailed, runtimecontract.CodeDisconnected},
 		{"tool-budget", Execution{}, "succeeded", nil, [][]byte{[]byte(`{"type":"item.started","item":{"type":"command_execution"}}`), []byte(`{"type":"item.started","item":{"type":"command_execution"}}`)}, runtimecontract.StatusFailed, runtimecontract.CodeBudgetExceeded},
+		{"token-budget", Execution{}, "succeeded", nil, [][]byte{[]byte(`{"type":"turn.completed","usage":{"input_tokens":1001,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0}}`)}, runtimecontract.StatusFailed, runtimecontract.CodeBudgetExceeded},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -284,7 +285,7 @@ func newAdapterFixture(t *testing.T, enabled bool) adapterFixture {
 	contract := executioncontract.Contract{Schema: executioncontract.Schema, ContractID: "contract:codex", Version: 1, ProjectID: "project-one", TaskID: "task:one", TaskRevision: 1, GraphRevision: 1, WorkPackageID: "wp-one", ExecutionID: "execution:one", Runtime: runtimeRef, Provider: provider, Model: model, Node: node, Instruction: executioncontract.BindingReference{ID: "instruction:one", Version: 1, Digest: byteDigest(instruction)}, ContextDigest: contextDigest, Permissions: executioncontract.EffectivePermissions{Capabilities: []executioncontract.Capability{executioncontract.CapabilityInspect, executioncontract.CapabilityWrite, executioncontract.CapabilityShell, executioncontract.CapabilityTest, executioncontract.CapabilityBranch}, InspectPaths: []string{"."}, WritePaths: []string{"."}}, Budget: executioncontract.BudgetLimits{MaxTokens: 1000, MaxCostMicros: 1000, MaxWallClockSeconds: 60, MaxRetries: 0, MaxToolCalls: 20, MaxConcurrentWorkers: 1}, NotBefore: now, Deadline: now.Add(time.Minute)}
 	contract = signContract(contract)
 	executor := &scriptedExecutor{started: make(chan struct{}, 1), finished: make(chan struct{}, 1)}
-	config := Config{Enabled: enabled, Executable: filepath.Join(root, "codex.exe"), CodexHome: home, StateRoot: state, Runtime: runtimeRef, Provider: provider, Model: model, Node: node, Capabilities: contract.Permissions.Capabilities, MaxConcurrent: 1, Workspace: func(_ context.Context, binding WorkspaceBinding) (string, error) {
+	config := Config{Enabled: enabled, Executable: filepath.Join(root, "codex.exe"), CodexHome: home, StateRoot: state, Runtime: runtimeRef, Provider: provider, Model: model, Node: node, Capabilities: contract.Permissions.Capabilities, MaxConcurrent: 1, Publisher: staticResultPublisher{}, Workspace: func(_ context.Context, binding WorkspaceBinding) (string, error) {
 		if binding.WorkspaceID != "workspace:one" || binding.AttemptID == "" || binding.LeaseGeneration < 1 || !validDigest(binding.FencingDigest) {
 			return "", errors.New("invalid workspace lease binding")
 		}
@@ -294,7 +295,7 @@ func newAdapterFixture(t *testing.T, enabled bool) adapterFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return adapterFixture{adapter: adapter, executor: executor, config: config, prepare: runtimecontract.PrepareRequest{Contract: contract, AttemptID: "attempt:one", LeaseGeneration: 1, FencingDigest: repeat("3"), WorkspaceID: "workspace:one", ContextBundle: contextBytes, InstructionBundle: instruction, IdempotencyKeyDigest: repeat("1"), ResumeKeyDigest: repeat("2")}}
+	return adapterFixture{adapter: adapter, executor: executor, config: config, prepare: runtimecontract.PrepareRequest{Contract: contract, AssignmentID: "assignment:one", AttemptID: "attempt:one", LeaseGeneration: 1, FencingDigest: repeat("3"), WorkspaceID: "workspace:one", ContextBundle: contextBytes, InstructionBundle: instruction, IdempotencyKeyDigest: repeat("1"), ResumeKeyDigest: repeat("2")}}
 }
 
 type scriptedExecutor struct {
@@ -358,8 +359,15 @@ func waitForStatus(t *testing.T, adapter *Adapter, sessionID string, want runtim
 	return runtimecontract.Observation{}
 }
 func boundFinal(session runtimecontract.Session, id, outcome string) []byte {
-	raw, _ := json.Marshal(codexFinal{CollectedResult: runtimecontract.CollectedResult{ResultID: id, EnvelopeDigest: repeat("9"), ClaimedOutcome: outcome}, ContractDigest: session.Contract.Digest, SessionID: session.SessionID, AttemptID: session.AttemptID, LeaseGeneration: session.LeaseGeneration, FencingDigest: session.FencingDigest})
+	_ = id
+	raw, _ := json.Marshal(codexFinal{ClaimedOutcome: outcome, ContractDigest: session.Contract.Digest, SessionID: session.SessionID, AttemptID: session.AttemptID, LeaseGeneration: session.LeaseGeneration, FencingDigest: session.FencingDigest})
 	return raw
+}
+
+type staticResultPublisher struct{}
+
+func (staticResultPublisher) PublishResult(_ context.Context, publication ResultPublication) (runtimecontract.CollectedResult, error) {
+	return runtimecontract.CollectedResult{ResultID: "result:one", EnvelopeDigest: repeat("9"), ClaimedOutcome: publication.ClaimedOutcome}, nil
 }
 func testContextBundle(t *testing.T) ([]byte, string) {
 	t.Helper()

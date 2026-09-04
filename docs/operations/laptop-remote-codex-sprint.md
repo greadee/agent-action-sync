@@ -19,7 +19,7 @@ changes execution authority.
 | --- | --- | --- | --- | --- |
 | 1. Task authority | Import immutable authority-local task specifications and publish/validate their portable task graphs through the production setup facade | `gpt-5.6-sol` | high | completed |
 | 2. Dispatch authority | Build a SQLite/project-backed scheduler work source, registry bootstrap, context compilation, contract preview, and deterministic dispatch binding | `gpt-5.6-sol` | high | completed |
-| 3. Hosted runtime loop | Establish isolated Codex authentication, bridge supervised runtime results into intake, configure exact test/review gates, and pass a disposable hosted pilot | `gpt-5.6-sol` | xhigh | pending |
+| 3. Hosted runtime loop | Establish isolated Codex authentication, bridge supervised runtime results into intake, configure exact test/review gates, and pass a disposable hosted pilot | `gpt-5.6-sol` | xhigh | implementation complete; live pilot pending |
 | 4. Work telemetry | Record real queue/runtime/gate/review timestamps and persist nullable usage evidence into telemetry and portable accepted history | `gpt-5.6-terra` | high | pending |
 | 5. Private laptop control | Keep the administration listener loopback-only while adding an authenticated private-tunnel bootstrap and narrowly scoped remote operator workflow | `gpt-5.6-sol` | high | pending |
 | 6. Live action visualizer | Add a bounded resumable event stream, live DAG/attempt views, and an adapter for the agent-action visualizer event contract | `gpt-5.6-terra` | high | pending |
@@ -94,6 +94,32 @@ capture the adapter's fenced structured result automatically, run explicitly
 authorized tests/review, and stop at human approval. Prove success, refusal,
 timeout, restart uncertainty, cancellation, malformed output, and token/tool
 budget exhaustion against a disposable repository.
+
+### Implementation completed 2026-09-04
+
+The desktop now bootstraps its isolated Codex home from the OS-stored provider
+credential through `codex login --with-api-key`, exposes a privacy-reduced login
+status command, and refuses to compose the production runtime while that home
+is logged out. A successful model response is only a fenced terminal claim;
+the authority derives the canonical result ID, builds and stores the envelope,
+and completes intake before the runtime can report success.
+
+Production gate composition now accepts only exact built-in version/digest
+definitions. The deterministic `gate:tests` command performs a bounded,
+non-hooking workspace diff check and retains only digested evidence. Review and
+operations-approval gates stop at the human decision boundary even when no
+automated reviewer is installed. The disposable composition pilot proves a
+real worktree change, automatic envelope storage, and accepted intake. Adapter
+fixtures cover refusal, timeout, restart uncertainty, cancellation, malformed
+or forged output, disconnect, rate limiting, and token/tool budget exhaustion.
+The full repository suite and
+`tools\check_desktop_node_slice13_release.ps1 -SkipTests` pass.
+
+The live hosted-provider pilot remains pending because this machine has no
+active SyncGate desktop configuration or isolated-home credential yet. Run the
+authentication and disposable-project setup in
+`docs\operations\hosted-codex-runtime.md`, then execute one approved pilot task
+before changing this slice to completed.
 
 ## Slice 4: work telemetry
 

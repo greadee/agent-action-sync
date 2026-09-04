@@ -85,7 +85,8 @@ func TestLocalDispatchAuthorityBuildsApprovedWorkAndRejectsVisibleProject(t *tes
 	}
 	composition, err := BuildLocalOrchestration(ctx, LocalOrchestrationOptions{
 		Base: manager.Base, Config: cfg, Store: store, Identity: deviceIdentity, Credentials: manager.Credentials,
-		Now: func() time.Time { return now.UTC() },
+		AuthRunner: &recordingCodexAuthRunner{},
+		Now:        func() time.Time { return now.UTC() },
 		Observe: func(_ string, ceiling int, observedAt time.Time) (MachineResources, error) {
 			return MachineResources{CPUMillis: 4000, LogicalCPUs: 4, DiskTotalBytes: 100 << 20, DiskAvailableBytes: 80 << 20, ConfiguredConcurrency: ceiling, ObservedAt: observedAt, ExpiresAt: observedAt.Add(30 * time.Second)}, nil
 		},
