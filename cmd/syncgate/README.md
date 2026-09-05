@@ -5,6 +5,8 @@ This directory contains the foreground agent command. It loads local configurati
 Current commands:
 
 - `node-ui-session --config <node-root>/config/config.json` mints a two-minute, one-use fragment URL for the embedded loopback browser shell without exposing the durable administration bearer.
+- `node-private-tunnel --ssh-target HOME` starts an authenticated SSH local forward from a laptop loopback port to the home node's loopback administration port; it never opens a public listener or executes a remote command.
+- `node-remote-ui-session --config HOME-CONFIG --tunnel-port PORT` is run on the home host through that authenticated SSH connection and mints a two-minute, one-use browser URL for the laptop-side forwarded port.
 - `check-config --config config.example.json` validates device, local API, transfer, and per-share sync settings.
 - `daemon --config config.example.json` starts the foreground local agent, initializes durable storage and its Windows Credential Manager identity, scans eligible source shares on startup and their configured intervals, and shuts down on Ctrl+C or SIGTERM.
 - `identity-migrate --config config.example.json` explicitly verifies and moves a legacy plaintext development identity into Windows Credential Manager, then removes the plaintext file.
@@ -31,3 +33,6 @@ revocation behavior are defined in `docs/architecture/pairing.md`.
 
 The direct TLS identity binding, rejection behavior, and precise encryption
 scope are defined in `docs/architecture/authenticated-transport.md`.
+
+The two-machine SSH workflow and revocation behavior are defined in
+`docs/operations/private-laptop-control.md`.

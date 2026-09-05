@@ -45,6 +45,10 @@ func main() {
 		runNodeHealth(os.Args[2:])
 	case "node-ui-session":
 		runNodeUISession(os.Args[2:])
+	case "node-remote-ui-session":
+		runNodeRemoteUISession(os.Args[2:])
+	case "node-private-tunnel":
+		runNodePrivateTunnel(os.Args[2:])
 	case "node-settings-show":
 		runNodeSettingsShow(os.Args[2:])
 	case "node-settings-stage":
@@ -970,27 +974,65 @@ func runNodeUISession(args []string) {
 	configPath := flags.String("config", "config.example.json", "path to syncgate JSON config")
 	jsonOutput := flags.Bool("json", false, "print the browser session URL as JSON")
 	_ = flags.Parse(args)
-
-	cfg, err := config.LoadFile(context.Background(), *configPath)
-	if err != nil {
-		exitf("load node configuration: %v", err)
-	}
-	client := openAdminClient(*configPath)
-	defer client.Close()
-	ticket, err := client.CreateBrowserSession(context.Background())
+	sessionURL, expiresAt, err := browserSessionURL(*configPath, "", 0)
 	if err != nil {
 		exitf("create browser session: %v", err)
 	}
-	address := net.JoinHostPort(cfg.LocalAPI.Host, fmt.Sprint(cfg.LocalAPI.Port))
-	sessionURL := "http://" + address + "/ui/#bootstrap=" + url.QueryEscape(ticket.BootstrapToken)
 	if *jsonOutput {
 		printJSON(struct {
 			URL       string    `json:"url"`
 			ExpiresAt time.Time `json:"expires_at"`
-		}{URL: sessionURL, ExpiresAt: ticket.ExpiresAt})
+		}{URL: sessionURL, ExpiresAt: expiresAt})
 		return
 	}
 	fmt.Println(sessionURL)
+}
+
+func runNodeRemoteUISession(args []string) {
+	flags := flag.NewFlagSet("node-remote-ui-session", flag.ExitOnError)
+	configPath := flags.String("config", "config.example.json", "path to the home node JSON config")
+	tunnelPort := flags.Int("tunnel-port", 0, "laptop loopback port already forwarded through authenticated SSH")
+	jsonOutput := flags.Bool("json", false, "print the remote browser session URL as JSON")
+	_ = flags.Parse(args)
+	if *tunnelPort < 1 || *tunnelPort > 65535 {
+		exitf("--tunnel-port must be between 1 and 65535")
+	}
+	sessionURL, expiresAt, err := browserSessionURL(*configPath, "127.0.0.1", *tunnelPort)
+	if err != nil {
+		exitf("create remote browser session: %v", err)
+	}
+	if *jsonOutput {
+		printJSON(struct {
+			URL       string    `json:"url"`
+			ExpiresAt time.Time `json:"expires_at"`
+		}{URL: sessionURL, ExpiresAt: expiresAt})
+		return
+	}
+	fmt.Println(sessionURL)
+}
+
+func browserSessionURL(configPath, browserHost string, browserPort int) (string, time.Time, error) {
+	cfg, err := config.LoadFile(context.Background(), configPath)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if browserPort == 0 {
+		browserPort = cfg.LocalAPI.Port
+	}
+	if browserHost == "" {
+		browserHost = cfg.LocalAPI.Host
+	}
+	client, err := newAdminClient(configPath)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer client.Close()
+	ticket, err := client.CreateBrowserSession(context.Background())
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	address := net.JoinHostPort(browserHost, fmt.Sprint(browserPort))
+	return "http://" + address + "/ui/#bootstrap=" + url.QueryEscape(ticket.BootstrapToken), ticket.ExpiresAt, nil
 }
 
 func newAdminClient(configPath string) (*api.Client, error) {

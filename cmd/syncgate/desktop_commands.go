@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
 	"syncgate/internal/config"
 	"syncgate/internal/desktop"
 	"syncgate/internal/identity"
+	"syncgate/internal/privatetunnel"
 	"syncgate/internal/resultintake"
 	"syncgate/internal/taskspec"
 )
@@ -214,6 +216,26 @@ func runNodeCodexAuthStatus(args []string) {
 		exitf("read isolated Codex authentication: %v", err)
 	}
 	printJSON(status)
+}
+
+func runNodePrivateTunnel(args []string) {
+	flags := flag.NewFlagSet("node-private-tunnel", flag.ExitOnError)
+	target := flags.String("ssh-target", "", "trusted SSH host alias or user@host for the home node")
+	localPort := flags.Int("local-port", config.DefaultLocalAPIPort, "laptop loopback port to bind")
+	remotePort := flags.Int("remote-port", config.DefaultLocalAPIPort, "home loopback administration port to forward")
+	_ = flags.Parse(args)
+	arguments, err := privatetunnel.SSHArguments(privatetunnel.Request{SSHTarget: *target, LocalPort: *localPort, RemotePort: *remotePort})
+	if err != nil {
+		exitf("configure private tunnel: %v", err)
+	}
+	ssh, err := exec.LookPath("ssh")
+	if err != nil {
+		exitf("locate authenticated SSH client: %v", err)
+	}
+	fmt.Fprintf(os.Stderr, "syncgate private tunnel %s; close this command to revoke laptop access\n", privatetunnel.Description(privatetunnel.Request{SSHTarget: *target, LocalPort: *localPort, RemotePort: *remotePort}))
+	if err := exec.CommandContext(context.Background(), ssh, arguments...).Run(); err != nil {
+		exitf("run private tunnel: %v", err)
+	}
 }
 
 func localCodexAuthManager(root string) (desktop.CodexAuthManager, error) {

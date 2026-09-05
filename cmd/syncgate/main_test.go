@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,6 +117,51 @@ func TestAdminClientUsesDaemonAPIWithoutOpeningSQLite(t *testing.T) {
 	remaining, err := os.ReadFile(databasePath)
 	if err != nil || string(remaining) != "not a SQLite database" {
 		t.Fatalf("online command touched SQLite: %q, err=%v", remaining, err)
+	}
+}
+
+func TestBrowserSessionURLUsesLaptopLoopbackPortAndFragment(t *testing.T) {
+	credential := []byte("TATATATATATATATATATATATATATATATATATATATATAT")
+	token := strings.Repeat("t", 32)
+	expiresAt := time.Date(2026, time.September, 4, 19, 30, 0, 0, time.UTC)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/browser-sessions" || request.Header.Get("Authorization") != "Bearer "+string(credential) {
+			writer.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(api.BrowserSessionTicketResponse{BootstrapToken: token, ExpiresAt: expiresAt})
+	}))
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+
+	dataDir, shareRoot := t.TempDir(), t.TempDir()
+	store, err := api.NewAdminCredentialStore(api.AdminCredentialStoreOptions{DataDir: dataDir, RuntimeMode: config.RuntimeModeDevelopment, AllowInsecureDevelopmentFile: true})
+	if err != nil {
+		t.Fatalf("create test credential store: %v", err)
+	}
+	if err := store.Save(credential); err != nil {
+		t.Fatalf("save test credential: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	cfg := config.Config{DeviceName: "CLI-REMOTE-TEST", DataDir: dataDir, RuntimeMode: config.RuntimeModeDevelopment, Identity: config.IdentityConfig{Store: config.IdentityStoreDevelopment, AllowInsecureDevelopmentFile: true}, LocalAPI: config.LocalAPIConfig{Host: "127.0.0.1", Port: port}, Shares: []config.ShareConfig{{ID: "drop", Name: "Drop", RootPath: shareRoot, Mode: "upload_only"}}}
+	raw, _ := json.Marshal(cfg)
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	value, actualExpiry, err := browserSessionURL(configPath, "127.0.0.1", 57820)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "http://127.0.0.1:57820/ui/#bootstrap=" + url.QueryEscape(token)
+	if value != want || actualExpiry != expiresAt || strings.Contains(value, "?bootstrap=") {
+		t.Fatalf("session URL=%q expires=%s", value, actualExpiry)
 	}
 }
 

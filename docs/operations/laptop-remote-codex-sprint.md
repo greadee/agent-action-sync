@@ -21,7 +21,7 @@ changes execution authority.
 | 2. Dispatch authority | Build a SQLite/project-backed scheduler work source, registry bootstrap, context compilation, contract preview, and deterministic dispatch binding | `gpt-5.6-sol` | high | completed |
 | 3. Hosted runtime loop | Establish isolated Codex authentication, bridge supervised runtime results into intake, configure exact test/review gates, and pass a disposable hosted pilot | `gpt-5.6-sol` | xhigh | implementation complete; live pilot pending |
 | 4. Work telemetry | Record real queue/runtime/gate/review timestamps and persist nullable usage evidence into telemetry and portable accepted history | `gpt-5.6-terra` | high | completed |
-| 5. Private laptop control | Keep the administration listener loopback-only while adding an authenticated private-tunnel bootstrap and narrowly scoped remote operator workflow | `gpt-5.6-sol` | high | pending |
+| 5. Private laptop control | Keep the administration listener loopback-only while adding an authenticated private-tunnel bootstrap and narrowly scoped remote operator workflow | `gpt-5.6-sol` | high | implementation complete; two-machine pilot pending |
 | 6. Live action visualizer | Add a bounded resumable event stream, live DAG/attempt views, and an adapter for the agent-action visualizer event contract | `gpt-5.6-terra` | high | pending |
 | 7. Efficiency and operations | Add session KPI views, always-on startup supervision, restart drills, current binaries, installer signing, and laptop/home runbooks | `gpt-5.6-terra` | medium | pending |
 
@@ -151,6 +151,20 @@ Retain the loopback browser security model. Add a private authenticated tunnel
 workflow and remote one-use browser-session bootstrap. Any later native paired
 command protocol requires separate expiring grants, exact action allowlists,
 replay protection, confirmation, revocation, and audit evidence.
+
+### Implementation completed 2026-09-04
+
+The laptop can now start an SSH-only local forward with no remote command and
+with the laptop and home endpoints fixed to loopback. The home host can mint a
+fresh one-use browser URL specifically for that forwarded laptop port; the
+browser exchanges only the fragment token over the established private tunnel.
+The home administration bearer remains in its OS credential store, and the
+daemon remains a loopback-only listener. The complete two-machine procedure is
+in `docs/operations/private-laptop-control.md`.
+
+Run the documented tunnel and session command across the actual laptop/home
+pair before marking this slice completed. Public/reverse tunnels and native
+paired command control remain out of scope.
 
 ## Slice 6: live action visualizer
 
