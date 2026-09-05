@@ -20,6 +20,7 @@ import (
 	"syncgate/internal/runtimecontract"
 	"syncgate/internal/storage"
 	"syncgate/internal/storage/sqlite"
+	"syncgate/internal/telemetry"
 	"syncgate/internal/workhistory"
 	"syncgate/internal/workspace"
 )
@@ -66,6 +67,31 @@ type runtimeResolver struct{ adapter runtimecontract.Adapter }
 
 func (value runtimeResolver) ResolveRuntime(executioncontract.BindingReference) (runtimecontract.Adapter, error) {
 	return value.adapter, nil
+}
+
+type telemetryRecorderFake struct{ calls int }
+
+func (recorder *telemetryRecorderFake) RecordAccepted(_ context.Context, contract executioncontract.Contract, snapshot storage.OrchestrationSnapshot) (project.TelemetrySummaryPayload, error) {
+	recorder.calls++
+	value := int64(5)
+	summary := project.TelemetrySummaryPayload{
+		ProjectRevision: contract.ProjectRevision, TaskID: contract.TaskID, TaskRecordID: contract.TaskRecordID, TaskRevision: contract.TaskRevision, TaskDigest: contract.TaskDigest,
+		GraphRecordID: contract.GraphRecordID, GraphRevision: contract.GraphRevision, GraphDigest: contract.GraphDigest,
+		WorkPackageID: contract.WorkPackageID, WorkPackageRecordID: contract.WorkPackageRecordID, WorkPackageDigest: contract.WorkPackageDigest,
+		Contract: project.RegistryReference{ID: contract.ContractID, Version: contract.Version, Digest: contract.Digest}, Trade: contract.Trade, Worker: contract.Worker,
+		Instruction: telemetryBinding(contract.Instruction), ContextDigest: contract.ContextDigest, Runtime: telemetryBinding(contract.Runtime), Provider: telemetryBinding(contract.Provider), Model: telemetryBinding(contract.Model), Node: telemetryBinding(contract.Node),
+		Observations: []project.TelemetryObservation{{Name: "active_runtime_milliseconds", Value: &value, Source: "locally_measured"}}, FinalOutcome: "succeeded",
+	}
+	createdAt := snapshot.Attempt.UpdatedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = time.Date(2026, time.August, 18, 12, 0, 0, 0, time.UTC)
+	}
+	envelope, _, err := telemetry.BuildEnvelope(telemetry.Envelope{TelemetryID: "telemetry:accepted-gate", IdempotencyKeyDigest: testHash([]byte("telemetry-accepted-gate")), Summary: summary, CreatedAt: createdAt})
+	return envelope.Summary, err
+}
+
+func telemetryBinding(value executioncontract.BindingReference) project.TelemetryBindingReference {
+	return project.TelemetryBindingReference{ID: value.ID, Version: value.Version, Digest: value.Digest}
 }
 
 type resultSource []byte
@@ -183,6 +209,8 @@ func newGateFixture(t *testing.T) *gateFixture {
 
 func TestEvaluateApproveReplayAndCleanProjection(t *testing.T) {
 	fixture := newGateFixture(t)
+	recorder := &telemetryRecorderFake{}
+	fixture.service.Telemetry = recorder
 	summary, err := fixture.service.Evaluate(context.Background(), fixture.request)
 	if !errors.Is(err, ErrHumanRequired) || !summary.ReadyForDecision {
 		t.Fatalf("evaluate: summary=%+v err=%v", summary, err)
@@ -199,6 +227,9 @@ func TestEvaluateApproveReplayAndCleanProjection(t *testing.T) {
 	}
 	if fixture.control.snapshot.Attempt.State != storage.AssignmentAccepted {
 		t.Fatalf("state=%s", fixture.control.snapshot.Attempt.State)
+	}
+	if recorder.calls != 1 {
+		t.Fatalf("accepted telemetry calls=%d", recorder.calls)
 	}
 	if _, err = fixture.service.Decide(context.Background(), decision); err != nil {
 		t.Fatalf("accepted decision replay: %v", err)
@@ -220,7 +251,7 @@ func TestEvaluateApproveReplayAndCleanProjection(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{string(project.EventTestRecorded), string(project.EventHandoffCreated), string(project.EventArtifactRecorded), string(project.EventReviewRecorded), string(project.EventWorkAccepted)} {
+	for _, want := range []string{string(project.EventTestRecorded), string(project.EventHandoffCreated), string(project.EventArtifactRecorded), string(project.EventReviewRecorded), string(project.EventWorkAccepted), string(project.EventTelemetryRecorded)} {
 		if !seen[want] {
 			t.Fatalf("missing %s", want)
 		}

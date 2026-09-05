@@ -52,6 +52,22 @@ type Control interface {
 type RuntimeResolver func(context.Context, string) (runtimecontract.Adapter, error)
 type NodeResolver func(context.Context, string) (computenode.Provider, error)
 
+// LifecycleRecorder persists bounded terminal evidence at the moment the
+// scheduler observes it. It receives the runtime's own timestamp, never a
+// later scheduler polling timestamp.
+type LifecycleRecorder interface {
+	RecordTerminal(context.Context, TerminalEvent) error
+}
+
+type TerminalEvent struct {
+	AssignmentID  string
+	AttemptID     string
+	WorkPackageID string
+	Session       runtimecontract.Session
+	Observation   runtimecontract.Observation
+	Outcome       Outcome
+}
+
 var _ BindingPlanner = dispatchbinding.ContractBindingService{}
 var _ Control = orchestration.ControlService{}
 
@@ -68,6 +84,7 @@ type Config struct {
 	Workspace      workspace.Manager
 	ResolveRuntime RuntimeResolver
 	ResolveNode    NodeResolver
+	Lifecycle      LifecycleRecorder
 	Source         WorkSource
 	ActorID        string
 	MaxConcurrent  int
@@ -604,6 +621,10 @@ func (scheduler *Scheduler) reapLocked(ctx context.Context, report *CycleReport)
 		switch observation.Status {
 		case runtimecontract.StatusSucceeded:
 			if _, err := scheduler.transition(ctx, id, attempt.attemptID, attempt.session.LeaseGeneration, attempt.fence, storage.AssignmentCollecting, ""); err == nil {
+				if !scheduler.recordTerminal(ctx, attempt, observation, OutcomeCollecting) {
+					report.Items = append(report.Items, ItemReport{WorkPackageID: attempt.workPackageID, AssignmentID: id, Outcome: OutcomeWaiting, Reasons: []string{"telemetry_record_failed"}})
+					continue
+				}
 				scheduler.releaseActiveLease(ctx, attempt)
 				delete(scheduler.active, id)
 				scheduler.known[id] = storage.AssignmentCollecting
@@ -611,6 +632,10 @@ func (scheduler *Scheduler) reapLocked(ctx context.Context, report *CycleReport)
 			}
 		case runtimecontract.StatusFailed, runtimecontract.StatusClosed:
 			if _, err := scheduler.transition(ctx, id, attempt.attemptID, attempt.session.LeaseGeneration, attempt.fence, storage.AssignmentFailed, runtimeFailureCode(observation)); err == nil {
+				if !scheduler.recordTerminal(ctx, attempt, observation, OutcomeFailed) {
+					report.Items = append(report.Items, ItemReport{WorkPackageID: attempt.workPackageID, AssignmentID: id, Outcome: OutcomeWaiting, Reasons: []string{"telemetry_record_failed"}})
+					continue
+				}
 				scheduler.releaseActiveLease(ctx, attempt)
 				delete(scheduler.active, id)
 				scheduler.known[id] = storage.AssignmentFailed
@@ -618,6 +643,10 @@ func (scheduler *Scheduler) reapLocked(ctx context.Context, report *CycleReport)
 			}
 		case runtimecontract.StatusCanceled:
 			if _, err := scheduler.transition(ctx, id, attempt.attemptID, attempt.session.LeaseGeneration, attempt.fence, storage.AssignmentCanceled, "runtime_canceled"); err == nil {
+				if !scheduler.recordTerminal(ctx, attempt, observation, OutcomeCanceled) {
+					report.Items = append(report.Items, ItemReport{WorkPackageID: attempt.workPackageID, AssignmentID: id, Outcome: OutcomeWaiting, Reasons: []string{"telemetry_record_failed"}})
+					continue
+				}
 				scheduler.releaseActiveLease(ctx, attempt)
 				delete(scheduler.active, id)
 				scheduler.known[id] = storage.AssignmentCanceled
@@ -625,6 +654,16 @@ func (scheduler *Scheduler) reapLocked(ctx context.Context, report *CycleReport)
 			}
 		}
 	}
+}
+
+func (scheduler *Scheduler) recordTerminal(ctx context.Context, attempt *activeAttempt, observation runtimecontract.Observation, outcome Outcome) bool {
+	if scheduler.config.Lifecycle == nil {
+		return true
+	}
+	return scheduler.config.Lifecycle.RecordTerminal(ctx, TerminalEvent{
+		AssignmentID: attempt.assignmentID, AttemptID: attempt.attemptID, WorkPackageID: attempt.workPackageID,
+		Session: attempt.session, Observation: observation, Outcome: outcome,
+	}) == nil
 }
 
 func (scheduler *Scheduler) renewLocked(ctx context.Context, attempt *activeAttempt) (string, error) {

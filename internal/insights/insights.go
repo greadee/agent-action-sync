@@ -126,7 +126,10 @@ func calculate(projectID string, all []storage.ProjectEventProjection, calculate
 	artifacts, handoffs := int64(0), int64(0)
 	telemetryOutcomes := map[string]int64{"succeeded": 0, "failed": 0, "canceled": 0, "partial": 0}
 	telemetryTotal := int64(0)
-	telemetryKnown := map[string][]int64{"duration_milliseconds": {}, "input_tokens": {}, "output_tokens": {}, "provider_cost_micros": {}, "tool_calls": {}}
+	telemetryKnown := map[string][]int64{
+		"duration_milliseconds": {}, "queue_milliseconds": {}, "active_runtime_milliseconds": {}, "gate_milliseconds": {}, "review_milliseconds": {}, "human_wait_milliseconds": {},
+		"input_tokens": {}, "cached_input_tokens": {}, "output_tokens": {}, "reasoning_output_tokens": {}, "provider_cost_micros": {}, "tool_calls": {}, "retries": {},
+	}
 	telemetryGroups := map[string]*versionedTelemetryGroup{}
 	groups := map[string]map[string]int64{"worker": {}, "model": {}, "provider": {}, "device": {}}
 	for _, event := range accepted {

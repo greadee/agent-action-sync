@@ -158,13 +158,15 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 	if options.Binder != nil {
 		binder = options.Binder
 	}
+	lifecycle := localLifecycleTelemetry{Contracts: options.Store.ExecutionContracts(), Telemetry: options.Store.ExecutionTelemetry(), Control: control, Runtime: adapter, Now: options.Now}
 	var workSource scheduler.WorkSource = dispatchAuthority
 	if options.Source != nil {
 		workSource = authorizedWorkSource{source: options.Source, projectID: authorizedProjectID}
 	}
 	schedulerValue, err := scheduler.New(scheduler.Config{
 		Binder: binder, Control: control, Workspace: workspaces, Source: workSource,
-		ActorID: "scheduler:desktop", MaxConcurrent: options.Config.Node.Execution.MaxConcurrent,
+		Lifecycle: lifecycle,
+		ActorID:   "scheduler:desktop", MaxConcurrent: options.Config.Node.Execution.MaxConcurrent,
 		StartPaused: true,
 		ResolveRuntime: func(_ context.Context, id string) (runtimecontract.Adapter, error) {
 			if id != runtimeRef.ID {
@@ -208,6 +210,7 @@ func BuildLocalOrchestration(ctx context.Context, options LocalOrchestrationOpti
 		Control:   control, History: history, HistoryRoots: projectHistoryRoots{projects: options.Store.ProjectRegistrations()},
 		Runtimes: runtimes, Results: results, Contents: results, Workspaces: workspaces,
 		Tests: LocalTestRunner{Control: control, Workspaces: workspaces}, TestPlans: localTestPlans(),
+		Telemetry: lifecycle,
 	}
 	administration := NewLocalOrchestrationAdministration(LocalAdministrationOptions{
 		Scheduler: schedulerValue, Control: control, Inventory: options.Store.OrchestrationControl(),

@@ -20,7 +20,7 @@ changes execution authority.
 | 1. Task authority | Import immutable authority-local task specifications and publish/validate their portable task graphs through the production setup facade | `gpt-5.6-sol` | high | completed |
 | 2. Dispatch authority | Build a SQLite/project-backed scheduler work source, registry bootstrap, context compilation, contract preview, and deterministic dispatch binding | `gpt-5.6-sol` | high | completed |
 | 3. Hosted runtime loop | Establish isolated Codex authentication, bridge supervised runtime results into intake, configure exact test/review gates, and pass a disposable hosted pilot | `gpt-5.6-sol` | xhigh | implementation complete; live pilot pending |
-| 4. Work telemetry | Record real queue/runtime/gate/review timestamps and persist nullable usage evidence into telemetry and portable accepted history | `gpt-5.6-terra` | high | pending |
+| 4. Work telemetry | Record real queue/runtime/gate/review timestamps and persist nullable usage evidence into telemetry and portable accepted history | `gpt-5.6-terra` | high | completed |
 | 5. Private laptop control | Keep the administration listener loopback-only while adding an authenticated private-tunnel bootstrap and narrowly scoped remote operator workflow | `gpt-5.6-sol` | high | pending |
 | 6. Live action visualizer | Add a bounded resumable event stream, live DAG/attempt views, and an adapter for the agent-action visualizer event contract | `gpt-5.6-terra` | high | pending |
 | 7. Efficiency and operations | Add session KPI views, always-on startup supervision, restart drills, current binaries, installer signing, and laptop/home runbooks | `gpt-5.6-terra` | medium | pending |
@@ -127,6 +127,23 @@ Write lifecycle events when they occur instead of reconstructing them during
 integration evaluation. Persist provider-reported and locally measured usage
 with nullable evidence, then derive queue time, active runtime, gate time,
 review time, human wait, tokens, tool calls, retries, and accepted-work rates.
+
+### Completed 2026-09-04
+
+The scheduler now records a bounded terminal telemetry envelope immediately
+after the authoritative lifecycle transition, using the runtime adapter's own
+terminal timestamp. Terminal success is deliberately `partial`: review and
+human-decision measurements remain unknown until their events exist. A later
+explicit acceptance transition writes a completed `succeeded` envelope and
+publishes its allowlisted summary to portable work history.
+
+Queue time is planned-to-running; active runtime is running-to-the runtime's
+terminal timestamp; gate time is collecting-to-awaiting-gates; and review and
+human-wait time are awaiting-gates-to-accepted. Provider token fields are
+nullable and provider-reported, while tool calls and retry count are locally
+measured. The browser's existing telemetry projection reads the resulting
+authority-local records. The deterministic desktop pilot now proves that
+provider token evidence survives terminal collection without raw output.
 
 ## Slice 5: private laptop control
 

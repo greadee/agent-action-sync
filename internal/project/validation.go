@@ -883,7 +883,7 @@ func validTelemetryObservation(value TelemetryObservation) bool {
 		return false
 	}
 	switch value.Name {
-	case "duration_milliseconds", "input_tokens", "output_tokens", "provider_cost_micros", "tool_calls", "files_inspected", "files_changed", "tests_run", "tests_failed", "retries", "runtime_errors", "tool_errors", "review_findings", "rework_cycles", "conflicts", "interventions", "rollbacks", "context_bytes":
+	case "duration_milliseconds", "queue_milliseconds", "active_runtime_milliseconds", "gate_milliseconds", "review_milliseconds", "human_wait_milliseconds", "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "provider_cost_micros", "tool_calls", "files_inspected", "files_changed", "tests_run", "tests_failed", "retries", "runtime_errors", "tool_errors", "review_findings", "rework_cycles", "conflicts", "interventions", "rollbacks", "context_bytes":
 		return true
 	default:
 		return false

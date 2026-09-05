@@ -1,6 +1,6 @@
 # Telemetry, Provenance, and Memory Inputs
 
-Slice 7 adds authority-local, restart-safe execution telemetry. It is evidence
+Slice 4 adds authority-local, restart-safe execution telemetry. It is evidence
 for review and descriptive calculations, not execution control, workforce
 learning, or a runtime transport protocol.
 
@@ -17,10 +17,22 @@ means **unknown**, never zero. Values are bounded counts and carry exactly one
 evidence source: `provider_reported`, `locally_measured`, `worker_claimed`, or
 `reviewer_verified`.
 
-The supported observations cover duration, tokens, provider cost, tool calls,
-files inspected/changed, tests, retries, runtime/tool errors, review findings,
-rework, conflicts, intervention, rollback, and context size. Evidence itself is
-only a typed ID/digest reference.
+The supported observations cover total duration, queue, active-runtime, gate,
+review, and human-wait durations; input/cached-input/output/reasoning tokens;
+provider cost; tool calls; files inspected/changed; tests; retries;
+runtime/tool errors; review findings; rework; conflicts; intervention;
+rollback; and context size. Evidence itself is only a typed ID/digest
+reference.
+
+The local scheduler writes terminal telemetry after its authoritative state
+transition using the runtime adapter's `UpdatedAt` time, rather than the later
+poll time. It writes `partial` success when gate/review/decision boundaries do
+not exist yet. After an explicit operator approval, the integration gate writes
+a `succeeded` summary and its portable history event. Queue is
+planned-to-running, active runtime is running-to-runtime-terminal, gate time
+is collecting-to-awaiting-gates, and review/human wait are
+awaiting-gates-to-accepted. If either boundary is missing, the duration is
+null. There are no synthetic zero measurements.
 
 ## Portable history and privacy
 
@@ -32,8 +44,9 @@ paths, and raw evidence bytes are not fields in either contract. Raw material
 must remain in a separately approved local artifact.
 
 The summary event is projection-rebuildable. Descriptive insights expose only
-outcome counts and nullable resource aggregates, including known/unknown counts
-and a minimum-sample warning for fewer than three accepted telemetry summaries.
+outcome counts, the existing accepted-work/completion rate, and nullable timing
+and resource aggregates, including known/unknown counts and a minimum-sample
+warning for fewer than three accepted telemetry summaries.
 
 ## Descriptive orchestration insights
 
@@ -62,6 +75,7 @@ evaluation decision.
 
 ## Explicitly disabled
 
-Production runtime execution, telemetry upload transports, raw transcript
-capture, automatic remediation, automatic promotion, and learned routing remain
-disabled.
+Telemetry upload transports, raw transcript capture, automatic remediation,
+automatic promotion, and learned routing remain disabled. Production runtime
+execution is enabled only through the separately authorized local desktop
+composition and remains subject to its task, dispatch, and runtime gates.

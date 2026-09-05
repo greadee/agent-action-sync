@@ -90,6 +90,12 @@ type Reviewer interface {
 }
 type HistoryRootResolver interface{ HistoryRoot(string) (string, error) }
 
+// TelemetryRecorder completes the bounded local telemetry summary only after
+// an explicit acceptance transition. It does not receive raw runtime output.
+type TelemetryRecorder interface {
+	RecordAccepted(context.Context, executioncontract.Contract, storage.OrchestrationSnapshot) (project.TelemetrySummaryPayload, error)
+}
+
 type Service struct {
 	Contracts          storage.ExecutionContractStore
 	Intake             resultintake.Service
@@ -104,6 +110,7 @@ type Service struct {
 	Reviewer           Reviewer
 	TestPlans          map[string]TestCommand
 	AllowedBinaryPaths []string
+	Telemetry          TelemetryRecorder
 }
 
 type EvaluateRequest struct {
@@ -357,8 +364,18 @@ func (service Service) Decide(ctx context.Context, request DecisionRequest) (Int
 	if _, err := service.History.AcceptWork(ctx, workhistory.AcceptWorkRequest{Metadata: withKey(base, "accept"), WorkPackageID: contract.WorkPackageID, AcceptedBy: request.ActorID, Summary: "approved for integration"}); err != nil {
 		return IntegrationSummary{}, fmt.Errorf("accept canonical work: %w", err)
 	}
-	if _, err := service.Control.Transition(ctx, service.transitionDecision(request, snapshot, storage.AssignmentAccepted, "", "accepted")); err != nil {
+	accepted, err := service.Control.Transition(ctx, service.transitionDecision(request, snapshot, storage.AssignmentAccepted, "", "accepted"))
+	if err != nil {
 		return IntegrationSummary{}, err
+	}
+	if service.Telemetry != nil {
+		telemetrySummary, err := service.Telemetry.RecordAccepted(ctx, contract, accepted.Snapshot)
+		if err != nil {
+			return IntegrationSummary{}, fmt.Errorf("record accepted telemetry: %w", err)
+		}
+		if _, err := service.History.RecordTelemetry(ctx, workhistory.RecordTelemetryRequest{ExecutionRequest: workhistory.ExecutionRequest{Metadata: withKey(base, "telemetry"), WorkPackageID: contract.WorkPackageID, ExecutionID: contract.ExecutionID}, Summary: telemetrySummary}); err != nil {
+			return IntegrationSummary{}, fmt.Errorf("record portable telemetry: %w", err)
+		}
 	}
 	return request.Summary, nil
 }

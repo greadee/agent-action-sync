@@ -27,6 +27,7 @@ import (
 	"syncgate/internal/scheduler"
 	"syncgate/internal/storage"
 	"syncgate/internal/storage/sqlite"
+	"syncgate/internal/telemetry"
 	"syncgate/internal/workspace"
 )
 
@@ -302,6 +303,28 @@ func TestLocalOrchestrationRunsDeterministicPilotToCollecting(t *testing.T) {
 	if err != nil || intake.Decision != "accepted" || intake.EnvelopeDigest != envelope.Digest {
 		t.Fatalf("automatic result intake = %+v, err=%v", intake, err)
 	}
+	telemetryRecords, err := store.ExecutionTelemetry().ListExecutionTelemetry(ctx, "project:local-pilot", "execution:local-pilot")
+	if err != nil || len(telemetryRecords) != 1 || telemetryRecords[0].FinalOutcome != "partial" {
+		t.Fatalf("terminal telemetry = %+v, err=%v", telemetryRecords, err)
+	}
+	telemetryEnvelope, _, err := telemetry.DecodeEnvelope(telemetryRecords[0].SummaryJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inputTokens, cachedTokens, outputTokens *int64
+	for _, observation := range telemetryEnvelope.Summary.Observations {
+		switch observation.Name {
+		case "input_tokens":
+			inputTokens = observation.Value
+		case "cached_input_tokens":
+			cachedTokens = observation.Value
+		case "output_tokens":
+			outputTokens = observation.Value
+		}
+	}
+	if inputTokens == nil || cachedTokens == nil || outputTokens == nil || *inputTokens != 12 || *cachedTokens != 3 || *outputTokens != 7 {
+		t.Fatalf("provider usage was not retained as nullable telemetry: %+v", telemetryEnvelope.Summary.Observations)
+	}
 }
 
 func TestAuthorizedWorkSourceDropsOtherProjectRequests(t *testing.T) {
@@ -355,7 +378,7 @@ func (binder pilotBinder) BindAndPlan(ctx context.Context, request dispatchbindi
 
 type pilotExecutor struct{ completed chan struct{} }
 
-func (executor *pilotExecutor) Run(_ context.Context, invocation codexruntime.Invocation, _ codexruntime.EventSink) (codexruntime.Execution, error) {
+func (executor *pilotExecutor) Run(_ context.Context, invocation codexruntime.Invocation, sink codexruntime.EventSink) (codexruntime.Execution, error) {
 	var input struct {
 		Contract        executioncontract.ContractReference `json:"contract"`
 		SessionID       string                              `json:"session_id"`
@@ -370,6 +393,9 @@ func (executor *pilotExecutor) Run(_ context.Context, invocation codexruntime.In
 		return codexruntime.Execution{}, err
 	}
 	if err := os.WriteFile(filepath.Join(invocation.Directory, "src", "pilot.txt"), []byte("deterministic desktop pilot\n"), 0o600); err != nil {
+		return codexruntime.Execution{}, err
+	}
+	if err := sink([]byte(`{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":3,"output_tokens":7,"reasoning_output_tokens":2}}`)); err != nil {
 		return codexruntime.Execution{}, err
 	}
 	final, err := json.Marshal(struct {
